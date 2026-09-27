@@ -131,7 +131,9 @@ just build --pull           # refresh the node:26-trixie-slim base too
 Reach for `--no-cache` when a build step whose command text never changes has gone stale —
 Docker keeps serving the cached layer for `npm install -g @anthropic-ai/claude-code` or the
 oh-my-posh `curl | sh` installer, so a plain `just build` will not pick up newer versions of
-either.
+either. That rebuild is also how Claude Code gets updated: its in-box auto-updater is off
+(`DISABLE_AUTOUPDATER` in `custom/settings.json`), since the npm global prefix is root-owned
+and the box's disk would lose the update on the next `-f` anyway.
 
 The `agentgateway` MCP server is configured user-scoped in `/root/.claude.json`, so Claude
 Code points at the host gateway in any project — including a mounted host directory.
