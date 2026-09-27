@@ -21,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       rust: ${{ steps.diff.outputs.rust }}
+      base: ${{ steps.diff.outputs.base }}
+      custom: ${{ steps.diff.outputs.custom }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,21 +35,26 @@ jobs:
       # fork) skips: release.yml auto-merges it within seconds without waiting
       # for checks, so this build would only finish after the merge. The push
       # to main that follows still builds.
+      # base/custom follow the same rules and gate the image jobs.
       - id: diff
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           RELEASE_PR: ${{ github.head_ref == 'release-please--branches--main' && github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
+          # match <regex>: does the diff touch a matching path?
+          match() { git diff --name-only "$BASE" HEAD | grep -qE "$1"; }
           if [ "$RELEASE_PR" = true ]; then
-            rust=false
+            rust=false base=false custom=false
           elif [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            rust=true
-          elif git diff --name-only "$BASE" HEAD | grep -qE '^(cbox/|\.github/workflows/ci\.yml$|CHANGELOG\.md$)'; then
-            rust=true
+            rust=true base=true custom=true
           else
-            rust=false
+            match '^(cbox/|\.github/workflows/ci\.yml$|CHANGELOG\.md$)' && rust=true || rust=false
+            match '^(base/|\.github/workflows/(base-image|ci)\.yml$)' && base=true || base=false
+            match '^(custom/|\.github/workflows/ci\.yml$)' && custom=true || custom=false
+            # A new base can break custom/, so check them together.
+            [ "$base" = true ] && custom=true
           fi
-          echo "rust=$rust" | tee -a "$GITHUB_OUTPUT"
+          printf 'rust=%s\nbase=%s\ncustom=%s\n' "$rust" "$base" "$custom" | tee -a "$GITHUB_OUTPUT"
 
   build:
     needs: changes
@@ -117,15 +124,68 @@ jobs:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
 
-  # The single check the ruleset should require. Passes if build passed or was
-  # skipped for having no Rust changes, so the matrix can change without a
-  # ruleset change. (A skipped matrix job never reports its per-row check names.)
+  # Same-repo PRs publish :pr-<number> so a base/ change can be tried before
+  # merge (CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:pr-<n> just build).
+  # Fork and Dependabot tokens can't write packages, so those only build.
+  # Publishing from main happens in release.yml and the weekly schedule.
+  base-image:
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.base == 'true'
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: base-image-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    uses: ./.github/workflows/base-image.yml
+    with:
+      tags: pr-${{ github.event.pull_request.number }}
+      push: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+
+  # Builds custom/ (amd64 only: its steps are architecture-independent) on the
+  # PR's own base when one was published, else on :latest. Never pushed:
+  # cbox-custom is built per person. always() lets it run when base-image was
+  # skipped; the result checks stop it on a failed or cancelled base.
+  custom-image:
+    needs: [changes, base-image]
+    if: >-
+      always() && github.event_name == 'pull_request' &&
+      needs.changes.result == 'success' && needs.changes.outputs.custom == 'true' &&
+      (needs.base-image.result == 'success' || needs.base-image.result == 'skipped')
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: custom
+          platforms: linux/amd64
+          pull: true
+          push: false
+          build-args: BASE_IMAGE=${{ needs.base-image.outputs.image || 'ghcr.io/the-mentor/cbox-base:latest' }}
+
+  # The single check the ruleset requires. Passes if every job passed or was
+  # skipped for having nothing to check, so jobs and matrices can change
+  # without a ruleset change. (A skipped matrix job never reports its per-row
+  # check names.)
   ci-ok:
     name: CI
     if: always()
-    needs: [changes, build]
+    needs: [changes, build, base-image, custom-image]
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          [ "${{ needs.changes.result }}" = success ] &&
-          case "${{ needs.build.result }}" in success|skipped) true ;; *) false ;; esac
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          RESULTS: ${{ needs.build.result }} ${{ needs.base-image.result }} ${{ needs.custom-image.result }}
+        run: |
+          [ "$CHANGES" = success ] || { echo "changes: $CHANGES"; exit 1; }
+          for r in $RESULTS; do
+            case "$r" in success|skipped) ;; *) echo "a job ended $r"; exit 1 ;; esac
+          done
