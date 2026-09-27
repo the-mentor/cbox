@@ -27,13 +27,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       # Falls back to "true" when there's no usable base (act, a new branch).
+      # CHANGELOG.md only changes in release PRs, whose merge must always build:
+      # release.yml attaches this run's artifacts to the release.
       - id: diff
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             rust=true
-          elif git diff --name-only "$BASE" HEAD | grep -qE '^(cbox/|\.github/workflows/ci\.yml$)'; then
+          elif git diff --name-only "$BASE" HEAD | grep -qE '^(cbox/|\.github/workflows/ci\.yml$|CHANGELOG\.md$)'; then
             rust=true
           else
             rust=false
