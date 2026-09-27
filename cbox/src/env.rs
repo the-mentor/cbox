@@ -50,10 +50,33 @@ fn is_set_and_non_empty(key: &str) -> bool {
 fn llm_passthrough() -> Vec<&'static str> {
     if is_set_and_non_empty("CLAUDE_CODE_OAUTH_TOKEN") {
         vec!["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL"]
-    } else if is_set_and_non_empty("ANTHROPIC_BASE_URL") {
-        vec!["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]
+    } else if keyed_gateway_mode() {
+        // Not ANTHROPIC_AUTH_TOKEN: see `add_gateway_placeholder`.
+        vec!["ANTHROPIC_BASE_URL"]
     } else {
         vec!["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+    }
+}
+
+/// The `/api` route's branch of `llm_passthrough`: a base URL and no OAuth
+/// token, so the gateway attaches the real key itself.
+fn keyed_gateway_mode() -> bool {
+    !is_set_and_non_empty("CLAUDE_CODE_OAUTH_TOKEN") && is_set_and_non_empty("ANTHROPIC_BASE_URL")
+}
+
+/// What the box sends as `ANTHROPIC_AUTH_TOKEN` in keyed-gateway mode.
+pub const GATEWAY_PLACEHOLDER_TOKEN: &str = "dummy";
+
+/// In keyed-gateway mode, give the box a fixed placeholder token instead of
+/// the host's `ANTHROPIC_AUTH_TOKEN`. The gateway discards whatever the box
+/// sends, so the host value is never needed there -- and forwarding it put a
+/// real credential in the guest whenever the host shell happened to export
+/// one: a shell export also beats the env file's `dummy`, since the env file
+/// only fills in what the shell leaves unset. An explicit
+/// `-e ANTHROPIC_AUTH_TOKEN=...` is left alone.
+pub fn add_gateway_placeholder(plain: &mut Vec<(String, String)>) {
+    if keyed_gateway_mode() && !plain.iter().any(|(k, _)| k == "ANTHROPIC_AUTH_TOKEN") {
+        plain.push(("ANTHROPIC_AUTH_TOKEN".into(), GATEWAY_PLACEHOLDER_TOKEN.into()));
     }
 }
 
@@ -136,7 +159,10 @@ pub fn compose(
 
 #[cfg(test)]
 mod tests {
-    use super::{any_anthropic_credential_set, compose, parse_e_flag, passthrough_vars};
+    use super::{
+        GATEWAY_PLACEHOLDER_TOKEN, add_gateway_placeholder, any_anthropic_credential_set,
+        compose, parse_e_flag, passthrough_vars,
+    };
     use crate::test_env_lock::EnvVarGuard;
 
     /// Clears the three vars the conditional branches on, so each test below
@@ -248,13 +274,56 @@ mod tests {
         let _base = EnvVarGuard::set("ANTHROPIC_BASE_URL", "http://gw");
 
         let vars = passthrough_vars();
-        assert!(vars.contains(&"ANTHROPIC_AUTH_TOKEN".to_string()));
         assert!(vars.contains(&"ANTHROPIC_BASE_URL".to_string()));
         assert!(
             !vars.contains(&"ANTHROPIC_API_KEY".to_string()),
             "keyed-gateway mode must not forward the real API key: {vars:?}"
         );
+        assert!(
+            !vars.contains(&"ANTHROPIC_AUTH_TOKEN".to_string()),
+            "keyed-gateway mode must not forward the host's auth token: {vars:?}"
+        );
         assert!(!vars.contains(&"CLAUDE_CODE_OAUTH_TOKEN".to_string()));
+    }
+
+    /// The host shell exporting a real ANTHROPIC_AUTH_TOKEN must not reach
+    /// the box in keyed-gateway mode: the box gets the placeholder instead.
+    #[test]
+    fn keyed_gateway_mode_sends_the_placeholder_not_the_host_token() {
+        let _lock = crate::test_env_lock::lock();
+        let _cleared = clear_llm_vars();
+        let _base = EnvVarGuard::set("ANTHROPIC_BASE_URL", "http://gw");
+        let _auth = EnvVarGuard::set("ANTHROPIC_AUTH_TOKEN", "sk-real-host-token");
+
+        let mut plain = compose(&[], &passthrough_vars(), &[]).unwrap();
+        add_gateway_placeholder(&mut plain);
+        let tokens: Vec<_> = plain.iter().filter(|(k, _)| k == "ANTHROPIC_AUTH_TOKEN").collect();
+        assert_eq!(tokens, [&("ANTHROPIC_AUTH_TOKEN".to_string(), GATEWAY_PLACEHOLDER_TOKEN.to_string())]);
+    }
+
+    #[test]
+    fn an_explicit_e_flag_token_is_kept_in_keyed_gateway_mode() {
+        let _lock = crate::test_env_lock::lock();
+        let _cleared = clear_llm_vars();
+        let _base = EnvVarGuard::set("ANTHROPIC_BASE_URL", "http://gw");
+
+        let mut plain =
+            compose(&["ANTHROPIC_AUTH_TOKEN=chosen".to_string()], &passthrough_vars(), &[]).unwrap();
+        add_gateway_placeholder(&mut plain);
+        let tokens: Vec<_> = plain.iter().filter(|(k, _)| k == "ANTHROPIC_AUTH_TOKEN").collect();
+        assert_eq!(tokens, [&("ANTHROPIC_AUTH_TOKEN".to_string(), "chosen".to_string())]);
+    }
+
+    #[test]
+    fn the_placeholder_is_only_added_in_keyed_gateway_mode() {
+        let _lock = crate::test_env_lock::lock();
+        let _cleared = clear_llm_vars();
+        let mut plain = Vec::new();
+        add_gateway_placeholder(&mut plain); // direct
+        let _base = EnvVarGuard::set("ANTHROPIC_BASE_URL", "http://gw");
+        let _oauth = EnvVarGuard::set("CLAUDE_CODE_OAUTH_TOKEN", "oauth-tok");
+        add_gateway_placeholder(&mut plain); // oauth through the gateway
+        assert!(plain.is_empty(), "{plain:?}");
     }
 
     #[test]
