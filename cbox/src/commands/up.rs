@@ -146,15 +146,11 @@ pub async fn run(args: UpArgs) -> Result<()> {
     } else {
         // `get_or_create`'s own doc: "the provided options are ignored (no
         // config drift validation)". So the reused box keeps whatever
-        // credentials, mounts, and disk size it had when first created,
+        // credentials, mounts, disk size, memory and CPUs it had when first created,
         // silently -- unless this says so, that's invisible until something
         // fails (e.g. a rotated token 401ing), which is precisely the
         // failure class this whole project exists to prevent.
-        println!(
-            "cbox: reusing existing box {name}; its configuration (credentials, mounts, \
-             disk size) dates from when it was first created. Run with -f/--force to \
-             recreate it with today's settings instead."
-        );
+        println!("{}", reuse_message(&name));
         if let Some(existing) = sidecar::read(&home) {
             let changed = sidecar::changed_secrets(&existing.secret_hashes, &secret_hashes);
             if !changed.is_empty() {
@@ -295,10 +291,28 @@ async fn run_git_bootstrap(litebox: &LiteBox) {
     }
 }
 
+/// Printed when `up` resumes an existing box: `get_or_create` ignores the
+/// new options, so every setting below keeps its value from creation.
+fn reuse_message(name: &str) -> String {
+    format!(
+        "cbox: reusing existing box {name}; its configuration (credentials, mounts, \
+         disk size, memory, CPUs) dates from when it was first created. Run with \
+         -f/--force to recreate it with today's settings instead."
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::secure_box_home;
+    use super::{reuse_message, secure_box_home};
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn the_reuse_message_names_memory_and_cpus_as_fixed_at_creation() {
+        let msg = reuse_message("demo");
+        assert!(msg.contains("memory"), "{msg}");
+        assert!(msg.contains("CPUs"), "{msg}");
+        assert!(msg.contains("-f/--force"), "{msg}");
+    }
 
     #[test]
     fn a_freshly_created_box_home_is_owner_only() {
