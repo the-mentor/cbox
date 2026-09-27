@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/the-mentor/cbox/compare/v0.1.1...v0.1.2) (2026-09-27)
+
+
+### Features
+
+* **justfile:** add just version to print the installed cbox version ([#63](https://github.com/the-mentor/cbox/issues/63)) ([c372f64](https://github.com/the-mentor/cbox/commit/c372f64d54ccfe333cb4872cf2e219aa96050956))
+
 ## [0.1.1](https://github.com/the-mentor/cbox/compare/v0.1.0...v0.1.1) (2026-09-27)
 
 
