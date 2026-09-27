@@ -6,6 +6,8 @@ agentgateway/htpasswd
 
 # Per-machine gateway overrides, picked up by `just gateway-*` when present.
 agentgateway/docker-compose.override.yml
+# Conventional name for a local config.yaml copy the override mounts in.
+agentgateway/config.local.yaml
 
 # Superpowers process artifacts (specs, plans, notes) — kept local, not part of the deliverable
 docs/superpowers/

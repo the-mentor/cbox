@@ -201,8 +201,9 @@ to "the host only." That's why the admin API's port is not published by default 
 For gateway changes that should stay on your machine only (an extra MCP server, say),
 create `agentgateway/docker-compose.override.yml`. It is gitignored, and when it exists
 `just gateway-up`/`gateway-down`/`gateway-logs` pass it to compose after the base file, so
-it can add services or override mounts. To change `config.yaml` too, mount your own copy
-over `/config.yaml` from that file. Anything it publishes is reachable from every box too.
+it can add services or override mounts. To change `config.yaml` too, copy it to
+`agentgateway/config.local.yaml` (also gitignored) and mount that over `/config.yaml` from
+the override. Anything it publishes is reachable from every box too.
 
 | Bind | Serves |
 |---|---|
