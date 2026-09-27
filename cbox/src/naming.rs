@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn sanitize_passes_through_already_valid_names() {
-        assert_eq!(sanitize("claude-boxlite"), "claude-boxlite");
+        assert_eq!(sanitize("cbox"), "cbox");
         assert_eq!(sanitize("my_box.v2"), "my_box.v2");
     }
 

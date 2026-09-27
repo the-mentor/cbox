@@ -38,7 +38,7 @@ host cwd onto `/workspace`), `-v host:box` (mount an arbitrary host folder, repe
 KEY=VALUE` (inject an extra environment variable into the box, repeatable; `cbox` merges these
 with its built-in passthrough list — `passthrough_vars()` in `cbox/src/env.rs`, not a justfile
 variable — with the `-e` value winning on a key collision), `-i`/`--image` (override the image
-path passed to `boxlite run`; defaults to `custom_tag`, i.e. `claude-boxlite-custom`),
+path passed to `boxlite run`; defaults to `custom_tag`, i.e. `cbox-custom`),
 `--disk-size <GB>` (container rootfs disk size; defaults to 10GB, headroom for in-box `docker
 pull`/`apt install`/`npm install`/build caches), `--memory <GB>` / `--cpus <N>` (guest RAM in whole GiB and vCPU count; default 4 GiB / 2,
 above BoxLite's own 1 GiB / 1, which is too little to `cargo build` in the box), `-d`/`--detach` (let the box outlive this

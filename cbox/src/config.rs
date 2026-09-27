@@ -127,8 +127,8 @@ mod tests {
 
     #[test]
     fn box_home_is_per_name_under_the_boxes_root() {
-        let home = box_home("claude-boxlite");
-        assert!(home.ends_with("boxes/claude-boxlite"));
+        let home = box_home("cbox");
+        assert!(home.ends_with("boxes/cbox"));
     }
 
     #[test]

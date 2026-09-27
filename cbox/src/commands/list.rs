@@ -240,23 +240,23 @@ mod tests {
 
     #[test]
     fn marker_for_flags_only_the_box_matching_the_current_directory() {
-        assert_eq!(marker_for("claude-boxlite", "claude-boxlite"), " <- here");
-        assert_eq!(marker_for("other-box", "claude-boxlite"), "");
+        assert_eq!(marker_for("cbox", "cbox"), " <- here");
+        assert_eq!(marker_for("other-box", "cbox"), "");
     }
 
     #[test]
     fn format_row_renders_a_missing_origin_as_an_empty_cell_not_a_placeholder() {
         let row = Row {
-            name: "claude-boxlite".into(),
+            name: "my-box".into(),
             id: "abc12345".into(),
             status: "running".into(),
-            image: "claude-boxlite-custom".into(),
+            image: "cbox-custom".into(),
             created: "2026-08-18 09:00".into(),
             origin: String::new(),
             marker: " <- here".into(),
         };
         let rendered = format_row(&row);
-        assert!(rendered.contains("claude-boxlite"));
+        assert!(rendered.contains("my-box"));
         assert!(rendered.ends_with(" <- here"));
         // The empty origin cell is still full-width padding, not "N/A" or
         // similar — nothing but spaces where the path would be.

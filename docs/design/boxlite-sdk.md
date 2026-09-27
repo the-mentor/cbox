@@ -138,7 +138,7 @@ Checked by introspecting the installed package and CLI, not from documentation p
 
 ## What the spike established
 
-Live run, `claude-boxlite-custom`, one `Secret` scoped to `github.com`/`api.github.com`, 4/4
+Live run, `cbox-custom`, one `Secret` scoped to `github.com`/`api.github.com`, 4/4
 checks passing:
 
 - **Custody holds. Verified.** `printenv GH_TOKEN` inside the guest returns
