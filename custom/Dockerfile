@@ -5,6 +5,9 @@ USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends awscli \
     && rm -rf /var/lib/apt/lists/*
+# Forwards Claude Code hook events to cbox on the host (iTerm2 integration),
+# wired up as hooks in settings.json below.
+COPY --chmod=0755 cbox-hook.sh /usr/local/bin/cbox-hook
 USER sandbox-user
 
 # Mark first-run onboarding complete so the interactive TUI uses
