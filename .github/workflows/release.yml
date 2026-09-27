@@ -1,8 +1,12 @@
 name: release
 
-# main only accepts PRs (default-branch ruleset), so a push here is a merge.
+# Runs after ci finishes on main, so a release can only be cut from a commit
+# whose tests passed, and its binaries come from that same ci run. main only
+# accepts PRs (default-branch ruleset), so a push there is always a merge.
 on:
-  push:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
     branches: [main]
 
 permissions:
@@ -12,14 +16,11 @@ concurrency:
   group: release
   cancel-in-progress: false
 
-env:
-  CARGO_INCREMENTAL: 0
-  # Pinned so CI, releases and the cache key agree on one compiler. Keep ci.yml
-  # and release.yml in sync; bump by hand.
-  RUST_VERSION: 1.98.1
-
 jobs:
   release-please:
+    # `branches` matches head_branch, which a fork PR can also call main, so
+    # check the event too.
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -65,59 +66,29 @@ jobs:
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           BRANCH: release-please--branches--main
 
-  # Only when a release was just published: build the binaries at the release
-  # commit and attach them. Tests already gated the merge via ci.yml.
+  # Only when a release was just published: attach the binaries the
+  # triggering ci run built. The release PR's merge bumps cbox/Cargo.toml, so
+  # ci's build ran for that commit and the binaries carry the new version.
+  # ponytail: if two merges land before ci finishes, the release can be created
+  # by the later run, whose ci may have skipped the build; the download then
+  # fails and a re-run of the release PR's run fixes it.
   assets:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            asset: cbox-linux-x86_64
-          - os: macos-14
-            asset: cbox-macos-arm64
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          persist-credentials: false
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          pattern: cbox-*
+          merge-multiple: true
+          path: dist
 
-      # boxlite's build.rs compiles boxlite-shared, which requires protoc >= 3.12
-      - name: Install protoc (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-
-      - name: Install protoc (macOS)
-        if: runner.os == 'macOS'
-        run: brew install protobuf
-
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal
-          rustup default "$RUST_VERSION"
-
-      # Same key as ci.yml, so this restores what ci's main runs saved.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            cbox/target
-          key: cargo-${{ runner.os }}-rust${{ env.RUST_VERSION }}-${{ hashFiles('cbox/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-rust${{ env.RUST_VERSION }}-
-
-      - name: Build
-        working-directory: cbox
-        run: cargo build --release
-
-      - run: cp cbox/target/release/cbox ${{ matrix.asset }}
-
-      - run: gh release upload "$TAG" ${{ matrix.asset }} --clobber
+      - run: gh release upload "$TAG" dist/cbox-linux-x86_64 dist/cbox-macos-arm64 --clobber
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

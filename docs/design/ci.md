@@ -9,8 +9,12 @@ PR, and publishes prebuilt binaries on each release, so `just install-cbox` can 
 `build-cbox` stays the path for anyone editing `cbox`'s source, since a published binary can never
 reflect local changes.
 
-There are two workflows. `ci.yml` builds and tests. `release.yml` cuts releases and runs only on
-merges to `main`.
+There are two workflows. `ci.yml` builds and tests. `release.yml` cuts releases, and runs only
+after `ci` passes on a merge to `main`:
+
+```
+merge to main ──> ci (changes → build → CI) ──success──> release (release-please → assets)
+```
 
 ## `.github/workflows/ci.yml`
 
@@ -73,10 +77,18 @@ there on another Mac, add a `codesign --sign - --entitlements ...` step at that 
 
 ## `.github/workflows/release.yml`
 
-Trigger: `push` to `main`. The ruleset only lets changes into `main` through PRs, so a push here
-is always a merge. It is separate from `ci.yml` so a release never waits on, or races with, a CI
-run. The PR's required `build` checks already gated the merge. `concurrency: release` queues
-back-to-back merges instead of running them in parallel.
+Trigger: `workflow_run` on `ci` completing for `main`. Both jobs are skipped unless that ci run
+succeeded and was itself triggered by a push. The ruleset only lets changes into `main` through
+PRs, so that push is always a merge. The push check matters because `branches: [main]` matches the
+run's head branch name, which a fork PR can also call `main`.
+
+This makes a release depend on ci passing for the exact commit being released, not just on the
+PR's checks. The PR checks can pass while the merged result fails, because the ruleset doesn't
+require PRs to be up to date. `concurrency: release` queues back-to-back runs instead of running
+them in parallel.
+
+`workflow_run` always uses the copy of `release.yml` on the default branch. A PR that edits it
+can't test the change before merging.
 
 ### `release-please`
 
@@ -115,16 +127,25 @@ landed on, so the first changelog doesn't list the whole history.
 
 ### `assets` (only when a release was just created)
 
-A matrix with the same two runners as `ci.yml`'s `build` job. It checks out the release commit
-and restores the same cargo cache read-only (`actions/cache/restore`), so it's a warm build. It
-runs `cargo build --release`, then `gh release upload <tag> <asset> --clobber`, one asset per
-matrix row. It doesn't re-run tests, because the merge was already gated on them. This is the
-only job with `contents: write`. It uses the plain `GITHUB_TOKEN`, because uploading assets
-doesn't need to trigger anything.
+It doesn't build anything. It downloads the `cbox-*` artifacts from the ci run that triggered it
+(`actions/download-artifact` with `run-id`, which needs `actions: read`), then runs `gh release
+upload <tag> ... --clobber`. So the released binaries are the ones ci tested, from the same commit
+and the same compiler.
+
+The release PR's merge always bumps `cbox/Cargo.toml`, so ci's `changes` job always selects the
+build for that commit and the artifacts exist.
+
+**Edge case:** if a second merge lands before ci finishes for the release PR's merge, the later run
+can be the one that creates the release. If that later ci run skipped the build, because it didn't
+touch Rust, the download fails. Re-running the release workflow for the release PR's run fixes
+it.
+
+This is the only job with `contents: write`. It uses the plain `GITHUB_TOKEN`, because uploading
+assets doesn't need to trigger anything.
 
 ## Toolchain pinning
 
-Both workflows set `RUST_VERSION` (currently `1.98.1`) at the workflow level and run `rustup
+`ci.yml` sets `RUST_VERSION` (currently `1.98.1`) at the workflow level and runs `rustup
 toolchain install "$RUST_VERSION"` instead of tracking `stable`. Without the pin, every new stable
 release (every six weeks) would:
 
@@ -132,10 +153,10 @@ release (every six weeks) would:
   compiler, so every run recompiles all dependencies and never re-saves the cache;
 - let CI fail on commits that don't touch Rust, through new lints or warnings.
 
-The pin applies to CI and releases only. There's no `rust-toolchain.toml`, so local
+Release binaries come from ci's artifacts, so the pin covers them too. There's no `rust-toolchain.toml`, so local
 `just build-cbox` keeps using whatever toolchain the developer has.
 
-**Bumping it:** change `RUST_VERSION` in both `ci.yml` and `release.yml` in the same PR. The cache
+**Bumping it:** change `RUST_VERSION` in `ci.yml`. The cache
 key changes with it, so the first run afterwards is a cold build. Dependabot doesn't track this
 value; bump it by hand.
 

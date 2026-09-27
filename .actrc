@@ -1,7 +1,6 @@
 # nektos/act defaults for `just ci-local`. act can only run Linux jobs, so the
 # macos-14 matrix row is skipped locally.
 -P ubuntu-latest=catthehacker/ubuntu:act-latest
---artifact-server-path=/tmp/act-artifacts
 # Don't bind-mount the Docker socket into job containers: our jobs need no
 # docker-in-docker, and Rancher Desktop's host socket is a VM forward that
 # can't be mounted this way (`mkdir ...docker.sock: operation not supported`).
