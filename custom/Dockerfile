@@ -22,8 +22,8 @@ COPY --chown=sandbox-user:sandbox-user settings.json /home/sandbox-user/.claude/
 # Marketplaces (comma-separated GitHub repos) and plugins (comma-separated
 # plugin@marketplace ids) to bake in. Append to add more, or override at build:
 #   docker build --build-arg PLUGINS="a@m,b@m" custom/
-ARG MARKETPLACES="anthropics/claude-plugins-official,dietrichGebert/ponytail"
-ARG PLUGINS="superpowers@claude-plugins-official,ponytail@ponytail"
+ARG MARKETPLACES="anthropics/claude-plugins-official,dietrichGebert/ponytail,the-mentor/no-ai-attribution"
+ARG PLUGINS="superpowers@claude-plugins-official,ponytail@ponytail,no-ai-attribution@no-ai-attribution"
 RUN set -eu; IFS=,; \
     for m in $MARKETPLACES; do claude plugin marketplace add "$m"; done; \
     for p in $PLUGINS; do claude plugin install --scope user "$p"; done
