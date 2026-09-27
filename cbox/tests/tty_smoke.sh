@@ -14,7 +14,7 @@
 #   just build-cbox   # or: (cd cbox && cargo build --release)
 #   ./cbox/tests/tty_smoke.sh [image-name]
 #
-# `image-name` defaults to `claude-boxlite-custom`. The script skips itself
+# `image-name` defaults to `cbox-custom`. The script skips itself
 # (exit 0, printing why) rather than failing when a precondition isn't met:
 # no cbox binary, no such image, no `script(1)`, or a `script(1)` that
 # doesn't understand the macOS `-q outfile cmd...` invocation this was
@@ -46,7 +46,10 @@
 
 set -u
 
-image="${1:-claude-boxlite-custom}"
+image="${1:-cbox-custom}"
+# Pinned rather than derived from the checkout directory's name, so the
+# socket path below holds wherever the repo is cloned.
+box=tty-smoke
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
 cbox_bin="$repo_root/cbox/target/release/cbox"
@@ -116,11 +119,11 @@ trap cleanup EXIT INT TERM
 echo "tty_smoke: booting a box under scratch BOXLITE_HOME=$home"
 (
     BOXLITE_HOME="$home" script -q "$up_typescript" \
-        "$cbox_bin" up -f --image "$image" -- sh -c 'sleep 300'
+        "$cbox_bin" up "$box" -f --image "$image" -- sh -c 'sleep 300'
 ) &
 up_pid=$!
 
-sock="$home/boxes/claude-boxlite/cbox.sock"
+sock="$home/boxes/$box/cbox.sock"
 waited=0
 while [ ! -S "$sock" ]; do
     if ! kill -0 "$up_pid" 2>/dev/null; then
@@ -141,7 +144,7 @@ fi
 
 echo "tty_smoke: running cbox exec -- sh -c 'printf READY; exit 7'"
 BOXLITE_HOME="$home" script -q "$exec_typescript" \
-    "$cbox_bin" exec -- sh -c 'printf READY; exit 7'
+    "$cbox_bin" exec "$box" -- sh -c 'printf READY; exit 7'
 exec_status=$?
 
 stty_after=""
@@ -167,7 +170,7 @@ fi
 echo "tty_smoke: running cbox exec -- sh -c 'printf READY0; exit 0' (must return without a keypress)"
 zero_exit_start=$(date +%s)
 BOXLITE_HOME="$home" script -q "$zero_exit_typescript" \
-    "$cbox_bin" exec -- sh -c 'printf READY0; exit 0'
+    "$cbox_bin" exec "$box" -- sh -c 'printf READY0; exit 0'
 zero_exit_status=$?
 zero_exit_elapsed=$(($(date +%s) - zero_exit_start))
 

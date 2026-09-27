@@ -32,10 +32,10 @@ pub const CPUS: u8 = 2;
 /// second, is the exact bug this constant exists to prevent.
 ///
 /// `sleep infinity` is a real binary in this repo's image, checked rather
-/// than assumed: `docker run --rm claude-boxlite-custom sh -c 'command -v
+/// than assumed: `docker run --rm cbox-custom sh -c 'command -v
 /// sleep && sleep --version'` reports `/usr/bin/sleep`, GNU coreutils 9.7,
 /// against the actual image this repo builds
-/// (`custom/Dockerfile` FROM `claude-boxlite-base` FROM `node:26-trixie-slim`).
+/// (`custom/Dockerfile` FROM `cbox-base` FROM `node:26-trixie-slim`).
 /// coreutils is also an "essential" Debian package present in every
 /// `-slim` variant, so this isn't a fluke of this one image either, and
 /// GNU coreutils has supported the `infinity` duration since well before
@@ -185,7 +185,7 @@ mod tests {
 
     fn flags() -> UpFlags {
         UpFlags {
-            image: "claude-boxlite-custom".into(),
+            image: "cbox-custom".into(),
             cwd_mount: false,
             volumes: vec![],
             cmd: vec!["claude".into()],
