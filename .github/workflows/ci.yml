@@ -13,9 +13,33 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  # Job and matrix names are load-bearing: the default-branch ruleset requires
-  # "build (ubuntu-latest, cbox-linux-x86_64)" and "build (macos-14, cbox-macos-arm64)".
+  # Decides whether the Rust build/test needs to run at all.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.diff.outputs.rust }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Falls back to "true" when there's no usable base (act, a new branch).
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            rust=true
+          elif git diff --name-only "$BASE" HEAD | grep -qE '^(cbox/|\.github/workflows/ci\.yml$)'; then
+            rust=true
+          else
+            rust=false
+          fi
+          echo "rust=$rust" | tee -a "$GITHUB_OUTPUT"
+
   build:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -77,3 +101,16 @@ jobs:
         with:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
+
+  # The single check the ruleset should require. Passes if build passed or was
+  # skipped for having no Rust changes, so the matrix can change without a
+  # ruleset change. (A skipped matrix job never reports its per-row check names.)
+  ci-ok:
+    name: CI
+    if: always()
+    needs: [changes, build]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          [ "${{ needs.changes.result }}" = success ] &&
+          case "${{ needs.build.result }}" in success|skipped) true ;; *) false ;; esac

@@ -17,7 +17,18 @@ merges to `main`.
 Triggers: `pull_request` (any base) and `push` to `main`. The push run keeps the cache warm for
 PRs (see Caching).
 
-### `build`
+### `changes` → `build` → `CI`
+
+`changes` diffs the PR against its base, or a push against `github.event.before`. `build` runs
+only if something under `cbox/`, or `ci.yml` itself, changed. With no usable base (under act, or
+the first push of a branch), `changes` answers "yes" and `build` runs.
+
+`CI` is a single gate job that always runs. It passes when `changes` succeeded and `build` either
+passed or was skipped. **The ruleset should require `CI`, not the per-row `build (...)` checks.**
+A matrix job skipped by `if:` never expands its matrix, so its row names never report, and a
+docs-only PR would block forever. Requiring `CI` also means adding or dropping a matrix row needs
+no ruleset change.
+
 
 A matrix of two GitHub-hosted runners, no cross-compiling:
 
@@ -49,10 +60,8 @@ with `gh cache delete --all`.
 `Swatinem/rust-cache` would also prune stale artifacts, but it is not a verified-creator
 publisher, which is the bar in Action pinning below.
 
-**The job and matrix names are load-bearing.** The default-branch ruleset requires the checks
-`build (ubuntu-latest, cbox-linux-x86_64)` and `build (macos-14, cbox-macos-arm64)` by name.
-Renaming the job or a matrix value means updating the ruleset in the same change, or every PR
-will block on a check that never reports.
+**The `CI` job name is load-bearing.** The ruleset requires it by name, so renaming it means
+updating the ruleset in the same change, or every PR blocks on a check that never reports.
 
 The Linux binary links dynamically against whatever glibc `ubuntu-latest` ships (Ubuntu 24.04 →
 glibc 2.39), so it won't run on older distros. Pin an older runner if a lower floor is needed.
