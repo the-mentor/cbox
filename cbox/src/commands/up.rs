@@ -63,6 +63,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
 
     let passthrough = env::passthrough_vars();
     let mut plain = env::compose(&args.env_flags, &passthrough, &built.source_vars)?;
+    env::add_gateway_placeholder(&mut plain);
     plain.extend(built.env.clone());
     plain.push((
         "TERM".into(),

@@ -43,6 +43,9 @@ upstream handling, not because of an aesthetic preference for symmetry:
   block *is* what makes this passthrough rather than keyed auth — there's no flag to flip.
 - **`/api` (keyed).** The gateway attaches `ANTHROPIC_API_KEY` via `policies.backendAuth.key`
   on the route. The box sends a dummy `ANTHROPIC_AUTH_TOKEN` and never sees the real key.
+  cbox sets that dummy itself (`env::add_gateway_placeholder`) rather than forwarding the
+  host's `ANTHROPIC_AUTH_TOKEN`: a real token exported in the host shell would otherwise win
+  over the env file's `dummy` and land in the box.
 
 This asymmetry is the entire point of the gateway's keyed mode, and it is enforced by exactly
 one thing: the three-way conditional in `env::llm_passthrough()` (`cbox/src/env.rs`), which decides which
@@ -58,7 +61,7 @@ no schema rule that would catch a regression.
 | `.env` state | Vars forwarded to the box | Box's `ANTHROPIC_BASE_URL` |
 |---|---|---|
 | `CLAUDE_CODE_OAUTH_TOKEN` set | `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL` | unset, or `…:15002/claude` |
-| `CLAUDE_CODE_OAUTH_TOKEN` unset, `ANTHROPIC_BASE_URL` set | `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` | `…:15002/api` |
+| `CLAUDE_CODE_OAUTH_TOKEN` unset, `ANTHROPIC_BASE_URL` set | `ANTHROPIC_BASE_URL`, plus `ANTHROPIC_AUTH_TOKEN=dummy` (fixed, never the host's value) | `…:15002/api` |
 | neither set | `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` | unset (direct to Anthropic) |
 
 Read as four real-world modes: subscription-direct, subscription-through-gateway,
