@@ -24,24 +24,29 @@ broker Anthropic traffic — with an API key it holds the key host-side so the V
   `registries.json` template the first time you run `just up`/`up-dev`, so it's safe to add
   authenticated registries (e.g. ECR via `just registry-login`, see below) locally without
   ever touching the tracked file.
-- **Credentials.** Secrets are read from a gitignored `.env` and passed to the box at run
-  time via env-var injection (BoxLite's official credential mechanism) — never baked into
-  an image. A known set of vars is forwarded when set (see `passthrough_vars` in the
-  `justfile`): Claude auth is not a flat list but one mutually exclusive set picked by
-  `llm_vars` based on what `.env` contains — subscription, direct API key, or gateway-keyed
-  API key (see **The host-side gateway** below for exactly which vars each set includes),
-  plus `ANTHROPIC_MODEL` always optional on top — GitHub (`GH_TOKEN`/`GITHUB_TOKEN`), and git
-  identity (`GIT_AUTHOR_*` / `GIT_COMMITTER_*`). Unset vars are skipped.
+- **Credentials.** Secrets are read from a gitignored `.env` and never baked into an image.
+  They reach the box two different ways, and the difference matters. Most are **forwarded** as
+  ordinary environment variables when set: Claude auth is one mutually exclusive set chosen by
+  what `.env` contains — subscription, direct API key, or gateway-keyed API key (see **The
+  host-side gateway** below for which vars each set includes) — plus `ANTHROPIC_MODEL`
+  optionally on top, and git identity (`GIT_AUTHOR_*` / `GIT_COMMITTER_*`). Unset vars are
+  skipped. GitHub credentials are **not** forwarded: `GH_TOKEN`/`GITHUB_TOKEN` become
+  BoxLite *secrets*, so the box sees only a placeholder and a host-side proxy substitutes the
+  real value into GitHub-bound HTTPS. Both paths are implemented by `cbox` (see
+  `docs/design/cbox.md`), which the `justfile` recipes forward to.
 - **GitHub.** Setting `GH_TOKEN` (or `GITHUB_TOKEN`) authenticates the `gh` CLI
-  automatically; git is preconfigured to use gh's credential helper, so `git clone`/`push`
-  over HTTPS work too. Commit identity comes from the `GIT_AUTHOR_*` / `GIT_COMMITTER_*`
-  vars.
+  automatically, and `git clone`/`push` over HTTPS work too — but not via gh's credential
+  helper, which the box no longer uses. Git authenticates through an `http.extraHeader`
+  carrying a placeholder that the host-side proxy substitutes, because git builds Basic auth
+  itself and base64-encoding would hide a placeholder from the proxy. `docs/design/cbox.md`
+  explains why that forces two separate secrets. Commit identity still comes from the
+  `GIT_AUTHOR_*` / `GIT_COMMITTER_*` vars.
 
 ## Prerequisites
 
 - [`docker`](https://docs.docker.com/get-docker/) with `docker compose`
 - [`boxlite`](https://boxliteai.com) CLI — install the latest into `~/bin` with
-  `just install-boxlite`, or pin a version with `just install-boxlite v0.9.7` (see below)
+  `just install-boxlite`, or pin a version with `just install-boxlite v0.10.4` (see below)
 - [`just`](https://github.com/casey/just)
 
 ## Setup
@@ -52,7 +57,7 @@ install script), verifies its sha256 checksum, and installs into `~/bin` by defa
 
 ```bash
 just install-boxlite                    # latest release, installed to ~/bin
-just install-boxlite v0.9.7             # pin a specific version
+just install-boxlite v0.10.4             # pin a specific version
 just install-boxlite "" /usr/local/bin  # install to a different directory
 ```
 
@@ -67,7 +72,9 @@ cp .env.example .env
 #                 ANTHROPIC_BASE_URL=http://host.boxlite.internal:15002/api
 #                 and ANTHROPIC_AUTH_TOKEN=unused (value unchecked; the gateway
 #                 attaches the real key, so it never enters the box)
-# Optional GitHub: set GH_TOKEN=... (a PAT) — used by the box AND the gateway's github MCP target
+# Optional GitHub: set GH_TOKEN=... (a PAT) — substituted into the box's GitHub traffic
+#                  host-side (the box only ever holds a placeholder), and used directly by
+#                  the gateway's github MCP target
 # Optional git identity: GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL
 ```
 
@@ -129,17 +136,27 @@ either.
 The `agentgateway` MCP server is configured user-scoped in `/root/.claude.json`, so Claude
 Code points at the host gateway in any project — including a mounted host directory.
 
-`up`, `up-dev`, `shell`, and `down` take an optional box name (default `claude-box`), so you
-can run several boxes side by side. `up`/`up-dev` also accept `-f`/`--force` to replace an
-existing box of the same name (without it, a name collision errors out):
+`up`, `up-dev`, `shell`, and `down` take an optional box name (default: derived from the
+enclosing git repo's root directory, falling back to the cwd's name; pin one with `CBOX_NAME`), so you
+can run several boxes side by side. `up`/`up-dev` also accept `-f`/`--force` to replace an existing box of the same name with a
+fresh one (without it, a name collision resumes the existing box instead — see below):
 
 ```bash
 just up-dev my-box     # build + boot a box named "my-box"
-just up my-box -f      # re-boot it, replacing the running box
+just up my-box -f      # re-boot it from scratch, replacing whatever was there
 just up --cwd          # boot with the host current directory mounted at /workspace
 just shell my-box      # open a session in it
 just down my-box       # tear it down
 ```
+
+Closing the terminal (or losing it to a crash) stops the box rather than removing it — the
+disk and box record survive, and running `just up` again against the same name resumes it
+(cold-booting the VM again, not a suspend/resume) instead of erroring on the collision. That
+resumed box keeps the credentials, mounts, disk size, memory and CPUs it had when first created, so `cbox`
+warns on resume and specifically calls out any secret whose value has changed since (e.g. a
+rotated token) — `-f` is how to pick up today's settings instead. Pass `-d`/`--detach` to keep
+the old always-running behavior, so the box stays up and `just exec`/`just shell` can reach it
+without a `just up` first.
 
 `up`/`up-dev` also accept `-c`/`--cwd` (mount the host current directory onto `/workspace`),
 `-v host:box` (mount an arbitrary host folder, repeatable), `-e KEY=VALUE` (inject an
@@ -155,6 +172,23 @@ Other recipes: `just registry-up` / `just registry-down` manage the local regist
 directly; `just gateway-up` / `just gateway-down` / `just gateway-logs` manage the host-side
 agentgateway (see below); `just --list` shows everything.
 
+### iTerm2 integration
+
+iTerm2's own Claude Code integration (the tab status, dot and detail line) is a Claude Code
+hook, `~/.config/iterm2/cc-status`, that iTerm2 installs on your Mac. It is a macOS binary
+driving iTerm2 through its API socket, so it can't run in the box. Instead the image bakes
+hooks (`custom/settings.json`) that run `custom/cbox-hook.sh` for every event. The script
+returns the event to Claude Code as a hook `terminalSequence` (an `OSC 777;cbox-hook`
+sequence), so it travels out through the terminal stream. `cbox up`/`exec` strips those
+sequences out and pipes each event into `cc-status` on the host, so the status shows up in
+the iTerm2 tab you ran `cbox` from.
+
+In any other terminal the in-box hook exits straight away, so nothing is sent. Nothing to
+configure: `cbox` uses `~/.config/iterm2/cc-status` when it exists. Set
+`CBOX_HOOK_COMMAND` to use another host command, or set it to an empty string to turn the
+forwarding off. Boot with `just up -e CLAUDE_ITERM2_INTEGRATION=0` to stop one box from
+emitting events at all.
+
 ### The host-side gateway
 
 `just gateway-up` runs agentgateway from `agentgateway/docker-compose.yml`. Every port it
@@ -163,6 +197,13 @@ keeping it off the box: `host.boxlite.internal` resolves to the host loopback pr
 running box can reach any port this compose file publishes on 127.0.0.1**, exactly as if it
 were the host itself. Loopback narrows the audience to "this machine plus every box on it," not
 to "the host only." That's why the admin API's port is not published by default — see below.
+
+For gateway changes that should stay on your machine only (an extra MCP server, say),
+create `agentgateway/docker-compose.override.yml`. It is gitignored, and when it exists
+`just gateway-up`/`gateway-down`/`gateway-logs` pass it to compose after the base file, so
+it can add services or override mounts. To change `config.yaml` too, copy it to
+`agentgateway/config.local.yaml` (also gitignored) and mount that over `/config.yaml` from
+the override. Anything it publishes is reachable from every box too.
 
 | Bind | Serves |
 |---|---|
@@ -193,8 +234,8 @@ credential, not all of them:
 
 | Credential | Reaches the box? | Why |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | No, when `ANTHROPIC_BASE_URL` points at the gateway's `/api` route | the box never calls Anthropic directly in that mode — the gateway does it on the box's behalf, so the key has no reason to be there. With no `ANTHROPIC_BASE_URL` set at all, `llm_vars` forwards this key straight into the box instead — the gateway isn't in the loop, so this guarantee only applies to gateway-keyed mode |
-| `GH_TOKEN` / `GITHUB_TOKEN` | Yes | the box runs `gh` and `git push` itself, and no proxy can do that for it |
+| `ANTHROPIC_API_KEY` | No, when `ANTHROPIC_BASE_URL` points at the gateway's `/api` route | the box never calls Anthropic directly in that mode — the gateway does it on the box's behalf, so the key has no reason to be there. With no `ANTHROPIC_BASE_URL` set at all, `cbox`'s `env::llm_passthrough()` forwards this key straight into the box instead — the gateway isn't in the loop, so this guarantee only applies to gateway-keyed mode |
+| `GH_TOKEN` / `GITHUB_TOKEN` | No | the box holds only a placeholder (`<BOXLITE_SECRET:gh>`); a host-side proxy substitutes the real token into requests to `github.com`/`api.github.com`, so `gh`, `git clone`, and `git push` all authenticate without the value ever entering the VM. See `docs/design/cbox.md` |
 
 **Troubleshooting**
 
@@ -203,7 +244,7 @@ credential, not all of them:
 | `/mcp` connects but lists no tools | `GH_TOKEN` unset or expired — the `github-mcp` container's GitHub API calls 401, visible in `just gateway-logs` |
 | 401 from Anthropic | your `ANTHROPIC_BASE_URL` path and your credential disagree: `/claude` needs the OAuth token, `/api` needs the gateway to have `ANTHROPIC_API_KEY` |
 | 401 in subscription mode with the right path | `ANTHROPIC_AUTH_TOKEN` is set and shadowing the OAuth token — unset it |
-| 400 `Extra inputs are not permitted` | beta headers the backend rejects; set `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` and add it to `passthrough_vars` |
+| 400 `Extra inputs are not permitted` | beta headers the backend rejects; set `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` and pass it with `-e`, or add it to `UNCONDITIONAL_PASSTHROUGH` in `cbox/src/env.rs` |
 | Box can't reach Anthropic at all | the gateway isn't running — `just gateway-up` |
 
 ### Admin UI
