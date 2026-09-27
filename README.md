@@ -172,6 +172,23 @@ Other recipes: `just registry-up` / `just registry-down` manage the local regist
 directly; `just gateway-up` / `just gateway-down` / `just gateway-logs` manage the host-side
 agentgateway (see below); `just --list` shows everything.
 
+### iTerm2 integration
+
+iTerm2's own Claude Code integration (the tab status, dot and detail line) is a Claude Code
+hook, `~/.config/iterm2/cc-status`, that iTerm2 installs on your Mac. It is a macOS binary
+driving iTerm2 through its API socket, so it can't run in the box. Instead the image bakes
+hooks (`custom/settings.json`) that run `custom/cbox-hook.sh` for every event. The script
+returns the event to Claude Code as a hook `terminalSequence` (an `OSC 777;cbox-hook`
+sequence), so it travels out through the terminal stream. `cbox up`/`exec` strips those
+sequences out and pipes each event into `cc-status` on the host, so the status shows up in
+the iTerm2 tab you ran `cbox` from.
+
+In any other terminal the in-box hook exits straight away, so nothing is sent. Nothing to
+configure: `cbox` uses `~/.config/iterm2/cc-status` when it exists. Set
+`CBOX_HOOK_COMMAND` to use another host command, or set it to an empty string to turn the
+forwarding off. Boot with `just up -e CLAUDE_ITERM2_INTEGRATION=0` to stop one box from
+emitting events at all.
+
 ### The host-side gateway
 
 `just gateway-up` runs agentgateway from `agentgateway/docker-compose.yml`. Every port it

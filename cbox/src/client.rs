@@ -148,12 +148,16 @@ pub async fn proxy(stream: UnixStream, cmd: &[String]) -> Result<i32> {
     // termios-level raw mode restoration doesn't touch, and a manual call
     // after the pump is skipped entirely on a panic or an early `?`.
     let _terminal_guard = crate::terminal_guard::TerminalGuard::enable()?;
-    proxy_loop(&mut reader, &mut writer).await
+    let mut hooks = crate::hookfwd::Forwarder::spawn();
+    let result = proxy_loop(&mut reader, &mut writer, &mut hooks).await;
+    hooks.finish().await;
+    result
 }
 
 async fn proxy_loop(
     reader: &mut tokio::net::unix::OwnedReadHalf,
     writer: &mut tokio::net::unix::OwnedWriteHalf,
+    hooks: &mut crate::hookfwd::Forwarder,
 ) -> Result<i32> {
     let mut sigwinch =
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::window_change())?;
@@ -166,7 +170,7 @@ async fn proxy_loop(
             frame = read_frame(reader) => match frame? {
                 Some(Frame::Stdout(bytes)) => {
                     let mut out = std::io::stdout().lock();
-                    out.write_all(&bytes)?;
+                    out.write_all(&hooks.filter(&bytes))?;
                     out.flush()?;
                 }
                 Some(Frame::Exit { code }) => {
