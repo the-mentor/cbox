@@ -1,0 +1,4 @@
+# nektos/act defaults for `just ci-local`. act can only run Linux jobs, so the
+# macos-14 matrix row is skipped locally.
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+--artifact-server-path=/tmp/act-artifacts
