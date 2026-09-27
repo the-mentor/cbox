@@ -11,8 +11,8 @@ permissions:
 env:
   # Incremental artifacts are useless on a fresh runner and bloat the cache.
   CARGO_INCREMENTAL: 0
-  # Pinned so CI, releases and the cache key agree on one compiler. Keep ci.yml
-  # and release.yml in sync; bump by hand.
+  # Pinned so every build (and so every release binary) uses one compiler and
+  # the cache key tracks it. Bump by hand.
   RUST_VERSION: 1.98.1
 
 jobs:
