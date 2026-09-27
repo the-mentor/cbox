@@ -14,7 +14,7 @@ on `:15003` and two Anthropic routes on `:15002`.
 ## Commands
 
 ```bash
-just up-dev            # build images (base + custom, pushed to local registry) and the cbox binary, then boot the box
+just up-dev            # build custom on the published base (pushed to local registry) and the cbox binary, then boot the box
 just up                # boot the box without rebuilding (images and the cbox binary must already be built)
 just build              # start the local registry, build custom on the published base, push custom
 just build --no-cache   # same, bypassing the Docker layer cache (see below)

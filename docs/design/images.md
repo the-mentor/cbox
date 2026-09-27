@@ -89,11 +89,13 @@ not applied to a bare local tag like `cbox-base`, because Docker would otherwise
 tag from Docker Hub instead of using the one just built locally.
 
 `just build-local` is the pre-published flow: it runs `build-base` (building `base/` locally),
-then `build-image` with `CBOX_BASE_IMAGE` pointed at that local tag. Reach for it when changing
-`base/` itself, since a change there has nothing to test against until it's built. Both `build` and
-`build-local` also work with `CBOX_BASE_IMAGE` set to a PR's published tag
-(`CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:pr-67 just build`) to try that PR's base before it
-merges.
+then `build-image` with `CBOX_BASE_IMAGE` forced to that local tag — it always uses the locally
+built base, ignoring any `CBOX_BASE_IMAGE` already set in the environment. Reach for it when
+changing `base/` itself, since a change there has nothing to test against until it's built.
+
+`just build`/`just build-image` do honor an environment `CBOX_BASE_IMAGE`, so
+`CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:pr-67 just build` tries a PR's published base before
+it merges.
 
 ## Errors and recovery
 
