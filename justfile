@@ -1,7 +1,7 @@
 set dotenv-load
 
-base_tag   := "claude-boxlite-base"
-custom_tag := "claude-boxlite-custom"
+base_tag   := "cbox-base"
+custom_tag := "cbox-custom"
 registry   := "localhost:5551"
 compose    := "docker compose -f local-development/registry/docker-compose.yml"
 # Appends agentgateway/docker-compose.override.yml when it exists: an untracked,
@@ -231,7 +231,7 @@ cbox_bin := justfile_directory() + "/cbox/target/release/cbox"
 #
 # The `cd` is load-bearing: `just` sets the working directory to the justfile's
 # own directory, so without it cbox would always see the repo root as its cwd
-# and every derived box name would resolve to "claude-boxlite" no matter where
+# and every derived box name would resolve to "cbox" no matter where
 # the user was standing. Because the cd makes the path relative to the user
 # instead, --config has to be passed explicitly.
 up *args:

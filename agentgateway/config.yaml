@@ -6,7 +6,7 @@
 # on startup. Do not add a yaml-language-server schema directive at the top
 # of this file for the same reason (that directive is itself dollar-prefixed).
 #
-# Host-side agentgateway for claude-boxlite. Secrets are environment-variable
+# Host-side agentgateway for cbox. Secrets are environment-variable
 # references only — never paste a literal credential here. Tracked in git.
 #
 # Design and rationale: docs/design/agentgateway.md. Schema pinned at

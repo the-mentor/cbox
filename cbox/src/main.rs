@@ -47,7 +47,7 @@ enum Commands {
         volumes: Vec<String>,
         #[arg(short = 'e', long = "env")]
         env_flags: Vec<String>,
-        #[arg(short = 'i', long, default_value = "claude-boxlite-custom")]
+        #[arg(short = 'i', long, default_value = "cbox-custom")]
         image: String,
         #[arg(long)]
         config: Option<PathBuf>,

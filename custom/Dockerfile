@@ -1,4 +1,4 @@
-FROM claude-boxlite-base
+FROM cbox-base
 
 # The base image ends as USER sandbox-user; package installs need root.
 USER root

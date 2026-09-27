@@ -107,7 +107,7 @@ up *args:
 
 `just` sets the working directory to the justfile's own directory. Without the `cd`, cbox's
 cwd would always be the repo root and every derived box name would resolve to
-`claude-boxlite` regardless of where the user was standing — silently defeating the naming
+`cbox` regardless of where the user was standing — silently defeating the naming
 design below. The `cd` makes cbox's cwd genuinely the user's, which then requires passing
 `--config` explicitly since it is no longer relative.
 
@@ -306,9 +306,9 @@ cbox fixes it without a daemon. `cbox up` already holds a long-lived runtime; it
 listens on a unix socket at `<home>/cbox.sock`. `cbox exec` connects to it when present.
 
 ```
-cbox up claude-boxlite          # holds runtime + lock, listens on cbox.sock
-cbox exec claude-boxlite        # connects to the socket -> works immediately
-cbox exec other-box             # no socket -> opens its own runtime
+cbox up my-box        # holds runtime + lock, listens on cbox.sock
+cbox exec my-box      # connects to the socket -> works immediately
+cbox exec other-box   # no socket -> opens its own runtime
 ```
 
 A daemon was considered and rejected. It would additionally collapse the per-box image cache

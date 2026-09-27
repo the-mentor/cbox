@@ -9,8 +9,8 @@ the host-side agentgateway service, see `docs/design/agentgateway.md`.
 
 ## Two-layer image
 
-`base/Dockerfile` builds `claude-boxlite-base` (Debian + Node + Claude Code + `gh` + `uv`) and
-`custom/Dockerfile` layers `claude-boxlite-custom` on top of it. The split exists because the
+`base/Dockerfile` builds `cbox-base` (Debian + Node + Claude Code + `gh` + `uv`) and
+`custom/Dockerfile` layers `cbox-custom` on top of it. The split exists because the
 two layers change at very different rates: the base layer's contents — the OS, the language
 runtime, the CLIs — are slow to build and rarely need to change, while the custom layer is
 where per-repo configuration lives and gets rebuilt often. Keeping them separate means a config
@@ -34,7 +34,7 @@ up`/`up-dev` copy the latter to the former on first run only, so it's safe to ad
 per-machine registry credentials to the local copy without ever touching the tracked
 template.
 
-BoxLite also caches pulled images by tag, and that cache is the trap: once `claude-boxlite-custom:latest` has been pulled once, BoxLite will keep serving the cached digest for
+BoxLite also caches pulled images by tag, and that cache is the trap: once `cbox-custom:latest` has been pulled once, BoxLite will keep serving the cached digest for
 that tag even after a rebuild pushes a new one — there's no `boxlite rmi` to invalidate it.
 `just clean-cache` (run automatically at the end of `build-image`) works around this by
 deleting the cached tag→digest row for the custom image directly from BoxLite's own sqlite

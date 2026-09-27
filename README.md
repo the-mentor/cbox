@@ -1,4 +1,4 @@
-# claude-boxlite
+# cbox
 
 Build and run [Claude Code](https://github.com/anthropics/claude-code) inside a
 [BoxLite](https://boxliteai.com) microVM, with an MCP config baked in that points Claude
@@ -12,8 +12,8 @@ broker Anthropic traffic — with an API key it holds the key host-side so the V
 
 ## How it works
 
-- **Two-layer image.** `base/` builds `claude-boxlite-base` (Debian + Node 20 + Claude
-  Code) — slow, rebuilt rarely. `custom/` layers `claude-boxlite-custom` on top, baking
+- **Two-layer image.** `base/` builds `cbox-base` (Debian + Node 20 + Claude
+  Code) — slow, rebuilt rarely. `custom/` layers `cbox-custom` on top, baking
   `custom/claude.json` in as `/root/.claude.json` (theme, onboarding, and a user-scoped
   `agentgateway` MCP server). Nothing is baked into `/workspace`, so mounting a host
   directory there clobbers no config.
@@ -131,7 +131,9 @@ just build --pull           # refresh the node:26-trixie-slim base too
 Reach for `--no-cache` when a build step whose command text never changes has gone stale —
 Docker keeps serving the cached layer for `npm install -g @anthropic-ai/claude-code` or the
 oh-my-posh `curl | sh` installer, so a plain `just build` will not pick up newer versions of
-either.
+either. That rebuild is also how Claude Code gets updated: its in-box auto-updater is off
+(`DISABLE_AUTOUPDATER` in `custom/settings.json`), since the npm global prefix is root-owned
+and the box's disk would lose the update on the next `-f` anyway.
 
 The `agentgateway` MCP server is configured user-scoped in `/root/.claude.json`, so Claude
 Code points at the host gateway in any project — including a mounted host directory.
@@ -161,11 +163,11 @@ without a `just up` first.
 `up`/`up-dev` also accept `-c`/`--cwd` (mount the host current directory onto `/workspace`),
 `-v host:box` (mount an arbitrary host folder, repeatable), `-e KEY=VALUE` (inject an
 extra environment variable into the box, repeatable), and `-i`/`--image` (boot a different
-image path instead of the locally built `claude-boxlite-custom`):
+image path instead of the locally built `cbox-custom`):
 
 ```bash
 just up -e test=1 -e test2=2   # boot with test=1 and test2=2 set in the box
-just up -i localhost:5551/library/claude-boxlite-custom:v2   # boot a specific tag
+just up -i localhost:5551/library/cbox-custom:v2   # boot a specific tag
 ```
 
 Other recipes: `just registry-up` / `just registry-down` manage the local registry
