@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/the-mentor/cbox/compare/v0.1.2...v0.1.3) (2026-09-27)
+
+
+### Features
+
+* **image:** bake the no-ai-attribution plugin into the box ([#65](https://github.com/the-mentor/cbox/issues/65)) ([c9d0a3e](https://github.com/the-mentor/cbox/commit/c9d0a3e1f7deb6fbcc20d709bbc65532e0bf6df0))
+
 ## [0.1.2](https://github.com/the-mentor/cbox/compare/v0.1.1...v0.1.2) (2026-09-27)
 
 
