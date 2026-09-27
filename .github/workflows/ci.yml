@@ -1,4 +1,4 @@
-name: cbox
+name: ci
 
 on:
   pull_request:
@@ -46,7 +46,7 @@ jobs:
           rustup update stable
           rustup default stable
 
-      - name: Test
+      - name: Unit Test
         working-directory: cbox
         run: cargo test --release
 
@@ -66,8 +66,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs['cbox--release_created'] }}
-      tag_name: ${{ steps.release.outputs['cbox--tag_name'] }}
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       # Everything below runs as the release app: its PRs and merges trigger
       # workflows (GITHUB_TOKEN's don't), and it can bypass the ruleset to merge.
@@ -78,8 +78,9 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_KEY }}
           permission-contents: write
           permission-pull-requests: write
-      # Opens/updates a release PR that bumps cbox/Cargo.toml, cbox/Cargo.lock and
-      # cbox/CHANGELOG.md; merging it tags vX.Y.Z and publishes the GitHub release.
+      # One release for the whole repo: opens/updates a release PR that bumps
+      # CHANGELOG.md and cbox's Cargo.toml/Cargo.lock; merging it tags vX.Y.Z and
+      # publishes the GitHub release. Later artifacts (e.g. images) hang off the same tag.
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
         with:

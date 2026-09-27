@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Refuse to auto-merge a release PR unless it only bumps cbox's version and
-prepends to cbox/CHANGELOG.md.
+"""Refuse to auto-merge a release PR unless it only bumps the repo's version
+(cbox's Cargo.toml/Cargo.lock) and prepends to CHANGELOG.md.
 
 Usage: check_release_pr.py BASE_REF HEAD_SHA
 Compares git objects directly, so the merge must be pinned to HEAD_SHA.
@@ -13,7 +13,7 @@ import tomllib
 CARGO_TOML = "cbox/Cargo.toml"
 CARGO_LOCK = "cbox/Cargo.lock"
 MANIFEST = ".release-please-manifest.json"
-CHANGELOG = "cbox/CHANGELOG.md"
+CHANGELOG = "CHANGELOG.md"
 ALLOWED = {CARGO_TOML, CARGO_LOCK, MANIFEST, CHANGELOG}
 
 
@@ -55,8 +55,8 @@ def check(base, head):
             errors.append(f"{path}: changes something other than cbox's version")
 
     manifest = show(head, MANIFEST)
-    if manifest is None or list(json.loads(manifest)) != ["cbox"]:
-        errors.append(f"{MANIFEST}: must contain only the 'cbox' package")
+    if manifest is None or list(json.loads(manifest)) != ["."]:
+        errors.append(f"{MANIFEST}: must contain only the '.' package")
 
     old_log, new_log = show(base, CHANGELOG) or "", show(head, CHANGELOG)
     if new_log is None:

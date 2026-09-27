@@ -1,4 +1,4 @@
-# cbox CI and releases
+# CI and releases
 
 ## Why this exists
 
@@ -9,7 +9,7 @@ PR, and publishes prebuilt binaries on each release, so `just install-cbox` can 
 `build-cbox` stays the path for anyone editing `cbox`'s source, since a published binary can never
 reflect local changes.
 
-## Workflow: `.github/workflows/cbox.yml`
+## Workflow: `.github/workflows/ci.yml`
 
 Triggers: `pull_request` (any base) and `push` to `main`.
 
@@ -48,14 +48,23 @@ This follows the same flow as
    workflows, which `GITHUB_TOKEN`'s don't. That matters because the release PR needs its
    required `build` checks to run.
 2. `googleapis/release-please-action` reads Conventional Commits since the last release. It then
-   opens or updates a release PR that bumps `cbox/Cargo.toml`, `cbox/Cargo.lock`,
-   `cbox/CHANGELOG.md` and `.release-please-manifest.json`, using release-please's `rust` release
-   type (config in `release-please-config.json`). When that PR merges, the next run tags `vX.Y.Z`
-   and publishes the GitHub Release.
+   opens or updates a release PR, and when that PR merges, the next run tags `vX.Y.Z` and
+   publishes the GitHub Release. **There is one release for the whole repo, not one per
+   component.** The config (`release-please-config.json`) uses the `simple` type on the `.`
+   package, so the PR bumps the root `CHANGELOG.md` and `.release-please-manifest.json`. It also
+   bumps cbox's version in `cbox/Cargo.toml` and `cbox/Cargo.lock` through `extra-files`, which
+   keeps `cbox --version` matching the tag. Artifacts added later, such as the container images,
+   should publish under the same tag. Any version string they carry goes in `extra-files` and in
+   the guard's allowlist.
+
+   The `Cargo.lock` jsonpath is `$.package[?(@.name.value=='cbox')].version`, not
+   `@.name=='cbox'`. release-please's TOML parser wraps every value in `{start, end, value}`, so
+   the shorter filter silently matches nothing.
 3. **Auto-merge guard.** When the step opens or updates the PR, the job merges it itself, but
    only after two checks pass. First, the PR's author must be this app. Second,
-   `.github/scripts/check_release_pr.py` must confirm the diff touches only those four files and
-   changes nothing in them except cbox's version, plus entries prepended to the changelog. The
+   `.github/scripts/check_release_pr.py` must confirm the diff touches only those four files. It
+   also checks that nothing changed in them except cbox's version, apart from entries prepended to
+   the changelog. The
    merge is `--squash --admin --match-head-commit <checked sha>`, so a push after the check can't
    slip in. This relies on the app being a bypass actor on the default-branch ruleset.
 

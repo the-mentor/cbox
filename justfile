@@ -216,7 +216,7 @@ install-cbox tag="":
 # Extra args go to act, e.g. `just ci-local -l` to list jobs.
 # Usage: just ci-local [act-args...]
 ci-local *args:
-    act pull_request -W .github/workflows/cbox.yml -j build --matrix os:ubuntu-latest {{args}}
+    act pull_request -W .github/workflows/ci.yml -j build --matrix os:ubuntu-latest {{args}}
 
 # Refresh the custom image and sweep orphaned image blobs from boxlite's cache.
 # BoxLite caches image tags immutably and has no `rmi`, so a rebuilt :latest is
