@@ -65,13 +65,17 @@ pub async fn attach(litebox: &LiteBox, cmd: &[String]) -> Result<i32> {
     // `disable_raw_mode()` call after `pump` (the previous approach) only
     // undoes termios state and is skipped entirely on a panic.
     let _terminal_guard = crate::terminal_guard::TerminalGuard::enable()?;
-    pump(exec, out_stream, stdin_writer).await
+    let mut hooks = crate::hookfwd::Forwarder::spawn();
+    let result = pump(exec, out_stream, stdin_writer, &mut hooks).await;
+    hooks.finish().await;
+    result
 }
 
 async fn pump(
     exec: Arc<boxlite::Execution>,
     mut out_stream: impl Stream<Item = String> + Unpin,
     mut stdin_writer: boxlite::ExecStdin,
+    hooks: &mut crate::hookfwd::Forwarder,
 ) -> Result<i32> {
     let mut sigwinch =
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::window_change())?;
@@ -119,7 +123,7 @@ async fn pump(
             chunk = out_stream.next() => match chunk {
                 Some(text) => {
                     let mut stdout = std::io::stdout().lock();
-                    stdout.write_all(text.as_bytes())?;
+                    stdout.write_all(&hooks.filter(text.as_bytes()))?;
                     stdout.flush()?;
                 }
                 None => { end_reason = EndReason::GuestExited; break; }
