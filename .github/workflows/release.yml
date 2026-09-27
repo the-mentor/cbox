@@ -14,6 +14,9 @@ concurrency:
 
 env:
   CARGO_INCREMENTAL: 0
+  # Pinned so CI, releases and the cache key agree on one compiler. Keep ci.yml
+  # and release.yml in sync; bump by hand.
+  RUST_VERSION: 1.98.1
 
 jobs:
   release-please:
@@ -92,7 +95,10 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install protobuf
 
-      - run: rustup update stable && rustup default stable
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
 
       # Same key as ci.yml, so this restores what ci's main runs saved.
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -102,8 +108,8 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             cbox/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('cbox/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-
+          key: cargo-${{ runner.os }}-rust${{ env.RUST_VERSION }}-${{ hashFiles('cbox/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-rust${{ env.RUST_VERSION }}-
 
       - name: Build
         working-directory: cbox

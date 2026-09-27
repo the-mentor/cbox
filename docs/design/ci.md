@@ -37,8 +37,8 @@ A matrix of two GitHub-hosted runners, no cross-compiling:
 | Linux x86_64 | `ubuntu-latest` | `cbox-linux-x86_64` |
 | macOS arm64 | `macos-14` | `cbox-macos-arm64` |
 
-It installs `protoc`, runs `rustup update stable` (both runners ship rustup; under act it installs
-rustup first). It then restores the cargo cache, runs `Unit Test` (`cargo test --release`) and
+It installs `protoc`, then installs and selects the pinned Rust version, `RUST_VERSION` (see
+Toolchain pinning). Both runners ship rustup; under act it installs rustup first. It then restores the cargo cache, runs `Unit Test` (`cargo test --release`) and
 `cargo build --release`, and uploads the binary as an artifact named after its asset.
 
 ### Caching
@@ -46,15 +46,16 @@ rustup first). It then restores the cargo cache, runs `Unit Test` (`cargo test -
 Uncached, `Unit Test` takes about 3.5 minutes on both runners, nearly all of it compiling
 dependencies (`boxlite` and friends). The build after it takes about 5s because it reuses the
 test profile's output. `actions/cache` saves `~/.cargo/registry/{index,cache}`, `~/.cargo/git/db`
-and `cbox/target`, keyed on `runner.os` plus the hash of `cbox/Cargo.lock`. `restore-keys` falls
-back to the newest cache for that OS, so a lockfile bump still reuses most of the compiled
-dependencies. `CARGO_INCREMENTAL=0` keeps incremental-compilation data, which a fresh runner can't
+and `cbox/target`, keyed on `runner.os`, `RUST_VERSION` and the hash of `cbox/Cargo.lock`.
+`restore-keys` falls back to the newest cache for that OS and Rust version, so a lockfile bump
+still reuses most of the compiled dependencies. Artifacts built by one compiler version can't be
+reused by another, which is why the Rust version is in the key and the fallback. `CARGO_INCREMENTAL=0` keeps incremental-compilation data, which a fresh runner can't
 use, out of the cache.
 
 GitHub scopes caches by branch. A PR can restore caches saved on its base branch (`main`), but not
 caches from other PRs. That is why `ci.yml` also runs on push to `main`: those runs save the
 caches that every PR starts from. A cache hit on an exact key doesn't re-save. That is fine,
-because the key only changes when `Cargo.lock` does. If caches get stale or bloated, delete them
+because the key only changes when `Cargo.lock` or `RUST_VERSION` does. If caches get stale or bloated, delete them
 with `gh cache delete --all`.
 
 `Swatinem/rust-cache` would also prune stale artifacts, but it is not a verified-creator
@@ -120,6 +121,23 @@ runs `cargo build --release`, then `gh release upload <tag> <asset> --clobber`, 
 matrix row. It doesn't re-run tests, because the merge was already gated on them. This is the
 only job with `contents: write`. It uses the plain `GITHUB_TOKEN`, because uploading assets
 doesn't need to trigger anything.
+
+## Toolchain pinning
+
+Both workflows set `RUST_VERSION` (currently `1.98.1`) at the workflow level and run `rustup
+toolchain install "$RUST_VERSION"` instead of tracking `stable`. Without the pin, every new stable
+release (every six weeks) would:
+
+- invalidate the cache: the key stays the same, but cargo can't reuse artifacts from the old
+  compiler, so every run recompiles all dependencies and never re-saves the cache;
+- let CI fail on commits that don't touch Rust, through new lints or warnings.
+
+The pin applies to CI and releases only. There's no `rust-toolchain.toml`, so local
+`just build-cbox` keeps using whatever toolchain the developer has.
+
+**Bumping it:** change `RUST_VERSION` in both `ci.yml` and `release.yml` in the same PR. The cache
+key changes with it, so the first run afterwards is a cold build. Dependabot doesn't track this
+value; bump it by hand.
 
 ## Running CI locally: `just ci-local`
 

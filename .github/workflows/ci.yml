@@ -11,6 +11,9 @@ permissions:
 env:
   # Incremental artifacts are useless on a fresh runner and bloat the cache.
   CARGO_INCREMENTAL: 0
+  # Pinned so CI, releases and the cache key agree on one compiler. Keep ci.yml
+  # and release.yml in sync; bump by hand.
+  RUST_VERSION: 1.98.1
 
 jobs:
   # Decides whether the Rust build/test needs to run at all.
@@ -64,15 +67,15 @@ jobs:
         run: brew install protobuf
 
       # Hosted runners ship rustup; act's runner image doesn't, so install it there.
-      - name: Update Rust toolchain
+      - name: Install Rust toolchain
         run: |
           if ! command -v rustup >/dev/null; then
             curl -fsSL --proto '=https' --tlsv1.2 https://sh.rustup.rs | sh -s -- -y --profile minimal
             echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
             export PATH="$HOME/.cargo/bin:$PATH"
           fi
-          rustup update stable
-          rustup default stable
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
 
       # Dependency compilation is ~3.5 min of an uncached run. Keyed on the
       # lockfile; restore-keys falls back to the last cache for this OS. PRs can
@@ -84,8 +87,8 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             cbox/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('cbox/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-
+          key: cargo-${{ runner.os }}-rust${{ env.RUST_VERSION }}-${{ hashFiles('cbox/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-rust${{ env.RUST_VERSION }}-
 
       - name: Unit Test
         working-directory: cbox
