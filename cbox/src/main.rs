@@ -5,6 +5,7 @@ mod commands;
 mod config;
 mod env;
 mod envfile;
+mod hookfwd;
 mod naming;
 mod proto;
 mod secrets;

@@ -174,21 +174,20 @@ agentgateway (see below); `just --list` shows everything.
 
 ### iTerm2 integration
 
-When the box runs in [iTerm2](https://iterm2.com), Claude Code flags the tab whenever it is
-waiting on you. The image bakes Claude Code hooks (`custom/settings.json`) that run
-`custom/iterm2-notify.sh`:
+iTerm2's own Claude Code integration (the tab status, dot and detail line) is a Claude Code
+hook, `~/.config/iterm2/cc-status`, that iTerm2 installs on your Mac. It is a macOS binary
+driving iTerm2 through its API socket, so it can't run in the box. Instead the image bakes
+hooks (`custom/settings.json`) that run `custom/cbox-hook.sh` for every event. The script
+returns the event to Claude Code as a hook `terminalSequence` (an `OSC 777;cbox-hook`
+sequence), so it travels out through the terminal stream. `cbox up`/`exec` strips those
+sequences out and pipes each event into `cc-status` on the host, so the status shows up in
+the iTerm2 tab you ran `cbox` from.
 
-| Event | What happens in iTerm2 |
-| --- | --- |
-| Claude finishes a turn (`Stop`) | desktop notification, orange tab, "waiting for input" badge, dock bounce |
-| Claude needs permission or has sat idle (`Notification`) | orange tab, "needs attention" badge, dock bounce (Claude Code sends that desktop notification itself) |
-| You submit a prompt or a tool runs | tab color and badge cleared |
-
-This works because `cbox` forwards `TERM_PROGRAM`/`ITERM_SESSION_ID` from the host terminal,
-for both `up` and `exec`, and passes the box's terminal output through unchanged. In any other
-terminal the hooks do nothing. To see the desktop notifications, turn on iTerm2's
-*Settings → Profiles → Terminal → Notifications*. To switch the integration off for one box,
-boot it with `just up -e CLAUDE_ITERM2_INTEGRATION=0`.
+In any other terminal the in-box hook exits straight away, so nothing is sent. Nothing to
+configure: `cbox` uses `~/.config/iterm2/cc-status` when it exists. Set
+`CBOX_HOOK_COMMAND` to use another host command, or set it to an empty string to turn the
+forwarding off. Boot with `just up -e CLAUDE_ITERM2_INTEGRATION=0` to stop one box from
+emitting events at all.
 
 ### The host-side gateway
 

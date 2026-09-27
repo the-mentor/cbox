@@ -8,17 +8,105 @@
     "defaultMode": "auto"
   },
   "hooks": {
-    "Stop": [
-      { "hooks": [{ "type": "command", "command": "iterm2-notify waiting" }] }
-    ],
-    "Notification": [
-      { "hooks": [{ "type": "command", "command": "iterm2-notify attention" }] }
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cbox-hook"
+          }
+        ]
+      }
     ],
     "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "iterm2-notify clear" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cbox-hook"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cbox-hook"
+          }
+        ]
+      }
     ],
     "PostToolUse": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "iterm2-notify clear" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cbox-hook"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cbox-hook"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cbox-hook"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cbox-hook"
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cbox-hook"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cbox-hook"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cbox-hook"
+          }
+        ]
+      }
     ]
   }
 }

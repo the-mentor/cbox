@@ -543,6 +543,7 @@ uses one top-level directory per component.
 | `proto.rs` | socket frame codec |
 | `server.rs` | `up`'s listener |
 | `client.rs` | `exec`'s connect-or-fallback |
+| `hookfwd.rs` | strips `OSC 777;cbox-hook` hook events out of guest output and runs the host hook command (iTerm2's `cc-status`) on them |
 | `commands/` | one file per verb |
 
 Everything except `attach.rs`, `server.rs`, and `commands/` is testable without booting a VM.
