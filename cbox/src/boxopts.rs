@@ -7,9 +7,15 @@ use boxlite::{BoxOptions, RootfsSpec, Secret};
 use boxlite::runtime::options::VolumeSpec;
 
 /// Default disk size for a booted box, used when `--disk-size` is absent.
-/// User-configurable via that flag (see `build` below); `--cpus`/`--memory`/
-/// `-u`-style flags remain out of scope per the plan.
+/// User-configurable via that flag (see `build` below).
 pub const DISK_SIZE_GB: u64 = 10;
+
+/// Default memory and CPUs for a booted box, used when `--memory`/`--cpus`
+/// are absent. Deliberately above BoxLite's own defaults (1 GiB, 1 CPU in
+/// `runtime::constants::vm_defaults`): 1 GiB with no swap gets a
+/// `cargo build` of cbox itself OOM-killed inside the box.
+pub const MEMORY_GB: u32 = 4;
+pub const CPUS: u8 = 2;
 
 /// The box's init process (PID 1 inside the container) -- never the user's
 /// command.
@@ -43,6 +49,9 @@ pub struct UpFlags {
     pub cmd: Vec<String>,
     pub invocation_dir: PathBuf,
     pub disk_size_gb: Option<u64>,
+    /// Guest memory in GiB; `build` converts to MiB for BoxLite.
+    pub memory_gb: Option<u32>,
+    pub cpus: Option<u8>,
     /// Whether the box should outlive this process. Mirrors `boxlite run`'s
     /// `-d`/`--detach`; see `build` for the full reasoning.
     pub detach: bool,
@@ -116,12 +125,28 @@ pub fn build(
         bail!("--disk-size must be greater than 0");
     }
 
+    // Same reasoning as --disk-size above: 0 is a clear mistake worth an
+    // error, and no upper bound -- BoxLite fails loudly on a size the host
+    // can't back.
+    if flags.memory_gb == Some(0) {
+        bail!("--memory must be greater than 0");
+    }
+    if flags.cpus == Some(0) {
+        bail!("--cpus must be greater than 0");
+    }
+    let memory_gb = flags.memory_gb.unwrap_or(MEMORY_GB);
+    let Some(memory_mib) = memory_gb.checked_mul(1024) else {
+        bail!("--memory {memory_gb} is too large");
+    };
+
     Ok(BoxOptions {
         rootfs: RootfsSpec::Image(flags.image.clone()),
         env,
         secrets,
         volumes,
         disk_size_gb: Some(flags.disk_size_gb.unwrap_or(DISK_SIZE_GB)),
+        memory_mib: Some(memory_mib),
+        cpus: Some(flags.cpus.unwrap_or(CPUS)),
         working_dir: Some("/workspace".to_string()),
         // Never `flags.cmd` -- see `KEEP_ALIVE_CMD`'s doc comment for why the
         // init process and the user's command must never be the same thing.
@@ -166,6 +191,8 @@ mod tests {
             cmd: vec!["claude".into()],
             invocation_dir: PathBuf::from("/tmp/project"),
             disk_size_gb: None,
+            memory_gb: None,
+            cpus: None,
             detach: false,
         }
     }
@@ -303,6 +330,47 @@ mod tests {
         f.disk_size_gb = Some(0);
         let err = build(&f, vec![], vec![]).unwrap_err().to_string();
         assert!(err.contains("--disk-size"), "error should name the flag: {err}");
+    }
+
+    #[test]
+    fn absent_memory_and_cpus_flags_yield_the_raised_defaults() {
+        let opts = build(&flags(), vec![], vec![]).unwrap();
+        assert_eq!(opts.memory_mib, Some(MEMORY_GB * 1024));
+        assert_eq!(opts.cpus, Some(CPUS));
+        // The point of the change: never BoxLite's own 1 GiB / 1 CPU.
+        assert!(opts.memory_mib.unwrap() > 1024);
+        assert!(opts.cpus.unwrap() > 1);
+    }
+
+    #[test]
+    fn provided_memory_and_cpus_reach_box_options() {
+        let mut f = flags();
+        f.memory_gb = Some(8);
+        f.cpus = Some(6);
+        let opts = build(&f, vec![], vec![]).unwrap();
+        assert_eq!(opts.memory_mib, Some(8 * 1024));
+        assert_eq!(opts.cpus, Some(6));
+    }
+
+    #[test]
+    fn zero_memory_or_cpus_is_rejected_naming_the_flag() {
+        let mut f = flags();
+        f.memory_gb = Some(0);
+        let err = build(&f, vec![], vec![]).unwrap_err().to_string();
+        assert!(err.contains("--memory"), "error should name the flag: {err}");
+
+        let mut f = flags();
+        f.cpus = Some(0);
+        let err = build(&f, vec![], vec![]).unwrap_err().to_string();
+        assert!(err.contains("--cpus"), "error should name the flag: {err}");
+    }
+
+    #[test]
+    fn memory_that_overflows_mib_is_an_error_not_a_panic() {
+        let mut f = flags();
+        f.memory_gb = Some(u32::MAX / 1024 + 1);
+        let err = build(&f, vec![], vec![]).unwrap_err().to_string();
+        assert!(err.contains("--memory"), "error should name the flag: {err}");
     }
 
     #[test]

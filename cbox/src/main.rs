@@ -64,6 +64,13 @@ enum Commands {
         /// gives headroom for in-box docker pull/apt/npm/build caches.
         #[arg(long = "disk-size")]
         disk_size: Option<u64>,
+        /// Guest memory in GiB. Defaults to 4 (BoxLite's own default is 1,
+        /// too little to build Rust or large JS projects in the box).
+        #[arg(long = "memory", value_name = "GB")]
+        memory: Option<u32>,
+        /// Guest vCPU count. Defaults to 2.
+        #[arg(long = "cpus")]
+        cpus: Option<u8>,
         /// Let the box outlive this session so `cbox exec` can reach it
         /// later. Without this, closing the terminal lets boxlite's own
         /// watchdog stop the VM -- the disk and box record survive, and a
@@ -105,11 +112,11 @@ async fn main() -> Result<()> {
         }
         Commands::Up {
             name, force, cwd_mount, volumes, env_flags, image, config, secret_flags, env_file, cmd,
-            disk_size, detach,
+            disk_size, memory, cpus, detach,
         } => {
             commands::up::run(commands::up::UpArgs {
                 name, force, cwd_mount, volumes, env_flags, image, config, secret_flags, env_file,
-                cmd, disk_size_gb: disk_size, detach,
+                cmd, disk_size_gb: disk_size, memory_gb: memory, cpus, detach,
             })
             .await?;
         }
@@ -118,4 +125,29 @@ async fn main() -> Result<()> {
         Commands::List { all } => commands::list::run(all).await?,
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_up(args: &[&str]) -> Result<(Option<u32>, Option<u8>), clap::Error> {
+        let cli = Cli::try_parse_from(["cbox", "up"].iter().chain(args))?;
+        match cli.command {
+            Commands::Up { memory, cpus, .. } => Ok((memory, cpus)),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn memory_is_whole_gib_and_cpus_a_count() {
+        assert_eq!(parse_up(&["--memory", "8", "--cpus", "4"]).unwrap(), (Some(8), Some(4)));
+        assert_eq!(parse_up(&[]).unwrap(), (None, None));
+    }
+
+    #[test]
+    fn an_out_of_range_cpu_count_is_rejected_by_clap_naming_the_flag() {
+        let err = parse_up(&["--cpus", "300"]).unwrap_err().to_string();
+        assert!(err.contains("--cpus"), "{err}");
+    }
 }

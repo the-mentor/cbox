@@ -21,6 +21,8 @@ pub struct UpArgs {
     pub env_file: Option<PathBuf>,
     pub cmd: Vec<String>,
     pub disk_size_gb: Option<u64>,
+    pub memory_gb: Option<u32>,
+    pub cpus: Option<u8>,
     /// Let the box outlive this process. See `boxopts::build`'s `detach`
     /// comment for the full reasoning; default is `false`, matching what
     /// the pre-cbox justfile actually passed to `boxlite run`.
@@ -114,6 +116,8 @@ pub async fn run(args: UpArgs) -> Result<()> {
         cmd,
         invocation_dir: cwd,
         disk_size_gb: args.disk_size_gb,
+        memory_gb: args.memory_gb,
+        cpus: args.cpus,
         detach: args.detach,
     };
     let options = boxopts::build(&flags, built.secrets, plain)?;
