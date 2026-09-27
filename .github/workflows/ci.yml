@@ -100,7 +100,10 @@ jobs:
 
       - run: cp cbox/target/release/cbox ${{ matrix.asset }}
 
+      # act's artifact server doesn't speak this action's wire protocol
+      # (fails with "unknown field mime_type"); skip it under `just ci-local`.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !env.ACT }}
         with:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}

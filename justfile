@@ -216,6 +216,14 @@ install-cbox tag="":
 # Extra args go to act, e.g. `just ci-local -l` to list jobs.
 # Usage: just ci-local [act-args...]
 ci-local *args:
+    #!/usr/bin/env sh
+    set -eu
+    # act reads DOCKER_HOST but doesn't consult the docker CLI's context, so
+    # non-default contexts (Rancher Desktop, Colima, ...) need it spelled out.
+    # Assigning before export (rather than `export DOCKER_HOST="$(...)"`) means
+    # a failed lookup trips `set -e` instead of silently exporting "".
+    host="$(docker context inspect --format '{{"{{"}}.Endpoints.docker.Host{{"}}"}}')"
+    export DOCKER_HOST="$host"
     act pull_request -W .github/workflows/ci.yml -j build --matrix os:ubuntu-latest {{args}}
 
 # Refresh the custom image and sweep orphaned image blobs from boxlite's cache.
