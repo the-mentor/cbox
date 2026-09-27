@@ -24,7 +24,8 @@ PRs (see Caching).
 ### `changes` → `build` → `CI`
 
 `changes` diffs the PR against its base, or a push against `github.event.before`. `build` runs
-only if something under `cbox/`, or `ci.yml` itself, changed. With no usable base (under act, or
+only if something under `cbox/`, `ci.yml` itself, or `CHANGELOG.md` changed. `CHANGELOG.md` only
+changes in release PRs, whose merge always needs binaries (see `assets`). With no usable base (under act, or
 the first push of a branch), `changes` answers "yes" and `build` runs.
 
 `CI` is a single gate job that always runs. It passes when `changes` succeeded and `build` either
@@ -132,8 +133,10 @@ It doesn't build anything. It downloads the `cbox-*` artifacts from the ci run t
 upload <tag> ... --clobber`. So the released binaries are the ones ci tested, from the same commit
 and the same compiler.
 
-The release PR's merge always bumps `cbox/Cargo.toml`, so ci's `changes` job always selects the
-build for that commit and the artifacts exist.
+Every release PR changes `CHANGELOG.md`, and `changes` treats that as a reason to build, so the
+artifacts exist. `cbox/` alone isn't enough: a `Release-As` equal to the current version (which
+is how `v0.1.0` was cut) bumps nothing in `cbox/Cargo.toml`, and that release shipped without
+binaries until they were attached by hand.
 
 **Edge case:** if a second merge lands before ci finishes for the release PR's merge, the later run
 can be the one that creates the release. If that later ci run skipped the build, because it didn't
