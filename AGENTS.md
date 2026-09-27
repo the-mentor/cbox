@@ -20,6 +20,7 @@ just build              # start the local registry, build base + custom images, 
 just build --no-cache   # same, bypassing the Docker layer cache (see below)
 just build-cbox          # build the cbox binary (cbox/target/release/cbox); up/exec/down/list all hard-fail without it
 just install-cbox [tag]  # download a prebuilt cbox binary (latest release, or a pinned tag) instead of compiling it
+just version            # print the installed cbox binary's version (e.g. `cbox 0.1.1`)
 just ci-local           # run the ci workflow's Linux build job locally via nektos/act (needs Docker)
 just exec               # open a session in the running box (alias: just shell)
 just list               # list running boxes across every box name (see below), forwarding args to cbox's own `list` command
