@@ -184,6 +184,48 @@ build *args: (build-image args)
 build-cbox:
     cd cbox && cargo build --release
 
+# Fetch a prebuilt cbox binary from a GitHub Release instead of compiling it.
+# Defaults to the latest release; pass a tag (e.g. v0.2.0) to pin one. Writes
+# to the same path build-cbox does, so up/exec/down/list work unchanged.
+# Usage: just install-cbox [tag]
+install-cbox tag="":
+    #!/usr/bin/env sh
+    set -eu
+    case "$(uname -s)-$(uname -m)" in
+      Linux-x86_64) asset="cbox-linux-x86_64" ;;
+      Darwin-arm64) asset="cbox-macos-arm64" ;;
+      *) echo "install-cbox: no prebuilt binary for $(uname -s)-$(uname -m)" >&2; exit 1 ;;
+    esac
+    if [ -n "{{tag}}" ]; then
+      url="https://github.com/the-mentor/cbox/releases/download/{{tag}}/${asset}"
+    else
+      url="https://github.com/the-mentor/cbox/releases/latest/download/${asset}"
+    fi
+    out="{{cbox_bin}}"
+    mkdir -p "$(dirname "$out")"
+    tmp="$(mktemp "${out}.XXXXXX")"
+    trap 'rm -f "$tmp"' EXIT
+    echo "Fetching ${url}..." >&2
+    curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp" "$url"
+    chmod +x "$tmp"
+    mv "$tmp" "$out"
+    echo "Installed ${out}" >&2
+
+# Run the cbox CI workflow's Linux build job locally with nektos/act (needs
+# Docker). act can't run macOS jobs, so only the ubuntu-latest row runs.
+# Extra args go to act, e.g. `just ci-local -l` to list jobs.
+# Usage: just ci-local [act-args...]
+ci-local *args:
+    #!/usr/bin/env sh
+    set -eu
+    # act reads DOCKER_HOST but doesn't consult the docker CLI's context, so
+    # non-default contexts (Rancher Desktop, Colima, ...) need it spelled out.
+    # Assigning before export (rather than `export DOCKER_HOST="$(...)"`) means
+    # a failed lookup trips `set -e` instead of silently exporting "".
+    host="$(docker context inspect --format '{{"{{"}}.Endpoints.docker.Host{{"}}"}}')"
+    export DOCKER_HOST="$host"
+    act pull_request -W .github/workflows/ci.yml -j build --matrix os:ubuntu-latest {{args}}
+
 # Refresh the custom image and sweep orphaned image blobs from boxlite's cache.
 # BoxLite caches image tags immutably and has no `rmi`, so a rebuilt :latest is
 # ignored until its cached tag->digest row is dropped; then the next
@@ -237,7 +279,7 @@ cbox_bin := justfile_directory() + "/cbox/target/release/cbox"
 up *args:
     #!/usr/bin/env sh
     set -eu
-    [ -x "{{cbox_bin}}" ] || { echo "cbox binary not found at {{cbox_bin}} - run 'just build-cbox' first" >&2; exit 1; }
+    [ -x "{{cbox_bin}}" ] || { echo "cbox binary not found at {{cbox_bin}} - run 'just build-cbox' or 'just install-cbox' first" >&2; exit 1; }
     # First-run bootstrap. This lived in the old `up` recipe; it has to stay
     # here rather than move into cbox, because cbox's cwd is now the user's
     # directory and it has no other way to find the repo's tracked template.
@@ -255,7 +297,7 @@ alias shell := exec
 exec *args:
     #!/usr/bin/env sh
     set -eu
-    [ -x "{{cbox_bin}}" ] || { echo "cbox binary not found at {{cbox_bin}} - run 'just build-cbox' first" >&2; exit 1; }
+    [ -x "{{cbox_bin}}" ] || { echo "cbox binary not found at {{cbox_bin}} - run 'just build-cbox' or 'just install-cbox' first" >&2; exit 1; }
     cd "{{invocation_directory()}}"
     exec "{{cbox_bin}}" exec \
       --config "{{justfile_directory()}}/registries.local.json" {{args}}
@@ -265,7 +307,7 @@ exec *args:
 down *args:
     #!/usr/bin/env sh
     set -eu
-    [ -x "{{cbox_bin}}" ] || { echo "cbox binary not found at {{cbox_bin}} - run 'just build-cbox' first" >&2; exit 1; }
+    [ -x "{{cbox_bin}}" ] || { echo "cbox binary not found at {{cbox_bin}} - run 'just build-cbox' or 'just install-cbox' first" >&2; exit 1; }
     cd "{{invocation_directory()}}"
     exec "{{cbox_bin}}" down {{args}}
 
@@ -274,6 +316,6 @@ down *args:
 list *args:
     #!/usr/bin/env sh
     set -eu
-    [ -x "{{cbox_bin}}" ] || { echo "cbox binary not found at {{cbox_bin}} - run 'just build-cbox' first" >&2; exit 1; }
+    [ -x "{{cbox_bin}}" ] || { echo "cbox binary not found at {{cbox_bin}} - run 'just build-cbox' or 'just install-cbox' first" >&2; exit 1; }
     cd "{{invocation_directory()}}"
     exec "{{cbox_bin}}" list {{args}}

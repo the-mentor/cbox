@@ -1,0 +1,122 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  # Incremental artifacts are useless on a fresh runner and bloat the cache.
+  CARGO_INCREMENTAL: 0
+  # Pinned so CI, releases and the cache key agree on one compiler. Keep ci.yml
+  # and release.yml in sync; bump by hand.
+  RUST_VERSION: 1.98.1
+
+jobs:
+  # Decides whether the Rust build/test needs to run at all.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.diff.outputs.rust }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Falls back to "true" when there's no usable base (act, a new branch).
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            rust=true
+          elif git diff --name-only "$BASE" HEAD | grep -qE '^(cbox/|\.github/workflows/ci\.yml$)'; then
+            rust=true
+          else
+            rust=false
+          fi
+          echo "rust=$rust" | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: cbox-linux-x86_64
+          - os: macos-14
+            asset: cbox-macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # boxlite's build.rs compiles boxlite-shared, which requires protoc >= 3.12
+      - name: Install protoc (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Install protoc (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      # Hosted runners ship rustup; act's runner image doesn't, so install it there.
+      - name: Install Rust toolchain
+        run: |
+          if ! command -v rustup >/dev/null; then
+            curl -fsSL --proto '=https' --tlsv1.2 https://sh.rustup.rs | sh -s -- -y --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      # Dependency compilation is ~3.5 min of an uncached run. Keyed on the
+      # lockfile; restore-keys falls back to the last cache for this OS. PRs can
+      # restore caches saved on main, so pushes to main keep them warm.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            cbox/target
+          key: cargo-${{ runner.os }}-rust${{ env.RUST_VERSION }}-${{ hashFiles('cbox/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-rust${{ env.RUST_VERSION }}-
+
+      - name: Unit Test
+        working-directory: cbox
+        run: cargo test --release
+
+      - name: Build
+        working-directory: cbox
+        run: cargo build --release
+
+      - run: cp cbox/target/release/cbox ${{ matrix.asset }}
+
+      # act's artifact server doesn't speak this action's wire protocol
+      # (fails with "unknown field mime_type"); skip it under `just ci-local`.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !env.ACT }}
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+  # The single check the ruleset should require. Passes if build passed or was
+  # skipped for having no Rust changes, so the matrix can change without a
+  # ruleset change. (A skipped matrix job never reports its per-row check names.)
+  ci-ok:
+    name: CI
+    if: always()
+    needs: [changes, build]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          [ "${{ needs.changes.result }}" = success ] &&
+          case "${{ needs.build.result }}" in success|skipped) true ;; *) false ;; esac

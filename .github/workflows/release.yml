@@ -1,0 +1,124 @@
+name: release
+
+# main only accepts PRs (default-branch ruleset), so a push here is a merge.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: 0
+  # Pinned so CI, releases and the cache key agree on one compiler. Keep ci.yml
+  # and release.yml in sync; bump by hand.
+  RUST_VERSION: 1.98.1
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      # Everything below runs as the release app: its PRs and merges trigger
+      # workflows (GITHUB_TOKEN's don't), and it can bypass the ruleset to merge.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app-token
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      # One release for the whole repo: opens/updates a release PR that bumps
+      # CHANGELOG.md and cbox's Cargo.toml/Cargo.lock; merging it tags vX.Y.Z and
+      # publishes the GitHub release. Later artifacts (e.g. images) hang off the same tag.
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+      # Auto-merge the release PR, but only if this app opened it and it only
+      # bumps versions and prepends to CHANGELOG.md. The merge is pinned to the
+      # commit checked. Merging relies on the app being a ruleset bypass actor.
+      - if: steps.release.outputs.prs_created == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - if: steps.release.outputs.prs_created == 'true'
+        run: |
+          read -r author sha < <(gh pr view "$BRANCH" --json author,headRefOid -q '"\(.author.login) \(.headRefOid)"')
+          if [ "$author" != "app/$APP_SLUG" ]; then
+            echo "::error::release PR opened by $author, not app/$APP_SLUG; not merging"
+            exit 1
+          fi
+          git fetch --no-tags origin "$sha"
+          python3 .github/scripts/check_release_pr.py origin/main "$sha"
+          gh pr merge "$BRANCH" --squash --admin --match-head-commit "$sha"
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          BRANCH: release-please--branches--main
+
+  # Only when a release was just published: build the binaries at the release
+  # commit and attach them. Tests already gated the merge via ci.yml.
+  assets:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: cbox-linux-x86_64
+          - os: macos-14
+            asset: cbox-macos-arm64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # boxlite's build.rs compiles boxlite-shared, which requires protoc >= 3.12
+      - name: Install protoc (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Install protoc (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      # Same key as ci.yml, so this restores what ci's main runs saved.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            cbox/target
+          key: cargo-${{ runner.os }}-rust${{ env.RUST_VERSION }}-${{ hashFiles('cbox/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-rust${{ env.RUST_VERSION }}-
+
+      - name: Build
+        working-directory: cbox
+        run: cargo build --release
+
+      - run: cp cbox/target/release/cbox ${{ matrix.asset }}
+
+      - run: gh release upload "$TAG" ${{ matrix.asset }} --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
