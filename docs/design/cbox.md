@@ -115,9 +115,9 @@ design below. The `cd` makes cbox's cwd genuinely the user's, which then require
 
 ```
 cbox up   [name] [-f] [-c] [-v host:box] [-e KEY[=VALUE]] [-i image]
-                 [--disk-size GB] [--env-file path] [--config path]
+                 [--disk-size GB] [--memory GB] [--cpus N] [--env-file path] [--config path]
                  [--secret NAME=ENV_VAR@hosts]
-                 [--cpus N] [--memory MiB] [-u user] [-p [host:]box[/proto]]
+                 [-u user] [-p [host:]box[/proto]]
                  [--allow-net HOST]... [--network disabled]
                  [-- cmd...]
 cbox exec [name] [-- cmd...]

@@ -33,14 +33,15 @@ just install/uninstall  # symlink the cb wrapper onto PATH (see below)
 root directory, falling back to the cwd's name outside a repo; pin one explicitly with
 `CBOX_NAME` or a positional argument) and flags: `-f`/`--force`
 (remove and recreate an existing box of the same name from scratch, discarding its
-credentials/mounts/disk-size along with everything else it accumulated), `-c`/`--cwd` (mount
+credentials/mounts/disk-size/memory/CPUs along with everything else it accumulated), `-c`/`--cwd` (mount
 host cwd onto `/workspace`), `-v host:box` (mount an arbitrary host folder, repeatable), `-e
 KEY=VALUE` (inject an extra environment variable into the box, repeatable; `cbox` merges these
 with its built-in passthrough list — `passthrough_vars()` in `cbox/src/env.rs`, not a justfile
 variable — with the `-e` value winning on a key collision), `-i`/`--image` (override the image
 path passed to `boxlite run`; defaults to `custom_tag`, i.e. `claude-boxlite-custom`),
 `--disk-size <GB>` (container rootfs disk size; defaults to 10GB, headroom for in-box `docker
-pull`/`apt install`/`npm install`/build caches), `-d`/`--detach` (let the box outlive this
+pull`/`apt install`/`npm install`/build caches), `--memory <GB>` / `--cpus <N>` (guest RAM in whole GiB and vCPU count; default 4 GiB / 2,
+above BoxLite's own 1 GiB / 1, which is too little to `cargo build` in the box), `-d`/`--detach` (let the box outlive this
 session so `cbox exec` can reach it later; without it, the default, closing the terminal stops
 the VM — the disk and box record survive, and running `cbox up` again resumes it, a real
 restart rather than a suspend), and `-- <cmd>` (override the executable launched in the box;
