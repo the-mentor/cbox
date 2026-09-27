@@ -23,6 +23,12 @@ Nothing is baked into `/workspace` itself, which is a deliberate choice: it mean
 host directory there (`-c`/`-v`) never clobbers baked-in config, because there's no config
 sitting at that path to clobber.
 
+`cbox-base` is built and published by CI to `ghcr.io/the-mentor/cbox-base` — on every release,
+weekly, and for same-repo PRs that touch `base/` — so it no longer needs to be built locally by
+default. `custom/Dockerfile` builds on it via the `BASE_IMAGE` build arg (`CBOX_BASE_IMAGE` in the
+`justfile`), defaulting to `:latest`. See `docs/design/images.md` for the full design: tags, the
+build workflow, and the local-only `just build-local` fallback.
+
 ## Image handoff through a local registry
 
 BoxLite does not read Docker's local image store — a `docker build` alone doesn't make an

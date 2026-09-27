@@ -103,9 +103,9 @@ like ECR, without ever touching the tracked `registries.json`.
 ## Usage
 
 ```bash
-just up-dev            # build images (base + custom, pushed to the local registry) then boot the box
+just up-dev            # build custom on the published base (pushed to the local registry) then boot the box
 just up                # boot the box without rebuilding (images must already be built)
-just build             # start the local registry, build base + custom images, push custom
+just build             # start the local registry, build custom on the published base, push custom
 just shell             # open a session in the running box
 just list              # list running boxes
 just down                        # stop and remove the box
@@ -119,21 +119,25 @@ Use `just up-dev` the first time (or after changing the image); use `just up` fo
 boot once the images are built. Both run Claude Code interactively inside the box, so they
 need a valid `CLAUDE_CODE_OAUTH_TOKEN` in `.env`.
 
-`build`, `build-image`, and `build-base` forward any extra arguments to `docker build`, and
-`build`/`build-image` pass them down to the layers they depend on:
+`build`, `build-image`, and `build-base` forward any extra arguments to `docker build`. `build`
+and `build-image` build only `custom/`, on top of `CBOX_BASE_IMAGE` (the published
+`ghcr.io/the-mentor/cbox-base:latest` by default — see `docs/design/images.md`):
 
 ```bash
-just build --no-cache       # rebuild base + custom from scratch, ignoring the layer cache
-just build-base --no-cache  # same, base image only
-just build --pull           # refresh the node:26-trixie-slim base too
+just build --no-cache                  # rebuild custom from scratch, on a freshly pulled base
+just build-base --no-cache             # same, base image only
+just build-local --no-cache            # rebuild base + custom locally, ignoring the layer cache
 ```
 
 Reach for `--no-cache` when a build step whose command text never changes has gone stale —
 Docker keeps serving the cached layer for `npm install -g @anthropic-ai/claude-code` or the
 oh-my-posh `curl | sh` installer, so a plain `just build` will not pick up newer versions of
-either. That rebuild is also how Claude Code gets updated: its in-box auto-updater is off
-(`DISABLE_AUTOUPDATER` in `custom/settings.json`), since the npm global prefix is root-owned
-and the box's disk would lose the update on the next `-f` anyway.
+either. In practice this rarely matters locally: `cbox-base` is rebuilt weekly by CI and
+published, so a plain `just build` already picks up the newer Claude Code from the refreshed
+`:latest`. `just build-local --no-cache` gets the same result without depending on the published
+image. Claude Code's in-box auto-updater is off either way (`DISABLE_AUTOUPDATER` in
+`custom/settings.json`), since the npm global prefix is root-owned and the box's disk would lose
+the update on the next `-f` anyway.
 
 The `agentgateway` MCP server is configured user-scoped in `/root/.claude.json`, so Claude
 Code points at the host gateway in any project — including a mounted host directory.

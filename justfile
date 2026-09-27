@@ -167,9 +167,10 @@ registry-login *args:
 # The three build recipes forward extra arguments straight to `docker build`, so
 # `--no-cache` (the reason this exists: Docker caches `RUN` layers by command text, so a
 # `curl | sh` installer or an unpinned `npm i -g` keeps serving a stale version until the
-# cache is bypassed) reaches both image builds. `build`/`build-image` pass the same args
-# down to their dependencies, so `just build --no-cache` rebuilds base and custom from
-# scratch. Any other `docker build` flag works the same way (e.g. `--pull`, `--progress=plain`).
+# cache is bypassed) reaches whichever image is being built. `build`/`build-image` build only
+# `custom/`, on the published base, so `just build --no-cache` rebuilds only that layer from
+# scratch; `just build-local --no-cache` rebuilds base/ too. Any other `docker build` flag
+# works the same way (e.g. `--pull`, `--progress=plain`).
 # Usage: just build-base [docker-build-args...]
 build-base *args:
     docker build {{args}} -t {{base_tag}} base/
