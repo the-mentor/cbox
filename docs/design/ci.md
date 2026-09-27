@@ -28,6 +28,14 @@ only if something under `cbox/`, `ci.yml` itself, or `CHANGELOG.md` changed. `CH
 changes in release PRs, whose merge always needs binaries (see `assets`). With no usable base (under act, or
 the first push of a branch), `changes` answers "yes" and `build` runs.
 
+**The one exception is release-please's own PR.** On a `pull_request` from the
+`release-please--branches--main` branch of this repo (not a fork of the same name), `changes`
+always answers "no". `release.yml` auto-merges that PR within seconds using `--admin`, without
+waiting for its checks, so a build there would finish after the merge and be thrown away.
+`check_release_pr.py` has already limited the PR to version bumps and changelog entries, and the
+push to `main` that follows still builds, because `CHANGELOG.md` changed. That's the build whose
+artifacts `assets` ships.
+
 `CI` is a single gate job that always runs. It passes when `changes` succeeded and `build` either
 passed or was skipped. **The ruleset should require `CI`, not the per-row `build (...)` checks.**
 A matrix job skipped by `if:` never expands its matrix, so its row names never report, and a
