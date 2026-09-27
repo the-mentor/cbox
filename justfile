@@ -4,7 +4,10 @@ base_tag   := "claude-boxlite-base"
 custom_tag := "claude-boxlite-custom"
 registry   := "localhost:5551"
 compose    := "docker compose -f local-development/registry/docker-compose.yml"
-gateway    := "docker compose -f agentgateway/docker-compose.yml"
+# Appends agentgateway/docker-compose.override.yml when it exists: an untracked,
+# per-machine file for local-only gateway changes (see README.md). Compose
+# reads that name by itself only without -f, and this always passes -f.
+gateway    := "docker compose -f agentgateway/docker-compose.yml" + `[ -f agentgateway/docker-compose.override.yml ] && echo " -f agentgateway/docker-compose.override.yml" || true`
 
 default:
     @just --list

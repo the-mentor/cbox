@@ -198,6 +198,12 @@ running box can reach any port this compose file publishes on 127.0.0.1**, exact
 were the host itself. Loopback narrows the audience to "this machine plus every box on it," not
 to "the host only." That's why the admin API's port is not published by default — see below.
 
+For gateway changes that should stay on your machine only (an extra MCP server, say),
+create `agentgateway/docker-compose.override.yml`. It is gitignored, and when it exists
+`just gateway-up`/`gateway-down`/`gateway-logs` pass it to compose after the base file, so
+it can add services or override mounts. To change `config.yaml` too, mount your own copy
+over `/config.yaml` from that file. Anything it publishes is reachable from every box too.
+
 | Bind | Serves |
 |---|---|
 | `:15003/mcp` | multiplexed MCP tools (`github` live, proxied to a sibling `github-mcp` container — not GitHub's remote endpoint; others commented in `agentgateway/config.yaml`) |
