@@ -9,11 +9,15 @@ PR, and publishes prebuilt binaries on each release, so `just install-cbox` can 
 `build-cbox` stays the path for anyone editing `cbox`'s source, since a published binary can never
 reflect local changes.
 
-## Workflow: `.github/workflows/ci.yml`
+There are two workflows. `ci.yml` builds and tests. `release.yml` cuts releases and runs only on
+merges to `main`.
 
-Triggers: `pull_request` (any base) and `push` to `main`.
+## `.github/workflows/ci.yml`
 
-### `build` (every run)
+Triggers: `pull_request` (any base) and `push` to `main`. The push run keeps the cache warm for
+PRs (see Caching).
+
+### `build`
 
 A matrix of two GitHub-hosted runners, no cross-compiling:
 
@@ -23,8 +27,27 @@ A matrix of two GitHub-hosted runners, no cross-compiling:
 | macOS arm64 | `macos-14` | `cbox-macos-arm64` |
 
 It installs `protoc`, runs `rustup update stable` (both runners ship rustup; under act it installs
-rustup first), then `cargo test --release` and `cargo build --release`, and uploads the binary as
-an artifact named after its asset.
+rustup first). It then restores the cargo cache, runs `Unit Test` (`cargo test --release`) and
+`cargo build --release`, and uploads the binary as an artifact named after its asset.
+
+### Caching
+
+Uncached, `Unit Test` takes about 3.5 minutes on both runners, nearly all of it compiling
+dependencies (`boxlite` and friends). The build after it takes about 5s because it reuses the
+test profile's output. `actions/cache` saves `~/.cargo/registry/{index,cache}`, `~/.cargo/git/db`
+and `cbox/target`, keyed on `runner.os` plus the hash of `cbox/Cargo.lock`. `restore-keys` falls
+back to the newest cache for that OS, so a lockfile bump still reuses most of the compiled
+dependencies. `CARGO_INCREMENTAL=0` keeps incremental-compilation data, which a fresh runner can't
+use, out of the cache.
+
+GitHub scopes caches by branch. A PR can restore caches saved on its base branch (`main`), but not
+caches from other PRs. That is why `ci.yml` also runs on push to `main`: those runs save the
+caches that every PR starts from. A cache hit on an exact key doesn't re-save. That is fine,
+because the key only changes when `Cargo.lock` does. If caches get stale or bloated, delete them
+with `gh cache delete --all`.
+
+`Swatinem/rust-cache` would also prune stale artifacts, but it is not a verified-creator
+publisher, which is the bar in Action pinning below.
 
 **The job and matrix names are load-bearing.** The default-branch ruleset requires the checks
 `build (ubuntu-latest, cbox-linux-x86_64)` and `build (macos-14, cbox-macos-arm64)` by name.
@@ -38,7 +61,14 @@ The macOS binary is not explicitly codesigned. The linker's ad-hoc signature was
 `boxlite`'s macOS backend on the one Apple Silicon machine tested. If a released binary fails
 there on another Mac, add a `codesign --sign - --entitlements ...` step at that point.
 
-### `release-please` (push to `main` only, needs `build`)
+## `.github/workflows/release.yml`
+
+Trigger: `push` to `main`. The ruleset only lets changes into `main` through PRs, so a push here
+is always a merge. It is separate from `ci.yml` so a release never waits on, or races with, a CI
+run. The PR's required `build` checks already gated the merge. `concurrency: release` queues
+back-to-back merges instead of running them in parallel.
+
+### `release-please`
 
 This follows the same flow as
 [the-mentor/no-ai-attribution](https://github.com/the-mentor/no-ai-attribution):
@@ -73,11 +103,14 @@ Tags are `vX.Y.Z` (`include-component-in-tag: false`). While the version is belo
 and `feat` bump the patch version. `bootstrap-sha` points at the `main` commit this workflow
 landed on, so the first changelog doesn't list the whole history.
 
-### `upload-assets` (only when a release was just created)
+### `assets` (only when a release was just created)
 
-It downloads both `build` artifacts from the same run and runs `gh release upload <tag> ...
---clobber`. It is the only job with `contents: write`, and it uses the plain `GITHUB_TOKEN`
-because uploading assets doesn't need to trigger anything.
+A matrix with the same two runners as `ci.yml`'s `build` job. It checks out the release commit
+and restores the same cargo cache read-only (`actions/cache/restore`), so it's a warm build. It
+runs `cargo build --release`, then `gh release upload <tag> <asset> --clobber`, one asset per
+matrix row. It doesn't re-run tests, because the merge was already gated on them. This is the
+only job with `contents: write`. It uses the plain `GITHUB_TOKEN`, because uploading assets
+doesn't need to trigger anything.
 
 ## Running CI locally: `just ci-local`
 
@@ -85,8 +118,8 @@ because uploading assets doesn't need to trigger anything.
 [nektos/act](https://github.com/nektos/act). The repo's `.actrc` maps `ubuntu-latest` to
 `catthehacker/ubuntu:act-latest` and enables act's local artifact server, so the upload step
 works. It needs Docker and `act` on the host (`brew install act`). act only runs Linux containers,
-so the macOS row can't run locally. The `release-please` and `upload-assets` jobs only run on
-push, so they never run under `ci-local`'s `pull_request` event.
+so the macOS row can't run locally. `release.yml` is never run locally, because it needs the
+release app's credentials and would publish for real.
 
 ## Action pinning
 
