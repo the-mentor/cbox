@@ -7,7 +7,7 @@ rest is the roadmap**.
 Phase 1 shipped `up`, `exec`, `down`, `list`, `name`, derived box naming, the GitHub
 two-secret credential model, environment-file loading, and the control socket that lets `exec`
 run while `up` is attached. Deferred to phase 2: `logs`, `inspect`, `stats`, `cp`,
-`--allow-net` / `--network disabled`, `--cpus` / `--memory` / `-u`, `-p/--publish`,
+`--allow-net` / `--network disabled`, `-u`, `-p/--publish`,
 `clean-cache`, and moving Anthropic auth onto secrets. Where a section below describes
 something in that second list, it is a specification rather than a description.
 
@@ -115,9 +115,9 @@ design below. The `cd` makes cbox's cwd genuinely the user's, which then require
 
 ```
 cbox up   [name] [-f] [-c] [-v host:box] [-e KEY[=VALUE]] [-i image]
-                 [--disk-size GB] [--env-file path] [--config path]
+                 [--disk-size GB] [--memory GB] [--cpus N] [--env-file path] [--config path]
                  [--secret NAME=ENV_VAR@hosts]
-                 [--cpus N] [--memory MiB] [-u user] [-p [host:]box[/proto]]
+                 [-u user] [-p [host:]box[/proto]]
                  [--allow-net HOST]... [--network disabled]
                  [-- cmd...]
 cbox exec [name] [-- cmd...]
@@ -516,7 +516,7 @@ real gap that gets wider the longer a box sits `Stopped` between sessions (the d
 a box that fails to start leaves no output and no way to see it, and stopped boxes are
 invisible without `-a`.
 
-**Resource limits.** `--cpus`, `--memory`, `-u/--user` map directly onto `BoxOptions`.
+**User.** `-u/--user` maps directly onto `BoxOptions`.
 
 **File transfer and ports.** `cbox cp` and `-p/--publish`. Neither has a driving need today —
 `-v`/`-c` already covers getting the workspace in, and the gateway is host-side and reached

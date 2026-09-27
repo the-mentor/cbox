@@ -152,7 +152,7 @@ just down my-box       # tear it down
 Closing the terminal (or losing it to a crash) stops the box rather than removing it — the
 disk and box record survive, and running `just up` again against the same name resumes it
 (cold-booting the VM again, not a suspend/resume) instead of erroring on the collision. That
-resumed box keeps the credentials, mounts, and disk size it had when first created, so `cbox`
+resumed box keeps the credentials, mounts, disk size, memory and CPUs it had when first created, so `cbox`
 warns on resume and specifically calls out any secret whose value has changed since (e.g. a
 rotated token) — `-f` is how to pick up today's settings instead. Pass `-d`/`--detach` to keep
 the old always-running behavior, so the box stays up and `just exec`/`just shell` can reach it
