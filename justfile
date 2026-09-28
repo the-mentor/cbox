@@ -2,6 +2,10 @@ set dotenv-load
 
 base_tag   := "cbox-base"
 custom_tag := "cbox-custom"
+# Base for custom/: the published multi-arch image by default. Override per
+# command, e.g. CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:pr-67 just build
+# to try a PR's base, or use `just build-local` to build base/ locally.
+base_image := env_var_or_default("CBOX_BASE_IMAGE", "ghcr.io/the-mentor/cbox-base:latest")
 registry   := "localhost:5551"
 compose    := "docker compose -f local-development/registry/docker-compose.yml"
 # Appends agentgateway/docker-compose.override.yml when it exists: an untracked,
@@ -160,25 +164,37 @@ gateway-generate-ui-password username="admin":
 registry-login *args:
     ./scripts/registry-login.py {{args}}
 
-# The three build recipes forward extra arguments straight to `docker build`, so
-# `--no-cache` (the reason this exists: Docker caches `RUN` layers by command text, so a
-# `curl | sh` installer or an unpinned `npm i -g` keeps serving a stale version until the
-# cache is bypassed) reaches both image builds. `build`/`build-image` pass the same args
-# down to their dependencies, so `just build --no-cache` rebuilds base and custom from
-# scratch. Any other `docker build` flag works the same way (e.g. `--pull`, `--progress=plain`).
+# The four build recipes (build, build-image, build-base, build-local) forward extra
+# arguments straight to `docker build`, so `--no-cache` (the reason this exists: Docker
+# caches `RUN` layers by command text, so a `curl | sh` installer or an unpinned `npm i -g`
+# keeps serving a stale version until the
+# cache is bypassed) reaches whichever image is being built. `build`/`build-image` build only
+# `custom/`, on the published base, so `just build --no-cache` rebuilds only that layer from
+# scratch; `just build-local --no-cache` rebuilds base/ too. Any other `docker build` flag
+# works the same way (e.g. `--pull`, `--progress=plain`).
 # Usage: just build-base [docker-build-args...]
 build-base *args:
     docker build {{args}} -t {{base_tag}} base/
 
+# Build custom/ on top of base_image and push it to the local registry.
+# --pull re-fetches a registry base (docker build never refreshes a base it
+# already has, so :latest would go stale); a bare local tag like cbox-base is
+# built as-is, since --pull would look for it on Docker Hub.
 # Usage: just build-image [docker-build-args...]
-build-image *args: (build-base args) registry-up
-    docker build {{args}} -t {{custom_tag}} custom/
+build-image *args: registry-up
+    docker build {{args}} {{ if base_image =~ '/' { "--pull" } else { "" } }} --build-arg BASE_IMAGE={{base_image}} -t {{custom_tag}} custom/
     docker tag {{custom_tag}} {{registry}}/library/{{custom_tag}}
     docker push {{registry}}/library/{{custom_tag}}
     just clean-cache
 
 # Usage: just build [docker-build-args...]
 build *args: (build-image args)
+
+# Build base/ locally and custom/ on top of it: the pre-published flow, for
+# changing base/ itself.
+# Usage: just build-local [docker-build-args...]
+build-local *args: (build-base args)
+    CBOX_BASE_IMAGE={{base_tag}} just build-image {{args}}
 
 # Build the cbox binary. Requires protoc >= 3.12 (brew install protobuf).
 build-cbox:

@@ -1,0 +1,7 @@
+---
+# These are hosted GitHub runner labels, not actually self-hosted; they're listed here
+# because the installed actionlint (1.7.12) predates the ubuntu-26.04 runner images.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04
+    - ubuntu-26.04-arm

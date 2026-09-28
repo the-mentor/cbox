@@ -93,3 +93,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
+
+  # Publishes cbox-base:<release tag> and moves :latest. Built from the
+  # released commit (not main's tip, which may have moved on) with the cache
+  # skipped, so the image carries today's upstream packages.
+  base-image:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/base-image.yml
+    with:
+      tags: |
+        ${{ needs.release-please.outputs.tag_name }}
+        latest
+      push: true
+      no-cache: true
+      ref: ${{ github.event.workflow_run.head_sha }}

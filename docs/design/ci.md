@@ -84,6 +84,11 @@ The macOS binary is not explicitly codesigned. The linker's ad-hoc signature was
 `boxlite`'s macOS backend on the one Apple Silicon machine tested. If a released binary fails
 there on another Mac, add a `codesign --sign - --entitlements ...` step at that point.
 
+`ci.yml` also has two image jobs, `base-image` and `custom-image`, gated by the `changes` job's
+own `base`/`custom` outputs the same way `build` is gated by `rust`. `CI` now needs both of them
+too. They're covered in `docs/design/images.md`, along with the reusable `base-image.yml`
+workflow they both call and its use from `release.yml`.
+
 ## `.github/workflows/release.yml`
 
 Trigger: `workflow_run` on `ci` completing for `main`. Both jobs are skipped unless that ci run

@@ -1,4 +1,7 @@
-FROM cbox-base
+# Published multi-arch base (see docs/design/images.md). `just build-local`
+# overrides this with a locally built cbox-base.
+ARG BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest
+FROM ${BASE_IMAGE}
 
 # The base image ends as USER sandbox-user; package installs need root.
 USER root

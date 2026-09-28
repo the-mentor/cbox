@@ -1,0 +1,207 @@
+name: base-image
+
+# Builds base/ as a multi-arch image (amd64 + arm64, each on a native runner,
+# no QEMU). ci.yml calls it for PRs, release.yml after a release; the weekly
+# schedule refreshes :latest between releases, because base/ installs the
+# newest Claude Code/gh/apt packages at build time and nothing else would
+# pick those up. See docs/design/images.md.
+on:
+  workflow_call:
+    inputs:
+      tags:
+        description: Tags to publish (no repository), comma- or newline-separated, e.g. "v0.1.4,latest"
+        type: string
+        required: true
+      push:
+        type: boolean
+        required: true
+      no-cache:
+        type: boolean
+        default: false
+      ref:
+        description: Git ref to build; empty means the triggering commit
+        type: string
+        default: ''
+    outputs:
+      image:
+        description: Full reference of the first pushed tag; empty when not pushed
+        value: ${{ jobs.merge.outputs.image }}
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: 'Comma-separated tags, e.g. "v0.1.4,latest". Empty: today''s date + latest'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/the-mentor/cbox-base
+
+jobs:
+  # Normalizes the three triggers into one set of values. Scheduled and manual
+  # runs are the weekly refresh: dated tag + latest (or the tags typed into the
+  # Run workflow form), pushed, cache skipped so the fixed-text install steps
+  # (npm install -g, apt upgrade) actually re-run, and always built from the
+  # default branch — workflow_dispatch can be fired from any branch in the UI,
+  # and that ref must never move :latest.
+  # Tags are split on commas or whitespace (the UI form is single-line) and
+  # checked against Docker's tag grammar here, so a typo fails in seconds
+  # instead of after both architecture builds.
+  prep:
+    runs-on: ubuntu-26.04
+    outputs:
+      tags: ${{ steps.v.outputs.tags }}
+      push: ${{ steps.v.outputs.push }}
+      no-cache: ${{ steps.v.outputs.no-cache }}
+      ref: ${{ steps.v.outputs.ref }}
+    steps:
+      - id: v
+        env:
+          EVENT: ${{ github.event_name }}
+          IN_TAGS: ${{ inputs.tags }}
+          IN_PUSH: ${{ inputs.push }}
+          IN_NO_CACHE: ${{ inputs.no-cache }}
+          IN_REF: ${{ inputs.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -f  # tags are data: no globbing when splitting them below
+          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
+            raw="${IN_TAGS:-$(date -u +%F),latest}"
+            push=true
+            no_cache=true
+            ref="$DEFAULT_BRANCH"
+          else
+            raw="$IN_TAGS"
+            push="$IN_PUSH"
+            no_cache="$IN_NO_CACHE"
+            ref="$IN_REF"
+          fi
+          tags=""
+          for t in ${raw//,/ }; do
+            if ! [[ "$t" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+              echo "::error::invalid image tag '$t': use letters, digits, '_', '.', '-' (max 128), without the repository"
+              exit 1
+            fi
+            tags="$tags$t"$'\n'
+          done
+          if [ -z "$tags" ]; then
+            echo "::error::no image tags given"
+            exit 1
+          fi
+          {
+            echo "tags<<EOF"
+            printf '%s' "$tags"
+            echo "EOF"
+            echo "push=$push"
+            echo "no-cache=$no_cache"
+            echo "ref=$ref"
+          } >> "$GITHUB_OUTPUT"
+          echo "tags=$(echo "$tags" | tr '\n' ' ') push=$push no-cache=$no_cache ref=${ref:-<trigger>}"
+
+  build:
+    needs: prep
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-26.04
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-26.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prep.outputs.ref }}
+          persist-credentials: false
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Fork and Dependabot PR tokens can't write packages; callers pass
+      # push=false for them, so never log in then.
+      - if: needs.prep.outputs.push == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pushes by digest only; the merge job attaches tags once both
+      # architectures exist, so a half-built run never moves a tag.
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: base
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          no-cache: ${{ needs.prep.outputs.no-cache == 'true' }}
+          cache-from: type=gha,scope=base-${{ matrix.arch }}
+          cache-to: type=gha,scope=base-${{ matrix.arch }},mode=max
+          outputs: ${{ needs.prep.outputs.push == 'true' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || 'type=cacheonly' }}
+
+      - if: needs.prep.outputs.push == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - if: needs.prep.outputs.push == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: [prep, build]
+    if: needs.prep.outputs.push == 'true'
+    runs-on: ubuntu-26.04
+    outputs:
+      image: ${{ steps.first.outputs.image }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: first
+        env:
+          TAGS: ${{ needs.prep.outputs.tags }}
+        run: |
+          set -eu
+          args=""
+          for t in $TAGS; do args="$args -t $IMAGE:$t"; done
+          srcs=""
+          for d in /tmp/digests/*; do srcs="$srcs $IMAGE@sha256:$(basename "$d")"; done
+          # shellcheck disable=SC2086 # word-splitting the -t/source lists is intended
+          docker buildx imagetools create $args $srcs
+          first="$IMAGE:$(echo $TAGS | awk '{print $1}')"
+          # A tag missing either architecture would boot on one host type only.
+          plats="$(docker buildx imagetools inspect "$first" --format '{{range .Manifest.Manifests}}{{.Platform.Architecture}} {{end}}')"
+          echo "$first platforms: $plats"
+          case "$plats" in *amd64*) ;; *) echo "::error::$first has no amd64 image"; exit 1 ;; esac
+          case "$plats" in *arm64*) ;; *) echo "::error::$first has no arm64 image"; exit 1 ;; esac
+          echo "image=$first" >> "$GITHUB_OUTPUT"
