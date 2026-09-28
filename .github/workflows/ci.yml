@@ -41,8 +41,11 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           RELEASE_PR: ${{ github.head_ref == 'release-please--branches--main' && github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          # match <regex>: does the diff touch a matching path?
-          match() { git diff --name-only "$BASE" HEAD | grep -qE "$1"; }
+          # Changed paths, listed once. match greps the list rather than
+          # piping git diff into grep -q: under the runner's pipefail, grep -q
+          # exiting early SIGPIPEs git diff on a large diff and reads as "no match".
+          changed="$(git diff --name-only "$BASE" HEAD 2>/dev/null || true)"
+          match() { printf '%s\n' "$changed" | grep -qE "$1"; }
           if [ "$RELEASE_PR" = true ]; then
             rust=false base=false custom=false
           elif [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
