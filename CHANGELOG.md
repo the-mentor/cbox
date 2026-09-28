@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/the-mentor/cbox/compare/v0.1.4...v0.1.5) (2026-09-28)
+
+
+### Bug Fixes
+
+* **cbox:** delete the box home on down ([#69](https://github.com/the-mentor/cbox/issues/69)) ([3ad5a31](https://github.com/the-mentor/cbox/commit/3ad5a31c5d3ba0cd66fc765ba325c62679bad601))
+
 ## [0.1.4](https://github.com/the-mentor/cbox/compare/v0.1.3...v0.1.4) (2026-09-28)
 
 
