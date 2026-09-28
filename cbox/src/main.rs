@@ -7,6 +7,7 @@ mod env;
 mod envfile;
 mod hookfwd;
 mod naming;
+mod netpolicy;
 mod proto;
 mod secrets;
 mod server;
