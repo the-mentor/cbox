@@ -91,6 +91,10 @@ loopback proxy, so every running box reaches any port published here exactly as 
 the host itself. "Loopback-only" narrows the audience to "this machine plus every box booted
 from it," not to "the host alone."
 
+`cbox up --allow-net` does not change this. cbox adds the gateway IP `192.168.127.254` to every
+non-empty allow-list, and an allow-list rule has no port syntax, so a restricted box still
+reaches every published host port. See `docs/design/allow-net.md`.
+
 This was a real, confirmed defect: agentgateway's admin API (port 15001) was briefly
 published on 127.0.0.1, and a box was confirmed able to `curl` `/config_dump` and read back
 real credential values. Its blast radius is bigger than that one endpoint: `admin_router`

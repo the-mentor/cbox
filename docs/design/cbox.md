@@ -7,9 +7,11 @@ rest is the roadmap**.
 Phase 1 shipped `up`, `exec`, `down`, `list`, `name`, derived box naming, the GitHub
 two-secret credential model, environment-file loading, and the control socket that lets `exec`
 run while `up` is attached. Deferred to phase 2: `logs`, `inspect`, `stats`, `cp`,
-`--allow-net` / `--network disabled`, `-u`, `-p/--publish`,
-`clean-cache`, and moving Anthropic auth onto secrets. Where a section below describes
-something in that second list, it is a specification rather than a description.
+`-u`, `-p/--publish`,
+`clean-cache`, and moving Anthropic auth onto secrets. Phase 2 has since shipped
+`--memory`/`--cpus` and `--allow-net`/`--network disabled` (see `docs/design/allow-net.md`).
+Where a section below describes something in that deferred list, it is a specification rather
+than a description.
 
 Claims are tagged **verified** (measured against `boxlite 0.9.7`, the CLI, or a live box),
 **read from source** (asserted by the crate's own code but not exercised), or **open**. The
@@ -498,18 +500,34 @@ registries rather than an error — the box still boots against `docker.io`.
 
 These exist in the BoxLite CLI today and the justfile has never used them.
 
-**Egress allow-list.** `--allow-net HOST` (repeatable; exact host, `*.example.com`, IP, or
-CIDR) restricts egress and DNS-sinkholes everything else; `--network disabled` removes the
-interface entirely. This is the strongest security control available here — the box runs an
-autonomous agent over your source with a GitHub token, and an allow-list is what stops a
-prompt-injected agent or a poisoned dependency from shipping that source anywhere.
+**Egress allow-list.** Shipped; the full design is `docs/design/allow-net.md`. `--allow-net
+RULE` (repeatable) takes `@preset` (`@github`, `@npm`, `@crates`, `@pypi`, `@debian`, compiled
+into cbox), an exact host, `*.domain`, an IP, or a CIDR; `--network disabled` removes the
+interface entirely. The box runs an autonomous agent over your source with a GitHub token, and
+an allow-list is what narrows where a prompt-injected agent or a poisoned dependency can ship it.
 
-Two constraints make it opt-in rather than a default. It costs `WebFetch` and `WebSearch`,
-which run inside the box against arbitrary domains. And any non-empty allow-list **must**
-include `192.168.127.254` (`host.boxlite.internal`) or the baked MCP config cannot resolve —
-which, since the list has no port syntax, restores reachability to every published host port
-at once. **The ports policy in `agentgateway.md` stays exactly as load-bearing as written**,
-and `--allow-net` must not be described as having relaxed it.
+How BoxLite 0.10.4 enforces it (**read from source**, `runtime/options.rs:941-965`,
+`net/gvproxy/config.rs:85-89`; to be re-tagged **verified** once measured on a live box): IP
+and CIDR rules match the destination address; hostname rules match the TLS SNI / HTTP `Host`,
+so they only cover HTTP(S) — SSH needs an IP/CIDR rule — and a hostname-only list denies all
+UDP. **DNS is not filtered**, so DNS lookups remain a low-bandwidth exfiltration channel. Hosts
+covered by a configured secret stay reachable on :443 without a rule, so the secret list is a
+second egress gate. Every allowed host is an upload channel: `@github` means all of GitHub,
+including pushing to an attacker's repo with an attacker's token; until repo-scoped access
+exists (see `allow-net.md`, Out of scope), prefer fine-grained PATs limited to specific repos.
+
+It is opt-in: it costs `WebFetch`, and a box with no flags stays open. cbox always adds
+`192.168.127.254` (`host.boxlite.internal`) to a non-empty list so the baked MCP config and the
+Anthropic route keep working — and since the list has no port syntax, that restores
+reachability to every published host port at once. **The ports policy in `agentgateway.md`
+stays exactly as load-bearing as written**, and `--allow-net` must not be described as having
+relaxed it. The policy is fixed at creation; on reuse, a requested policy that differs from the
+recorded one prompts to recreate, continue as is, or abort (abort with no terminal).
+
+An allow-list and the untested secret-scoping property (Open questions) bound each other's
+failure: if scoping is broken, the allow-list limits where a leaked credential can go; if
+egress is open, scoping is the only thing between a prompt-injected agent and exfiltration.
+Neither substitutes for the other.
 
 **Observability.** `cbox logs [-f] [-n]`, `list -a`, `inspect`, `stats [-s]`. These close a
 real gap that gets wider the longer a box sits `Stopped` between sessions (the default now):
@@ -642,6 +660,6 @@ These can still change the design.
    the justfile. This is the milestone that retires the `GH_TOKEN` passthrough. Land the
    secrets-survival integration check with it — `exec` cannot be called done until the
    fallback path is known to keep substitution.
-3. Add observability, then `--allow-net`, then resource limits, then `cp`/`--publish`.
+3. Add observability, then `--allow-net`, then resource limits, then `cp`/`--publish`. (`--allow-net` and resource limits have shipped.)
 4. Settle `clean-cache` — port the sqlite workaround or replace it, and record which.
 5. Revisit Anthropic only if the `x-api-key` and Node CA questions both resolve favorably.
