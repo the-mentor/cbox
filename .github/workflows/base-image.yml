@@ -9,7 +9,7 @@ on:
   workflow_call:
     inputs:
       tags:
-        description: Newline-separated tags (no repository), e.g. "v0.1.4\nlatest"
+        description: Tags to publish (no repository), comma- or newline-separated, e.g. "v0.1.4,latest"
         type: string
         required: true
       push:
@@ -29,6 +29,11 @@ on:
   schedule:
     - cron: '17 6 * * 1'
   workflow_dispatch:
+    inputs:
+      tags:
+        description: 'Comma-separated tags, e.g. "v0.1.4,latest". Empty: today''s date + latest'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -39,10 +44,14 @@ env:
 
 jobs:
   # Normalizes the three triggers into one set of values. Scheduled and manual
-  # runs are the weekly refresh: dated tag + latest, pushed, cache skipped so
-  # the fixed-text install steps (npm install -g, apt upgrade) actually re-run,
-  # and always built from the default branch — workflow_dispatch can be fired
-  # from any branch in the UI, and that ref must never move :latest.
+  # runs are the weekly refresh: dated tag + latest (or the tags typed into the
+  # Run workflow form), pushed, cache skipped so the fixed-text install steps
+  # (npm install -g, apt upgrade) actually re-run, and always built from the
+  # default branch — workflow_dispatch can be fired from any branch in the UI,
+  # and that ref must never move :latest.
+  # Tags are split on commas or whitespace (the UI form is single-line) and
+  # checked against Docker's tag grammar here, so a typo fails in seconds
+  # instead of after both architecture builds.
   prep:
     runs-on: ubuntu-26.04
     outputs:
@@ -60,21 +69,33 @@ jobs:
           IN_REF: ${{ inputs.ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          set -f  # tags are data: no globbing when splitting them below
           if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
-            tags="$(date -u +%F)
-          latest"
+            raw="${IN_TAGS:-$(date -u +%F),latest}"
             push=true
             no_cache=true
             ref="$DEFAULT_BRANCH"
           else
-            tags="$IN_TAGS"
+            raw="$IN_TAGS"
             push="$IN_PUSH"
             no_cache="$IN_NO_CACHE"
             ref="$IN_REF"
           fi
+          tags=""
+          for t in ${raw//,/ }; do
+            if ! [[ "$t" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+              echo "::error::invalid image tag '$t': use letters, digits, '_', '.', '-' (max 128), without the repository"
+              exit 1
+            fi
+            tags="$tags$t"$'\n'
+          done
+          if [ -z "$tags" ]; then
+            echo "::error::no image tags given"
+            exit 1
+          fi
           {
             echo "tags<<EOF"
-            echo "$tags"
+            printf '%s' "$tags"
             echo "EOF"
             echo "push=$push"
             echo "no-cache=$no_cache"

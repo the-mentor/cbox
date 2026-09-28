@@ -40,7 +40,13 @@ A reusable workflow with three triggers:
   pushes `latest` and today's date, cache skipped.
 - **`workflow_dispatch`**: same as `schedule` — always the default branch, regardless of which
   branch it's dispatched from — for re-running the weekly build by hand and for the very first
-  publish.
+  publish. Its optional `tags` field takes comma-separated tags (e.g. `v0.1.4,latest`, to
+  re-publish a release by hand); left empty, it pushes today's date and `latest`.
+
+`tags` accepts commas or newlines in every trigger, because the Run workflow form is a single
+line. `prep` splits and checks each tag against Docker's tag rules (letters, digits, `_`, `.`,
+`-`, at most 128 characters, not starting with `.` or `-`) and fails on an empty list, so a typo
+fails in seconds instead of after both architecture builds.
 
 GitHub disables a scheduled workflow after 60 days with no repository activity, which would
 silently stop the weekly refresh; re-enable it from the workflow's page under the Actions tab.
