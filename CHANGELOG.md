@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/the-mentor/cbox/compare/v0.1.3...v0.1.4) (2026-09-28)
+
+
+### Features
+
+* **ci:** build and publish the cbox-base image ([#67](https://github.com/the-mentor/cbox/issues/67)) ([d2ae43a](https://github.com/the-mentor/cbox/commit/d2ae43a25549ffed5d1e708ed9cd673892610ba8))
+
 ## [0.1.3](https://github.com/the-mentor/cbox/compare/v0.1.2...v0.1.3) (2026-09-27)
 
 
