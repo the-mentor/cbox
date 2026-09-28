@@ -35,7 +35,8 @@ pub const CPUS: u8 = 2;
 /// than assumed: `docker run --rm cbox-custom sh -c 'command -v
 /// sleep && sleep --version'` reports `/usr/bin/sleep`, GNU coreutils 9.7,
 /// against the actual image this repo builds
-/// (`custom/Dockerfile` FROM `cbox-base` FROM `node:26-trixie-slim`).
+/// (`custom/Dockerfile` builds on the published `ghcr.io/the-mentor/cbox-base`,
+/// or a local `cbox-base` via `just build-local`, itself FROM `node:26-trixie-slim`).
 /// coreutils is also an "essential" Debian package present in every
 /// `-slim` variant, so this isn't a fluke of this one image either, and
 /// GNU coreutils has supported the `infinity` duration since well before

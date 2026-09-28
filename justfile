@@ -164,9 +164,10 @@ gateway-generate-ui-password username="admin":
 registry-login *args:
     ./scripts/registry-login.py {{args}}
 
-# The three build recipes forward extra arguments straight to `docker build`, so
-# `--no-cache` (the reason this exists: Docker caches `RUN` layers by command text, so a
-# `curl | sh` installer or an unpinned `npm i -g` keeps serving a stale version until the
+# The four build recipes (build, build-image, build-base, build-local) forward extra
+# arguments straight to `docker build`, so `--no-cache` (the reason this exists: Docker
+# caches `RUN` layers by command text, so a `curl | sh` installer or an unpinned `npm i -g`
+# keeps serving a stale version until the
 # cache is bypassed) reaches whichever image is being built. `build`/`build-image` build only
 # `custom/`, on the published base, so `just build --no-cache` rebuilds only that layer from
 # scratch; `just build-local --no-cache` rebuilds base/ too. Any other `docker build` flag

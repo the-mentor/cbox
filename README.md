@@ -125,7 +125,7 @@ and `build-image` build only `custom/`, on top of `CBOX_BASE_IMAGE` (the publish
 
 ```bash
 just build --no-cache                  # rebuild custom from scratch, on a freshly pulled base
-just build-base --no-cache             # same, base image only
+just build-base --no-cache             # rebuild base/ only, locally, ignoring the layer cache
 just build-local --no-cache            # rebuild base + custom locally, ignoring the layer cache
 ```
 

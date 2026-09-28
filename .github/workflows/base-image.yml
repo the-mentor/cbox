@@ -40,7 +40,9 @@ env:
 jobs:
   # Normalizes the three triggers into one set of values. Scheduled and manual
   # runs are the weekly refresh: dated tag + latest, pushed, cache skipped so
-  # the fixed-text install steps (npm install -g, apt upgrade) actually re-run.
+  # the fixed-text install steps (npm install -g, apt upgrade) actually re-run,
+  # and always built from the default branch — workflow_dispatch can be fired
+  # from any branch in the UI, and that ref must never move :latest.
   prep:
     runs-on: ubuntu-26.04
     outputs:
@@ -56,13 +58,14 @@ jobs:
           IN_PUSH: ${{ inputs.push }}
           IN_NO_CACHE: ${{ inputs.no-cache }}
           IN_REF: ${{ inputs.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
             tags="$(date -u +%F)
           latest"
             push=true
             no_cache=true
-            ref=""
+            ref="$DEFAULT_BRANCH"
           else
             tags="$IN_TAGS"
             push="$IN_PUSH"

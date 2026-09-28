@@ -28,7 +28,7 @@ without trusting a shared image.
 | `vX.Y.Z` | `release.yml`, after `release-please` cuts a release | pinning the exact base a release shipped with |
 | `latest` | every release, and the weekly rebuild | what `custom/Dockerfile` and `just build` use by default |
 | `YYYY-MM-DD` | the weekly scheduled rebuild | pinning a known-good base from before a bad upstream release, without waiting for the next `vX.Y.Z` |
-| `pr-<n>` | `ci.yml`, for a same-repo PR that touches `base/` | trying that PR's base before merge, including in `custom-image`'s own build |
+| `pr-<n>` | `ci.yml`, for a same-repo PR that changes `base/`, `base-image.yml`, or `ci.yml` | trying that PR's base before merge, including in `custom-image`'s own build |
 
 ## `base-image.yml`
 
@@ -36,10 +36,14 @@ A reusable workflow with three triggers:
 - **`workflow_call`**, from `ci.yml` and `release.yml`, with `tags`/`push`/`no-cache`/`ref` inputs
   and one output, `image` — the full reference of the first pushed tag, empty when nothing was
   pushed.
-- **`schedule`**, weekly (`17 6 * * 1`, Monday ~06:00 UTC): builds `main`, pushes `latest` and
-  today's date, cache skipped.
-- **`workflow_dispatch`**: same as `schedule`, for re-running the weekly build by hand and for the
-  very first publish.
+- **`schedule`**, weekly (`17 6 * * 1`, Monday ~06:00 UTC): builds the repo's default branch,
+  pushes `latest` and today's date, cache skipped.
+- **`workflow_dispatch`**: same as `schedule` — always the default branch, regardless of which
+  branch it's dispatched from — for re-running the weekly build by hand and for the very first
+  publish.
+
+GitHub disables a scheduled workflow after 60 days with no repository activity, which would
+silently stop the weekly refresh; re-enable it from the workflow's page under the Actions tab.
 
 The `build` job is a matrix of native runners — `linux/amd64` on `ubuntu-26.04`, `linux/arm64` on
 `ubuntu-26.04-arm` — with no QEMU emulation. `.github/actionlint.yaml` lists both labels because
@@ -97,6 +101,9 @@ changing `base/` itself, since a change there has nothing to test against until 
 `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:pr-67 just build` tries a PR's published base before
 it merges.
 
+To boot a box on a locally built base rather than the published one: `just build-local && just
+build-cbox && just up` (`just up-dev` always builds against the published base).
+
 ## Errors and recovery
 
 | Case | Behaviour |
@@ -114,6 +121,14 @@ it merges.
 GHCR creates a new package as private on its first push. After that first push, make `cbox-base`
 public in the package's own settings, so pulls need no login and fork PRs can still build
 `custom/` against it.
+
+Rollout, in order:
+1. On the implementation PR, confirm `:pr-<n>` built multi-arch and `custom-image` passed.
+2. Merge, then make the `cbox-base` package public in its GHCR package settings.
+3. Right after merge, run `base-image.yml` via `workflow_dispatch` to publish `latest` and a
+   dated tag — nothing has pushed `:latest` yet at this point.
+4. Until `:latest` exists, `just build`/`just up-dev` can't pull a base to build against; use
+   `just build-local` instead.
 
 ## Not covered
 

@@ -58,7 +58,7 @@ override (e.g. `just exec -- bash`) to exec something other than `claude --conti
 default) in the running box; against a `Stopped` box it says so and starts it (a ~2s cold boot)
 before attaching, rather than either failing or doing that silently.
 
-`build`, `build-image`, and `build-base` are variadic: everything after the recipe name is
+`build`, `build-image`, `build-base`, and `build-local` are variadic: everything after the recipe name is
 forwarded verbatim to `docker build` (`--pull`, `--progress=plain` and friends all work). `build`
 and `build-image` build only `custom/`, on top of `CBOX_BASE_IMAGE` (default
 `ghcr.io/the-mentor/cbox-base:latest`, the published base, re-pulled on every build), so `just
