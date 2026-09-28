@@ -26,8 +26,13 @@ run without it.
 - **Recorded per box.** `LiteBox::info()` → `BoxInfo.network: Option<NetworkInfo>`, whose
   `outbound.allow_net` / `outbound.mode` is BoxLite's own record of the policy
   (`runtime/types.rs:329-400`). Drift detection reads this; nothing new goes in the sidecar.
-- Secret hosts are **not** auto-allowed: `--secret`/the GitHub preset does not open GitHub's
-  hosts by itself.
+- **Secret hosts bypass the list on :443** (`runtime/options.rs:958-962`): a host matched by a
+  configured `Secret` is reachable on port 443 without a rule of its own. So a box holding the
+  GitHub secret can reach GitHub's secret hosts over HTTPS even under `--allow-net @npm`.
+  `allow_net` is not the only egress gate; the secret list is a second one.
+- Hostname-only lists deny **all UDP** (hostname rules need SNI/Host, which UDP lacks); IP/CIDR
+  rules cover UDP too. The implicit gateway IP therefore keeps UDP to the gateway open. The
+  gateway's DNS resolver and DHCP are internal services and unaffected.
 
 Consequences that shape the design and must be documented:
 
@@ -103,6 +108,12 @@ When the effective policy is not `Open`, `up` prints:
 ```
 cbox: egress restricted to: 192.168.127.254 (gateway, implicit), api.github.com, github.com, ...
 cbox: note: the gateway IP opens every published host port, not just :15002/:15003 (see docs/design/agentgateway.md)
+```
+
+When the box has secrets, one more line names the hosts reachable on :443 through them:
+
+```
+cbox: also reachable on :443 via secrets: api.github.com, github.com, ...
 ```
 
 For `Disabled`: `cbox: network disabled`, plus a warning when the command is `claude` that it
