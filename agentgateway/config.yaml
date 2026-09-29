@@ -31,6 +31,13 @@ gateways:
   llm-gateway:
     port: 15002
     protocol: HTTP
+    # CORS lets the admin UI's LLM playground (:15000, a different origin)
+    # call these routes from browser JS. Boxes call :15002 server-to-server
+    # and are unaffected either way.
+    cors:
+      allowOrigins: ["http://127.0.0.1:15000", "http://localhost:15000"]
+      allowMethods: ["GET", "POST", "OPTIONS"]
+      allowHeaders: ["*"]
   # Admin UI — on by default, behind basic auth (see `ui:` below). Separate
   # from the unauthenticated admin API (ADMIN_ADDR, port 15001), which this
   # repo deliberately never publishes — see docs/design/agentgateway.md.
@@ -60,6 +67,15 @@ mcp:
   # Serves /mcp and /sse automatically on mcp-gateway (port 15003) — the box's
   # baked http://host.boxlite.internal:15003/mcp needs no change here.
   gateways: mcp-gateway
+  # The admin UI's MCP playground checks this (not mcp-gateway's own cors)
+  # and only accepts a literal "*" for allowHeaders. Mcp-Session-Id must be
+  # exposed or browser JS can't read the session back.
+  policies:
+    cors:
+      allowOrigins: ["http://127.0.0.1:15000", "http://localhost:15000"]
+      allowMethods: ["GET", "POST", "DELETE", "OPTIONS"]
+      allowHeaders: ["*"]
+      exposeHeaders: ["Mcp-Session-Id"]
   targets:
     # GitHub's official MCP server (ghcr.io/github/github-mcp-server), run as
     # the `github-mcp` sibling compose service in HTTP mode (see
@@ -117,6 +133,14 @@ mcp:
 llm:
   gateways: llm-gateway
   models: []
+  # The admin UI playground checks this (not llm-gateway's own cors) before
+  # it will send anything. Same origins as llm-gateway's cors above.
+  policies:
+    cors:
+      allowOrigins: ["http://127.0.0.1:15000", "http://localhost:15000"]
+      allowMethods: ["GET", "POST", "OPTIONS"]
+      # The UI only accepts a literal "*" here, not an explicit list.
+      allowHeaders: ["*"]
 
 # LLM routes. See docs/design/agentgateway.md for the credential-asymmetry
 # design and why it's enforced only by justfile's `llm_vars`, not the schema.
