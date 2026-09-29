@@ -121,6 +121,17 @@ the block binds its own listener on port 4000 (unpublished in compose, but point
 like Models, Keys, and Playground show up too, and don't match how this config routes. The
 `/api` and `/claude` routes are unaffected.
 
+**The UI playgrounds read `mcp.policies.cors` and `llm.policies.cors`, not the gateway-level
+`cors` blocks.** The LLM and MCP playgrounds call `:15002`/`:15003` from browser JS on the
+`:15000` origin, and before sending anything they check the CORS policy on the top-level
+`mcp:`/`llm:` block. The check needs the origin listed, `GET` and `POST` allowed, a literal `*`
+in `allowHeaders` (an explicit list fails it), and, for MCP only, `Mcp-Session-Id` in
+`exposeHeaders`. The gateway-level `cors` blocks are still needed: they answer preflights on
+the listeners (including the `/claude` and `/api` routes). None of this affects boxes, which
+call these ports server-to-server. The gateway also forwards the browser's `Origin` to each MCP
+target, so a sibling server that validates origins (e.g. `terraform-mcp-server`'s default
+strict mode) must list the `:15000` origins too, or the playground's `initialize` gets a 403.
+
 The lesson generalizes: before adding or uncommenting a port in `docker-compose.yml`, ask
 whether the thing behind it authenticates its own requests. Binding `127.0.0.1` answers "is
 this reachable from the LAN," not "is this reachable from a box."
