@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/the-mentor/cbox/compare/v0.1.5...v0.1.6) (2026-09-29)
+
+
+### Bug Fixes
+
+* **agentgateway:** allow the admin UI playgrounds through CORS ([#72](https://github.com/the-mentor/cbox/issues/72)) ([492a94b](https://github.com/the-mentor/cbox/commit/492a94b4e9db5147cd22c5b76264156a32475005))
+
 ## [0.1.5](https://github.com/the-mentor/cbox/compare/v0.1.4...v0.1.5) (2026-09-28)
 
 
