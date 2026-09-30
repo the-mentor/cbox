@@ -6,6 +6,7 @@ mod config;
 mod env;
 mod envfile;
 mod hookfwd;
+mod mitm_ca;
 mod naming;
 mod proto;
 mod secrets;
