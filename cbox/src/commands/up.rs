@@ -177,6 +177,20 @@ pub async fn run(args: UpArgs) -> Result<()> {
     // from Stopped, or was already Running.
     litebox.start().await.context("failed to start the box")?;
 
+    // Only now, with the new box's disk created, can we tell which cached
+    // disk images are still in use. An unchanged image is shared by the new
+    // box and kept; one left over from an older image is not. Best-effort:
+    // a failed sweep costs disk space, not the session.
+    if args.force {
+        match sweep_disk_images(&home) {
+            Ok(freed) if !freed.is_empty() => {
+                println!("cbox: deleted {} unused disk image(s)", freed.len())
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("cbox: warning: could not sweep old disk images: {e:#}"),
+        }
+    }
+
     if has_github {
         run_git_bootstrap(&litebox).await;
     }
@@ -204,6 +218,71 @@ pub async fn run(args: UpArgs) -> Result<()> {
     // task didn't touch that, so keep dropping it here rather than changing
     // what `cbox up` reports to the shell.
     result.map(|_code| ())
+}
+
+/// Delete every `images/disk-images/*.ext4` in `home` that no qcow2 in the
+/// home uses as its backing file, returning what was deleted.
+///
+/// BoxLite caches one ext4 per image digest and never collects them, so each
+/// image rebuild leaves a ~2GB file behind. A box's disk (and any snapshot of
+/// it) is a qcow2 whose header names its backing file by canonical path, so
+/// scanning every qcow2 in the home finds every disk image still in use. Any
+/// qcow2 that can't be read aborts the sweep rather than risk deleting a disk
+/// image something depends on.
+fn sweep_disk_images(home: &std::path::Path) -> Result<Vec<PathBuf>> {
+    let dir = home.join("images/disk-images");
+    let Ok(entries) = std::fs::read_dir(&dir) else { return Ok(vec![]) };
+
+    let mut in_use = std::collections::HashSet::new();
+    let mut stack = vec![home.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).with_context(|| format!("reading {}", d.display()))? {
+            let e = e?;
+            let path = e.path();
+            // `images/` holds extracted layer rootfs trees: no box disks, but
+            // absolute symlinks that would lead the walk onto the host's own
+            // filesystem. file_type() doesn't follow symlinks for the rest.
+            if e.file_type()?.is_dir() && path != home.join("images") {
+                stack.push(path);
+            } else if path.extension().is_some_and(|x| x == "qcow2") {
+                if let Some(backing) = qcow2_backing(&path)? {
+                    in_use.insert(std::fs::canonicalize(&backing).unwrap_or(backing));
+                }
+            }
+        }
+    }
+
+    let mut freed = vec![];
+    for e in entries {
+        let path = e?.path();
+        if path.extension().is_none_or(|x| x != "ext4") {
+            continue;
+        }
+        if !in_use.contains(&std::fs::canonicalize(&path)?) {
+            std::fs::remove_file(&path).with_context(|| format!("deleting {}", path.display()))?;
+            freed.push(path);
+        }
+    }
+    Ok(freed)
+}
+
+/// The backing file named in a qcow2 header, if any (qcow2 spec: magic at 0,
+/// backing path offset as a u64 at 8, its length as a u32 at 16, big-endian).
+fn qcow2_backing(path: &std::path::Path) -> Result<Option<PathBuf>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
+    let mut h = [0u8; 20];
+    f.read_exact(&mut h).with_context(|| format!("reading {}", path.display()))?;
+    anyhow::ensure!(h[..4] == *b"QFI\xfb", "{} is not a qcow2 file", path.display());
+    let offset = u64::from_be_bytes(h[8..16].try_into().unwrap());
+    let len = u32::from_be_bytes(h[16..20].try_into().unwrap()) as usize;
+    if offset == 0 || len == 0 {
+        return Ok(None);
+    }
+    let mut buf = vec![0u8; len];
+    f.seek(SeekFrom::Start(offset))?;
+    f.read_exact(&mut buf).with_context(|| format!("reading {}", path.display()))?;
+    Ok(Some(PathBuf::from(String::from_utf8(buf)?)))
 }
 
 /// Create the box's home directory if needed, and ensure it is owner-only.
@@ -303,7 +382,7 @@ fn reuse_message(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{reuse_message, secure_box_home};
+    use super::{reuse_message, secure_box_home, sweep_disk_images};
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
@@ -343,5 +422,47 @@ mod tests {
         assert_eq!(mode, 0o700, "a loosely-permissioned existing home must be tightened, got {mode:o}");
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn sweep_keeps_disk_images_a_box_uses_and_deletes_the_rest() {
+        let home = std::env::temp_dir().join(format!("cbox-up-test-sweep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let images = home.join("images/disk-images");
+        let disks = home.join("boxes/abc/disks");
+        std::fs::create_dir_all(&images).unwrap();
+        std::fs::create_dir_all(&disks).unwrap();
+        let live = images.join("sha256-new-r1.ext4");
+        let stale = images.join("sha256-old-r1.ext4");
+        std::fs::write(&live, b"").unwrap();
+        std::fs::write(&stale, b"").unwrap();
+
+        // Minimal qcow2 header whose backing path is `live`, canonicalized
+        // the way BoxLite writes it.
+        let backing = std::fs::canonicalize(&live).unwrap();
+        let backing = backing.to_str().unwrap().as_bytes();
+        let mut qcow = vec![0u8; 64];
+        qcow[..4].copy_from_slice(b"QFI\xfb");
+        qcow[8..16].copy_from_slice(&64u64.to_be_bytes());
+        qcow[16..20].copy_from_slice(&(backing.len() as u32).to_be_bytes());
+        qcow.extend_from_slice(backing);
+        std::fs::write(disks.join("disk.qcow2"), &qcow).unwrap();
+        // A qcow2 without a backing file must not abort the sweep.
+        let mut plain = vec![0u8; 64];
+        plain[..4].copy_from_slice(b"QFI\xfb");
+        std::fs::write(disks.join("guest-rootfs.qcow2"), &plain).unwrap();
+        // Extracted layers are never walked: a non-qcow2 `.qcow2` there, or a
+        // symlink out of the home, must not abort or escape the sweep.
+        let layer = home.join("images/extracted/sha256-layer");
+        std::fs::create_dir_all(&layer).unwrap();
+        std::fs::write(layer.join("junk.qcow2"), b"not qcow2").unwrap();
+        std::os::unix::fs::symlink("/", home.join("boxes/abc/root-link")).unwrap();
+
+        let freed = sweep_disk_images(&home).unwrap();
+        assert_eq!(freed, vec![stale.clone()]);
+        assert!(live.exists());
+        assert!(!stale.exists());
+
+        std::fs::remove_dir_all(&home).unwrap();
     }
 }
