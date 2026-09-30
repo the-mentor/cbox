@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use boxlite::{BoxStatus, BoxliteOptions, BoxliteRuntime};
 
-use crate::{attach, client, config, naming};
+use crate::{attach, client, config, mitm_ca, naming};
 
 /// `std::process::exit` truncates its argument to the low 8 bits on Unix, so
 /// any negative code must be normalized before reaching it. Negative codes
@@ -37,6 +37,8 @@ pub async fn run(
 
     match client::route(&home).await? {
         client::Route::Socket(stream) => {
+            // A live control socket means the box is running.
+            mitm_ca::warn_if_expiring(&home, &resolved.name);
             let code = client::proxy(stream, &cmd).await?;
             if code != 0 {
                 std::process::exit(exit_status(code));
@@ -51,7 +53,7 @@ pub async fn run(
                 .map(|p| config::load_registries(&p))
                 .unwrap_or_default();
             let runtime = BoxliteRuntime::new(BoxliteOptions {
-                home_dir: home,
+                home_dir: home.clone(),
                 image_registries: registries,
             })
             .context("failed to open the BoxLite runtime")?;
@@ -82,9 +84,13 @@ pub async fn run(
                     "cbox: {} is {status}; starting it (cold boot, not a resume -- ~2s)...",
                     resolved.name
                 );
+                // See `mitm_ca`: a saved CA is reloaded without an expiry check.
+                mitm_ca::renew_before_start(&home, &resolved.name);
                 litebox.start().await.with_context(|| {
                     format!("failed to start {} (was {status})", resolved.name)
                 })?;
+            } else {
+                mitm_ca::warn_if_expiring(&home, &resolved.name);
             }
 
             let code = attach::attach(&litebox, &cmd).await?;
