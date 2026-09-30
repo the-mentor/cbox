@@ -7,7 +7,7 @@ This is not a change log — it doesn't track who did what or when, only what th
 
 ## Why
 
-`base/` builds slowly (Debian + Node + Claude Code + `gh` + `uv`) and used to be a purely local
+`base/` builds slowly (Debian + Node + Claude Code + `gh` + `uv` + `pre-commit`) and used to be a purely local
 build — every machine that ran `just up-dev` paid that cost itself. It also goes stale: nothing
 rebuilds it unless someone runs `just build-base` by hand, so the Claude Code version baked in
 drifts further from upstream the longer a machine goes without a from-scratch rebuild. Publishing

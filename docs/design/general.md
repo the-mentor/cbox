@@ -9,7 +9,7 @@ the host-side agentgateway service, see `docs/design/agentgateway.md`.
 
 ## Two-layer image
 
-`base/Dockerfile` builds `cbox-base` (Debian + Node + Claude Code + `gh` + `uv`) and
+`base/Dockerfile` builds `cbox-base` (Debian + Node + Claude Code + `gh` + `uv` + `pre-commit`) and
 `custom/Dockerfile` layers `cbox-custom` on top of it. The split exists because the
 two layers change at very different rates: the base layer's contents — the OS, the language
 runtime, the CLIs — are slow to build and rarely need to change, while the custom layer is
