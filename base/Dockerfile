@@ -17,9 +17,17 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o 
     && apt install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g @anthropic-ai/claude-code
+# npm keeps a ~100MB copy of the downloaded package in its cache, and node
+# leaves a compile cache in /tmp; neither is used at runtime.
+RUN npm install -g @anthropic-ai/claude-code \
+    && npm cache clean --force \
+    && rm -rf /tmp/node-compile-cache
 
-RUN curl -s https://ohmyposh.dev/install.sh | bash -s -- -d /usr/local/bin
+# Themes go to a shared path: the default (root's cache) is unreadable by
+# sandbox-user. Use one with --config $POSH_THEMES_PATH/<theme>.omp.json.
+ENV POSH_THEMES_PATH=/usr/local/share/oh-my-posh/themes
+RUN curl -s https://ohmyposh.dev/install.sh | bash -s -- -d /usr/local/bin -t "$POSH_THEMES_PATH" \
+    && rm -rf /root/.cache/oh-my-posh
 
 # Wrap the claude binary to pre-approve ANTHROPIC_API_KEY in ~/.claude.json at
 # startup, silencing the "Detected a custom API key" interactive prompt in
