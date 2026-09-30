@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.9](https://github.com/the-mentor/cbox/compare/v0.1.8...v0.1.9) (2026-09-30)
+
+
+### Performance Improvements
+
+* **base:** drop build caches and share oh-my-posh themes ([#79](https://github.com/the-mentor/cbox/issues/79)) ([c4ec9a1](https://github.com/the-mentor/cbox/commit/c4ec9a12c9476cfd8d2ab6cb3425c812d8472d74))
+
 ## [0.1.8](https://github.com/the-mentor/cbox/compare/v0.1.7...v0.1.8) (2026-09-30)
 
 
