@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/the-mentor/cbox/compare/v0.1.6...v0.1.7) (2026-09-30)
+
+
+### Bug Fixes
+
+* **cbox:** sweep unused disk images on up --force ([#74](https://github.com/the-mentor/cbox/issues/74)) ([ea4e05b](https://github.com/the-mentor/cbox/commit/ea4e05b1f470a47b1d5d85ab58275c3d954ab4f8))
+
 ## [0.1.6](https://github.com/the-mentor/cbox/compare/v0.1.5...v0.1.6) (2026-09-29)
 
 
