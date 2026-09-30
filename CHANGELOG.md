@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8](https://github.com/the-mentor/cbox/compare/v0.1.7...v0.1.8) (2026-09-30)
+
+
+### Features
+
+* **base:** bump uv to 0.12.21 and install pre-commit ([#77](https://github.com/the-mentor/cbox/issues/77)) ([91d5e7c](https://github.com/the-mentor/cbox/commit/91d5e7cda2d48a36fa51f33051647d408cda56ba))
+
 ## [0.1.7](https://github.com/the-mentor/cbox/compare/v0.1.6...v0.1.7) (2026-09-30)
 
 
