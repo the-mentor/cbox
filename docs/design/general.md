@@ -48,7 +48,9 @@ index, plus sweeping any blob files (manifests/configs/layers/extracted) that no
 referencing row, so the next `boxlite run` is forced to re-pull. Disk-images are deliberately
 left out of that sweep: BoxLite's index doesn't record which image a given disk-image belongs
 to, so an orphaned one can't be told apart from a live one without risking a costly, or
-outright breaking, re-pull.
+outright breaking, re-pull. `cbox up -f` sweeps them instead, after the recreated box has
+started: every box disk is a qcow2 naming its disk-image as its backing file, so any
+disk-image no qcow2 in the home points at is unused and gets deleted.
 
 ## Credentials: environment-variable passthrough, not baked images
 
