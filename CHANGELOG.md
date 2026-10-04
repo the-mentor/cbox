@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11](https://github.com/the-mentor/cbox/compare/v0.1.10...v0.1.11) (2026-10-04)
+
+
+### Bug Fixes
+
+* **cbox:** stop the hookfwd drain test racing on ETXTBSY ([#85](https://github.com/the-mentor/cbox/issues/85)) ([936e23b](https://github.com/the-mentor/cbox/commit/936e23b9647d11a8aa45d01293d181f08c3a5e87))
+
 ## [0.1.10](https://github.com/the-mentor/cbox/compare/v0.1.9...v0.1.10) (2026-10-04)
 
 
