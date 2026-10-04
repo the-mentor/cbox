@@ -515,7 +515,7 @@ into cbox), an exact host, `*.domain`, an IP, or a CIDR; `--network disabled` re
 interface entirely. The box runs an autonomous agent over your source with a GitHub token, and
 an allow-list is what narrows where a prompt-injected agent or a poisoned dependency can ship it.
 
-How BoxLite 0.10.4 enforces it (**read from source**, `runtime/options.rs:941-965`,
+How BoxLite 0.10.5 enforces it (**read from source**, `runtime/options.rs:1106-1130`,
 `net/gvproxy/config.rs:85-89`; to be re-tagged **verified** once measured on a live box): IP
 and CIDR rules match the destination address; hostname rules match the TLS SNI / HTTP `Host`,
 so they only cover HTTP(S) — SSH needs an IP/CIDR rule — and a hostname-only list denies all

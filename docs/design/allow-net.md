@@ -13,10 +13,10 @@ created. With no network flags a box stays fully open, exactly as today — no e
 changes. The host-side gateway is always reachable from a restricted box, since Claude cannot
 run without it.
 
-## What BoxLite 0.10.4 actually provides (read from source)
+## What BoxLite 0.10.5 actually provides (read from source)
 
 - `BoxOptions.network: NetworkSpec` — `Enabled { allow_net: Vec<String> }` or `Disabled`
-  (`runtime/options.rs:971-981`). Empty `allow_net` = unrestricted; non-empty = only listed
+  (`runtime/options.rs:1136-1146`). Empty `allow_net` = unrestricted; non-empty = only listed
   destinations; `Disabled` = no network backend, no `eth0` in the guest.
 - **Matching** (`net/gvproxy/config.rs:85-89`): IP and CIDR rules match the destination address;
   hostname rules match the peeked TLS SNI / HTTP `Host` and are dialed by name by the gateway.
@@ -26,7 +26,7 @@ run without it.
 - **Recorded per box.** `LiteBox::info()` → `BoxInfo.network: Option<NetworkInfo>`, whose
   `outbound.allow_net` / `outbound.mode` is BoxLite's own record of the policy
   (`runtime/types.rs:329-400`). Drift detection reads this; nothing new goes in the sidecar.
-- **Secret hosts bypass the list on :443** (`runtime/options.rs:958-962`): a host matched by a
+- **Secret hosts bypass the list on :443** (`runtime/options.rs:1122-1126`): a host matched by a
   configured `Secret` is reachable on port 443 without a rule of its own. So a box holding the
   GitHub secret can reach GitHub's secret hosts over HTTPS even under `--allow-net @npm`.
   `allow_net` is not the only egress gate; the secret list is a second one.

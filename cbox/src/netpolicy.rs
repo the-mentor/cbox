@@ -1,6 +1,6 @@
 //! Egress policy: `--allow-net` / `--network disabled` -> BoxLite `NetworkSpec`.
 //!
-//! Pure logic, no runtime calls. BoxLite 0.10.4 matches IP/CIDR rules on the
+//! Pure logic, no runtime calls. BoxLite 0.10.5 matches IP/CIDR rules on the
 //! destination address and hostname rules on the TLS SNI / HTTP Host; DNS is
 //! not filtered, and hosts covered by a configured `Secret` stay reachable on
 //! :443 regardless of the list. See docs/design/allow-net.md.

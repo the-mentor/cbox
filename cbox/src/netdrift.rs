@@ -1,6 +1,6 @@
 //! Reusing a box whose network policy differs from the one requested.
 //!
-//! `get_or_create` ignores a reused box's options, and BoxLite 0.10.4 does
+//! `get_or_create` ignores a reused box's options, and BoxLite 0.10.5 does
 //! not compare network policy on reuse, so without this a requested
 //! `--allow-net` could be silently dropped: a security control that looks
 //! applied and is not. The policy can't be changed in place, so the only
