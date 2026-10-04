@@ -8,6 +8,7 @@ mod envfile;
 mod hookfwd;
 mod mitm_ca;
 mod naming;
+mod netpolicy;
 mod proto;
 mod secrets;
 mod server;
