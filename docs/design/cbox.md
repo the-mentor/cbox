@@ -348,6 +348,29 @@ the fallback would have had to be deleted rather than repaired: a session that h
 lost substitution is indistinguishable from a working one until a request is rejected, which
 is worse than refusing to start.
 
+### The MITM CA expires after 24 hours
+
+The proxy above re-signs HTTPS with a per-box CA that BoxLite 0.10.4 generates itself, valid
+for **24 hours** (`net/ca.rs`: `not_after = now + 24h`), saved at
+`<box home>/boxes/<box_id>/ca/{cert,key}.pem`. Every later start reloads the saved CA without
+checking its expiry, so a box more than a day old fails every HTTPS request through the proxy
+(`git` reports `certificate has expired`). Only boxes with secrets have a `ca/` folder.
+
+**Renewal on start.** Before starting a box that isn't running — `cbox up` resuming a
+`Stopped` box, or `cbox exec` starting one — cbox deletes both files when the CA has less than
+12 hours (half its life) left, and prints `cbox: renewed <name>'s MITM CA (was expiring)`.
+BoxLite then generates a fresh CA, and because a started box re-runs guest init, the guest
+appends the new CA to its trust store. The expired copies stay there but are harmless: git,
+curl and Python were all tested to trust the valid CA of the same name when an expired one
+precedes it. Time left is the `cert.pem` mtime + 24h (BoxLite writes the file once, at
+generation), which ties this to BoxLite's hard-coded lifetime. The whole step is best-effort:
+a failed check or delete only warns.
+
+**A running box can't be renewed.** The proxy loads the CA once at start and BoxLite has no
+reload, and reattaching to a `Running` box skips guest init. Restarting the box would kill the
+attached session, so `up` and `exec` against a running box only warn when its CA has under 12
+hours left (or has expired): stop the box and run `cbox up` again to renew it — no `-f` needed.
+
 ## Credential model
 
 ### GitHub moves to secrets
