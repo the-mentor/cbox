@@ -521,7 +521,7 @@ fn reused_policy_lines(
                 && !secret_names.is_empty()
             {
                 lines.push(format!(
-                    "cbox: also reachable on :443 via this box's secrets ({})",
+                    "cbox: egress also allowed on :443 to the hosts of this box's secrets ({})",
                     secret_names.join(", ")
                 ));
             }
@@ -594,7 +594,7 @@ mod tests {
         let lines = reused_policy_lines(&Recorded::Known(p.clone()), &names, &[], true);
         assert_eq!(
             lines.last().unwrap(),
-            "cbox: also reachable on :443 via this box's secrets (gh, npm)"
+            "cbox: egress also allowed on :443 to the hosts of this box's secrets (gh, npm)"
         );
         let lines = reused_policy_lines(&Recorded::Known(p), &[], &[], true);
         assert!(!lines.iter().any(|l| l.contains("secrets")), "{lines:?}");
@@ -613,7 +613,8 @@ mod tests {
         let lines = reused_policy_lines(&Recorded::Known(p), &names, &hosts, true);
         assert_eq!(
             lines.last().unwrap(),
-            "cbox: also reachable on :443 via secrets: api.github.com, github.com"
+            "cbox: egress also allowed on :443 to api.github.com, github.com \
+             (secret hosts bypass the allow-list)"
         );
         assert!(!lines.iter().any(|l| l.contains("this box's secrets")), "{lines:?}");
     }
@@ -627,7 +628,7 @@ mod tests {
         assert!(lines[0].starts_with("cbox: continuing with existing policy"), "{lines:?}");
         assert!(lines.iter().any(|l| l.starts_with("cbox: egress restricted to: ")), "{lines:?}");
         assert!(lines.iter().any(|l| l.contains("the gateway IP opens every")), "{lines:?}");
-        assert!(lines.iter().any(|l| l.contains("via this box's secrets (gh)")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("hosts of this box's secrets (gh)")), "{lines:?}");
 
         let lines = continued_policy_lines(&Recorded::Unknown, &names, &[], true);
         assert_eq!(lines.len(), 1, "{lines:?}");

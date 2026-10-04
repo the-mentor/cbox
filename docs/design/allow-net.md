@@ -111,10 +111,10 @@ cbox: egress restricted to: 192.168.127.254 (gateway, implicit), api.github.com,
 cbox: note: the gateway IP opens every published host port, not just :15002/:15003 (see docs/design/agentgateway.md)
 ```
 
-When the box has secrets, one more line names the hosts reachable on :443 through them:
+When the box has secrets, one more line names the hosts the box can still reach on :443 because of them:
 
 ```
-cbox: also reachable on :443 via secrets: api.github.com, github.com, ...
+cbox: egress also allowed on :443 to api.github.com, github.com, ... (secret hosts bypass the allow-list)
 ```
 
 On reuse, BoxLite doesn't expose the box's secrets, so cbox records each secret's hosts in
@@ -124,7 +124,7 @@ field existed has only secret names in its sidecar, so it gets this line instead
 recreated:
 
 ```
-cbox: also reachable on :443 via this box's secrets (gh, ...)
+cbox: egress also allowed on :443 to the hosts of this box's secrets (gh, ...)
 ```
 
 A reuse with no flags whose policy BoxLite didn't record prints

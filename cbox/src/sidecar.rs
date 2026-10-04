@@ -31,7 +31,7 @@ pub struct Sidecar {
     pub secret_hashes: BTreeMap<String, u64>,
     /// Hosts each secret is substituted for, keyed by secret name. BoxLite
     /// keeps a box's secrets but doesn't report them back, and those hosts
-    /// stay reachable on :443 even under `--allow-net`, so a reused box
+    /// remain egress destinations on :443 even under `--allow-net`, so a reused box
     /// names them from here. Hostnames only, never values. Empty for boxes
     /// created before this field existed.
     #[serde(default)]

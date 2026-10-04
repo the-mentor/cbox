@@ -194,7 +194,7 @@ pub fn policy_lines(policy: &Policy, secret_hosts: &[String], runs_claude: bool)
             ];
             if !secret_hosts.is_empty() {
                 lines.push(format!(
-                    "cbox: also reachable on :443 via secrets: {}",
+                    "cbox: egress also allowed on :443 to {} (secret hosts bypass the allow-list)",
                     secret_hosts.join(", ")
                 ));
             }
@@ -399,11 +399,12 @@ mod tests {
         let lines = policy_lines(&allow, &[], true);
         assert!(lines[0].starts_with("cbox: egress restricted to: "), "{lines:?}");
         assert!(lines.iter().any(|l| l.contains("every published host port")), "{lines:?}");
-        assert!(!lines.iter().any(|l| l.contains("via secrets")), "{lines:?}");
+        assert!(!lines.iter().any(|l| l.contains("secret")), "{lines:?}");
 
         let lines = policy_lines(&allow, &s(&["github.com"]), true);
         assert!(
-            lines.iter().any(|l| l == "cbox: also reachable on :443 via secrets: github.com"),
+            lines.iter().any(|l| l
+                == "cbox: egress also allowed on :443 to github.com (secret hosts bypass the allow-list)"),
             "{lines:?}"
         );
 
