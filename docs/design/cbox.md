@@ -15,8 +15,8 @@ Claims are tagged **verified** (measured against `boxlite 0.9.7`, the CLI, or a 
 **read from source** (asserted by the crate's own code but not exercised), or **open**. The
 split is load-bearing: two of the open items can still change the design.
 
-**The crate is now pinned at `boxlite 0.10.4`.** The measurements above were taken at 0.9.7.
-The upgrade was checked against the 0.10.4 source rather than re-measured. Three things
+**The crate is now pinned at `boxlite 0.10.5`** (see below for what 0.10.5 changed). The
+measurements above were taken at 0.9.7. The 0.10.4 upgrade was checked against its source rather than re-measured. Three things
 matter to cbox. First, `auto_remove` is deprecated in favor of `auto_delete`, and cbox sets
 `auto_delete: Some(0)` explicitly, because `None` falls back to `auto_remove`, which
 defaults to `true`. Second, the SQLite schema goes from v8 to v10, and the migration is
@@ -26,6 +26,15 @@ if phase 2 adds `--allow-net`, the gateway ports must be allowlisted explicitly.
 for the upgrade is security: GHSA-c7v3-78jq-x45m (in 0.9.7 the secret-substitution proxy
 forwarded to whatever IP the guest chose; 0.10.3+ dials by hostname) and a macOS OCI-layer
 escape outside the rootfs (#1393, fixed in 0.10.1).
+
+**0.10.5**, checked against its source the same way, changes two things that reach cbox. The
+per-box MITM CA that secrets are re-signed with (`<box home>/boxes/<box_id>/ca/`) is now issued
+for 10 years instead of 24 hours, and BoxLite renews it in place, keeping the key, on any cold
+start where it has 30 days or less left (`net/ca.rs`, boxlite#1684). That retires cbox's own
+renewal workaround (#82, reverted). A box created under 0.10.4 still has a 24-hour CA until its
+next stop and start, which renews it. Inbound networking now defaults to disabled
+(boxlite#1677). cbox publishes no ports, so this changes nothing today; a future
+`-p/--publish` must enable inbound explicitly.
 
 **Where the evidence lives.** Every **verified** claim below states its measurement inline, so
 this document stands on its own. The measurements were originally taken by two throwaway
@@ -215,7 +224,7 @@ anyone who wants the box to outlive the session so `cbox exec` can reach it late
 `cbox up` first.
 
 **`auto_delete: Some(0)` always**, regardless of `detach`. With `detach: true`, `BoxOptions::
-sanitize()` (`boxlite-0.10.4/src/runtime/options.rs:579`) rejects remove-on-stop outright
+sanitize()` (`boxlite-0.10.5/src/runtime/options.rs:579`) rejects remove-on-stop outright
 ("Detached boxes should use auto_delete=0 ... for manual lifecycle control") — this part of
 the earlier analysis was correct and is unchanged. With `detach: false`, `auto_delete: Some(0)`
 is now what *preserves* the box across the watchdog stopping it, so a later `cbox up` can
@@ -234,7 +243,7 @@ agent coming up again (~2.2s for `guest_connect` alone, measured), but not a *re
 `--force` keeps meaning what it always meant: remove and recreate from scratch, discarding
 whatever the box had accumulated.
 
-**This is a restart, never a suspend/resume.** BoxLite (0.9.7 through 0.10.4) has no guest-memory
+**This is a restart, never a suspend/resume.** BoxLite (0.9.7 through 0.10.5) has no guest-memory
 snapshot/restore and no libkrun pause-and-resume FFI; `stop()` then `start()` boots a new
 kernel and a new guest agent from the preserved disk. Nothing in cbox should ever describe
 this as "resuming a paused VM" — it resumes the *box* (its disk and identity), not a live
@@ -347,29 +356,6 @@ for the lock contention rather than a requirement for credentials. Had this gone
 the fallback would have had to be deleted rather than repaired: a session that has silently
 lost substitution is indistinguishable from a working one until a request is rejected, which
 is worse than refusing to start.
-
-### The MITM CA expires after 24 hours
-
-The proxy above re-signs HTTPS with a per-box CA that BoxLite 0.10.4 generates itself, valid
-for **24 hours** (`net/ca.rs`: `not_after = now + 24h`), saved at
-`<box home>/boxes/<box_id>/ca/{cert,key}.pem`. Every later start reloads the saved CA without
-checking its expiry, so a box more than a day old fails every HTTPS request through the proxy
-(`git` reports `certificate has expired`). Only boxes with secrets have a `ca/` folder.
-
-**Renewal on start.** Before starting a box that isn't running — `cbox up` resuming a
-`Stopped` box, or `cbox exec` starting one — cbox deletes both files when the CA has less than
-12 hours (half its life) left, and prints `cbox: renewed <name>'s MITM CA (was expiring)`.
-BoxLite then generates a fresh CA, and because a started box re-runs guest init, the guest
-appends the new CA to its trust store. The expired copies stay there but are harmless: git,
-curl and Python were all tested to trust the valid CA of the same name when an expired one
-precedes it. Time left is the `cert.pem` mtime + 24h (BoxLite writes the file once, at
-generation), which ties this to BoxLite's hard-coded lifetime. The whole step is best-effort:
-a failed check or delete only warns.
-
-**A running box can't be renewed.** The proxy loads the CA once at start and BoxLite has no
-reload, and reattaching to a `Running` box skips guest init. Restarting the box would kill the
-attached session, so `up` and `exec` against a running box only warn when its CA has under 12
-hours left (or has expired): stop the box and run `cbox up` again to renew it — no `-f` needed.
 
 ## Credential model
 
