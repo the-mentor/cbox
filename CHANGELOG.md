@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.10](https://github.com/the-mentor/cbox/compare/v0.1.9...v0.1.10) (2026-10-04)
+
+
+### Bug Fixes
+
+* **cbox:** renew an expiring MITM CA when a box starts ([#82](https://github.com/the-mentor/cbox/issues/82)) ([481e7ae](https://github.com/the-mentor/cbox/commit/481e7aec5615e44de024789b2aad8ef852e80848)), closes [#81](https://github.com/the-mentor/cbox/issues/81)
+
 ## [0.1.9](https://github.com/the-mentor/cbox/compare/v0.1.8...v0.1.9) (2026-09-30)
 
 
