@@ -214,8 +214,16 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let log = dir.join("log");
         let cmd = dir.join("slow-hook");
-        std::fs::write(&cmd, format!("#!/bin/sh\nsleep 0.2\ncat >> '{}'\necho >> '{}'\n", log.display(), log.display()))
+        // Not written in-process: a test on another thread that forks at the
+        // wrong moment would inherit our write fd to the script, and Linux
+        // refuses to exec a file open for writing (ETXTBSY), which `run`
+        // swallows, so the log never appears. Writing a plain data file and
+        // letting a `cp` child create the script keeps the write fd out of
+        // this process entirely.
+        let src = dir.join("slow-hook.src");
+        std::fs::write(&src, format!("#!/bin/sh\nsleep 0.2\ncat >> '{}'\necho >> '{}'\n", log.display(), log.display()))
             .unwrap();
+        assert!(std::process::Command::new("cp").arg(&src).arg(&cmd).status().unwrap().success());
         std::fs::set_permissions(&cmd, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
 
         let (tx, rx) = mpsc::unbounded_channel();
