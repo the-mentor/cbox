@@ -25,7 +25,8 @@ run without it.
 - **Immutable after creation.** There is no API to change `allow_net` on an existing box.
 - **Recorded per box.** `LiteBox::info()` → `BoxInfo.network: Option<NetworkInfo>`, whose
   `outbound.allow_net` / `outbound.mode` is BoxLite's own record of the policy
-  (`runtime/types.rs:329-400`). Drift detection reads this; nothing new goes in the sidecar.
+  (`runtime/types.rs:329-400`). Drift detection reads this; the network policy itself is not
+  copied into the sidecar.
 - **Secret hosts bypass the list on :443** (`runtime/options.rs:1122-1126`): a host matched by a
   configured `Secret` is reachable on port 443 without a rule of its own. So a box holding the
   GitHub secret can reach GitHub's secret hosts over HTTPS even under `--allow-net @npm`.
@@ -116,8 +117,11 @@ When the box has secrets, one more line names the hosts reachable on :443 throug
 cbox: also reachable on :443 via secrets: api.github.com, github.com, ...
 ```
 
-On reuse, BoxLite doesn't expose the box's secret hosts, so the line instead names the
-secrets from cbox's sidecar (names only, never values), when the recorded policy is an allow-list:
+On reuse, BoxLite doesn't expose the box's secrets, so cbox records each secret's hosts in
+its `cbox.json` sidecar at creation (`secret_hosts`, hostnames only, never values) and prints
+the same line from there when the recorded policy is an allow-list. A box created before that
+field existed has only secret names in its sidecar, so it gets this line instead until it is
+recreated:
 
 ```
 cbox: also reachable on :443 via this box's secrets (gh, ...)
