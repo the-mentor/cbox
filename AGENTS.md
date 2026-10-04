@@ -60,9 +60,7 @@ says so and names any secret whose value has since changed; `-f` is how to pick 
 settings. `exec` takes the same optional box name and `-- <cmd>`
 override (e.g. `just exec -- bash`) to exec something other than `claude --continue` (its
 default) in the running box; against a `Stopped` box it says so and starts it (a ~2s cold boot)
-before attaching, rather than either failing or doing that silently. Both renew a box's
-24-hour MITM CA (the one secrets are re-signed with) when starting a non-running box whose CA
-has under 12 hours left, and only warn for a running one — see `docs/design/cbox.md`.
+before attaching, rather than either failing or doing that silently.
 
 `build`, `build-image`, `build-base`, and `build-local` are variadic: everything after the recipe name is
 forwarded verbatim to `docker build` (`--pull`, `--progress=plain` and friends all work). `build`
