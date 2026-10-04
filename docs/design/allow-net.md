@@ -1,6 +1,6 @@
 # `--allow-net` / `--network disabled` — design
 
-Status: approved in brainstorming, not yet implemented. Tracks item 2 of issue #39.
+Status: implemented; live verification pending (see Verification). Tracks item 2 of issue #39.
 
 ## Intent
 

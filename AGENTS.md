@@ -45,7 +45,11 @@ variable — with the `-e` value winning on a key collision), `-i`/`--image` (ov
 path passed to `boxlite run`; defaults to `custom_tag`, i.e. `cbox-custom`),
 `--disk-size <GB>` (container rootfs disk size; defaults to 10GB, headroom for in-box `docker
 pull`/`apt install`/`npm install`/build caches), `--memory <GB>` / `--cpus <N>` (guest RAM in whole GiB and vCPU count; default 4 GiB / 2,
-above BoxLite's own 1 GiB / 1, which is too little to `cargo build` in the box), `-d`/`--detach` (let the box outlive this
+above BoxLite's own 1 GiB / 1, which is too little to `cargo build` in the box), `--allow-net <RULE>` (repeatable; restrict egress to `@github`/`@npm`/`@crates`/`@pypi`/`@debian`
+presets, hosts, `*.domains`, IPs or CIDRs — the gateway is always added; without it the box is
+unrestricted) and `--network disabled` (no network; `claude` then can't reach the API), both
+fixed at creation — on reuse a differing request prompts to recreate, continue, or abort (see
+`docs/design/allow-net.md`), `-d`/`--detach` (let the box outlive this
 session so `cbox exec` can reach it later; without it, the default, closing the terminal stops
 the VM — the disk and box record survive, and running `cbox up` again resumes it, a real
 restart rather than a suspend), and `-- <cmd>` (override the executable launched in the box;
