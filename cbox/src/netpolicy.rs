@@ -215,6 +215,29 @@ pub fn policy_lines(policy: &Policy, secret_hosts: &[String], runs_claude: bool)
     }
 }
 
+/// Warning for the one way `--allow-net` silently breaks Claude: it runs in
+/// the box, has no gateway `ANTHROPIC_BASE_URL`, and so talks to
+/// api.anthropic.com directly, a host the allow-list doesn't cover.
+pub fn direct_anthropic_warning(
+    policy: &Policy,
+    runs_claude: bool,
+    base_url: Option<&str>,
+) -> Option<String> {
+    let Policy::Allow(list) = policy else { return None };
+    if !runs_claude || base_url.is_some_and(|u| u.contains("host.boxlite.internal")) {
+        return None;
+    }
+    if list.iter().any(|r| r == "api.anthropic.com" || r == "*.anthropic.com") {
+        return None;
+    }
+    Some(
+        "cbox: warning: claude talks to api.anthropic.com directly (no gateway \
+         ANTHROPIC_BASE_URL), which this allow-list blocks; add --allow-net \
+         api.anthropic.com or use the gateway"
+            .to_string(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,5 +411,21 @@ mod tests {
         assert_eq!(lines[0], "cbox: network disabled");
         assert!(lines.iter().any(|l| l.contains("warning") && l.contains("claude")), "{lines:?}");
         assert_eq!(policy_lines(&Policy::Disabled, &[], false), s(&["cbox: network disabled"]));
+    }
+
+    #[test]
+    fn direct_anthropic_warning_only_when_claude_goes_direct_under_an_allow_list() {
+        let allow = resolve(&s(&["@npm"]), false).unwrap();
+        let gw = Some("http://host.boxlite.internal:15002/api");
+        assert!(direct_anthropic_warning(&allow, true, None).unwrap().contains("api.anthropic.com"));
+        assert!(direct_anthropic_warning(&allow, true, Some("https://proxy.example")).is_some());
+        assert!(direct_anthropic_warning(&allow, true, gw).is_none());
+        assert!(direct_anthropic_warning(&allow, false, None).is_none());
+        assert!(direct_anthropic_warning(&Policy::Open, true, None).is_none());
+        assert!(direct_anthropic_warning(&Policy::Disabled, true, None).is_none());
+        for rule in ["api.anthropic.com", "*.anthropic.com"] {
+            let ok = resolve(&s(&[rule]), false).unwrap();
+            assert!(direct_anthropic_warning(&ok, true, None).is_none(), "{rule}");
+        }
     }
 }
