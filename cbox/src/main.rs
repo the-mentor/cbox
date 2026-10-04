@@ -80,6 +80,15 @@ enum Commands {
         /// Mirrors `boxlite run`'s `-d`.
         #[arg(short = 'd', long = "detach")]
         detach: bool,
+        /// Restrict egress to this rule (repeatable): @preset (github, npm,
+        /// crates, pypi, debian), a host, *.domain, an IP or a CIDR. The
+        /// gateway is always added. Without it the box is unrestricted.
+        #[arg(long = "allow-net", value_name = "RULE")]
+        allow_net: Vec<String>,
+        /// `disabled` removes the box's network entirely.
+        #[arg(long = "network", value_name = "MODE", value_parser = ["disabled"],
+              conflicts_with = "allow_net")]
+        network: Option<String>,
         #[arg(last = true)]
         cmd: Vec<String>,
     },
@@ -114,11 +123,12 @@ async fn main() -> Result<()> {
         }
         Commands::Up {
             name, force, cwd_mount, volumes, env_flags, image, config, secret_flags, env_file, cmd,
-            disk_size, memory, cpus, detach,
+            disk_size, memory, cpus, detach, allow_net, network,
         } => {
             commands::up::run(commands::up::UpArgs {
                 name, force, cwd_mount, volumes, env_flags, image, config, secret_flags, env_file,
                 cmd, disk_size_gb: disk_size, memory_gb: memory, cpus, detach,
+                allow_net, network_disabled: network.is_some(),
             })
             .await?;
         }
@@ -132,6 +142,33 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_net(args: &[&str]) -> Result<(Vec<String>, Option<String>), clap::Error> {
+        let cli = Cli::try_parse_from(["cbox", "up"].iter().chain(args))?;
+        match cli.command {
+            Commands::Up { allow_net, network, .. } => Ok((allow_net, network)),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn allow_net_is_repeatable() {
+        let (rules, net) = parse_net(&["--allow-net", "@github", "--allow-net", "10.0.0.0/8"]).unwrap();
+        assert_eq!(rules, vec!["@github".to_string(), "10.0.0.0/8".to_string()]);
+        assert_eq!(net, None);
+    }
+
+    #[test]
+    fn network_accepts_only_disabled() {
+        assert_eq!(parse_net(&["--network", "disabled"]).unwrap().1, Some("disabled".into()));
+        assert!(parse_net(&["--network", "open"]).is_err());
+    }
+
+    #[test]
+    fn allow_net_and_network_disabled_conflict() {
+        let err = parse_net(&["--allow-net", "@npm", "--network", "disabled"]).unwrap_err().to_string();
+        assert!(err.contains("--network") || err.contains("--allow-net"), "{err}");
+    }
 
     fn parse_up(args: &[&str]) -> Result<(Option<u32>, Option<u8>), clap::Error> {
         let cli = Cli::try_parse_from(["cbox", "up"].iter().chain(args))?;

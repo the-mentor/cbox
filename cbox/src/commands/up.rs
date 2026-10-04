@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use boxlite::{BoxCommand, BoxStatus, BoxliteOptions, BoxliteRuntime, LiteBox};
 
-use crate::{attach, boxopts, config, env, envfile, mitm_ca, naming, secrets, sidecar};
+use crate::{attach, boxopts, config, env, envfile, mitm_ca, naming, netpolicy, secrets, sidecar};
 
 pub struct UpArgs {
     pub name: Option<String>,
@@ -27,12 +27,17 @@ pub struct UpArgs {
     /// comment for the full reasoning; default is `false`, matching what
     /// the pre-cbox justfile actually passed to `boxlite run`.
     pub detach: bool,
+    /// `--allow-net` rules, unresolved.
+    pub allow_net: Vec<String>,
+    /// `--network disabled`.
+    pub network_disabled: bool,
 }
 
 pub async fn run(args: UpArgs) -> Result<()> {
     let cwd = std::env::current_dir().context("cannot read current directory")?;
     let resolved = naming::resolve(args.name.as_deref(), &cwd);
     let name = resolved.name;
+    let network = netpolicy::resolve(&args.allow_net, args.network_disabled)?;
 
     // Load the env file, if any, before anything below reads the process
     // environment: passthrough selection, secret source lookup, and GitHub
@@ -119,6 +124,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
         memory_gb: args.memory_gb,
         cpus: args.cpus,
         detach: args.detach,
+        network,
     };
     let options = boxopts::build(&flags, built.secrets, plain)?;
 

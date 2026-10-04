@@ -56,6 +56,9 @@ pub struct UpFlags {
     /// Whether the box should outlive this process. Mirrors `boxlite run`'s
     /// `-d`/`--detach`; see `build` for the full reasoning.
     pub detach: bool,
+    /// Egress policy from `--allow-net` / `--network disabled`. Fixed at
+    /// creation: BoxLite has no API to change it on an existing box.
+    pub network: crate::netpolicy::Policy,
 }
 
 /// `hostPath:boxPath[:ro|rw]`
@@ -176,6 +179,7 @@ pub fn build(
         //    collision. `cbox down` remains the only thing that removes a
         //    box either way.
         auto_delete: Some(0),
+        network: flags.network.to_spec(),
         ..Default::default()
     })
 }
@@ -195,7 +199,25 @@ mod tests {
             memory_gb: None,
             cpus: None,
             detach: false,
+            network: crate::netpolicy::Policy::Open,
         }
+    }
+
+    #[test]
+    fn the_network_policy_reaches_box_options() {
+        use boxlite::NetworkSpec;
+        let opts = build(&flags(), vec![], vec![]).unwrap();
+        assert!(matches!(opts.network, NetworkSpec::Enabled { ref allow_net } if allow_net.is_empty()));
+
+        let mut f = flags();
+        f.network = crate::netpolicy::resolve(&["@npm".to_string()], false).unwrap();
+        let opts = build(&f, vec![], vec![]).unwrap();
+        assert!(matches!(opts.network, NetworkSpec::Enabled { ref allow_net }
+            if allow_net == &vec!["192.168.127.254".to_string(), "registry.npmjs.org".to_string()]));
+
+        let mut f = flags();
+        f.network = crate::netpolicy::Policy::Disabled;
+        assert!(matches!(build(&f, vec![], vec![]).unwrap().network, NetworkSpec::Disabled));
     }
 
     #[test]
