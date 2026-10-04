@@ -79,7 +79,7 @@ pub enum Policy { Open, Allow(Vec<String>), Disabled }
 - The gateway is added by **IP**, not hostname: gateway traffic is plain HTTP, and IP matching
   does not depend on the `Host` header.
 - `Policy::to_spec() -> NetworkSpec`.
-- `Policy::from_info(Option<&NetworkInfo>) -> Recorded` where `Recorded` is a `Policy` or
+- `Recorded::from_info(Option<&NetworkInfo>) -> Recorded` where `Recorded` is a `Policy` or
   `Unknown`. `Enabled` with an empty list reads as `Open`; a missing `NetworkInfo` reads as
   `Unknown`, which never compares equal to a requested policy.
 - Equality between policies is order- and duplicate-insensitive.
@@ -116,6 +116,25 @@ When the box has secrets, one more line names the hosts reachable on :443 throug
 cbox: also reachable on :443 via secrets: api.github.com, github.com, ...
 ```
 
+On reuse, BoxLite doesn't expose the box's secret hosts, so the line instead names the
+secrets from cbox's sidecar (names only, never values), when the recorded policy is an allow-list:
+
+```
+cbox: also reachable on :443 via this box's secrets (gh, ...)
+```
+
+A reuse with no flags whose policy BoxLite didn't record prints
+`cbox: box network policy unknown (not recorded by BoxLite)`. The `[c]` answer to the drift
+prompt prints `continuing with existing policy` followed by the same lines.
+
+For a new or recreated allow-list box running the agent with no gateway `ANTHROPIC_BASE_URL`
+(it would talk to api.anthropic.com directly) and no `api.anthropic.com` / `*.anthropic.com`
+rule:
+
+```
+cbox: warning: claude talks to api.anthropic.com directly (no gateway ANTHROPIC_BASE_URL), which this allow-list blocks; add --allow-net api.anthropic.com or use the gateway
+```
+
 For `Disabled`: `cbox: network disabled`, plus a warning when the command is `claude` that it
 cannot reach the Anthropic API or MCP through the gateway.
 
@@ -127,7 +146,7 @@ be silently dropped — a security control that appears applied but is not. Afte
 
 | Requested | Recorded vs requested | Behaviour |
 |-----------|-----------------------|-----------|
-| `Open` (no flags) | any | Resume. If the box is restricted/disabled, print its recorded policy (`cbox: box <name> egress restricted to: …`). Lifting a restriction requires `-f`. |
+| `Open` (no flags) | any | Resume. If the box is restricted/disabled, print its recorded policy (`cbox: egress restricted to: …`). Lifting a restriction requires `-f`. |
 | non-`Open` | equal | Resume; print the policy. |
 | non-`Open` | differs, or recorded `Unknown` | Prompt (below). |
 | any | — with `-f` | No prompt; the box was already removed before `get_or_create`, as today. |
@@ -143,8 +162,7 @@ cbox: its network policy can't be changed without recreating it.
   [a] abort (default)
 ```
 
-- The "ends its running sessions" clause appears only when the box is `Running` (detached, or
-  another `up` attached).
+- The "ends its running sessions" clause appears only when the box is `Running` (e.g. detached).
 - `r` → `runtime.remove(name, true)`, then `runtime.create(options, name)`, then continue down
   the same path as a freshly created box (sidecar written with current secret hashes). No
   separate recreate code path.

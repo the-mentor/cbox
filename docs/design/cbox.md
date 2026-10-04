@@ -24,7 +24,7 @@ matter to cbox. First, `auto_remove` is deprecated in favor of `auto_delete`, an
 defaults to `true`. Second, the SQLite schema goes from v8 to v10, and the migration is
 one-way: once a 0.10.4 `cbox` has opened a box home, a 0.9.x binary (including an old
 `boxlite` CLI) refuses it. Third, `allow_net` now also filters `host.boxlite.internal`, so
-if phase 2 adds `--allow-net`, the gateway ports must be allowlisted explicitly. The reason
+the gateway must be allowlisted explicitly, so `--allow-net` always adds the gateway IP. The reason
 for the upgrade is security: GHSA-c7v3-78jq-x45m (in 0.9.7 the secret-substitution proxy
 forwarded to whatever IP the guest chose; 0.10.3+ dials by hostname) and a macOS OCI-layer
 escape outside the rootfs (#1393, fixed in 0.10.1).
@@ -120,7 +120,7 @@ cbox up   [name] [-f] [-c] [-v host:box] [-e KEY[=VALUE]] [-i image]
                  [--disk-size GB] [--memory GB] [--cpus N] [--env-file path] [--config path]
                  [--secret NAME=ENV_VAR@hosts]
                  [-u user] [-p [host:]box[/proto]]
-                 [--allow-net HOST]... [--network disabled]
+                 [--allow-net RULE]... [--network disabled]
                  [-- cmd...]
 cbox exec [name] [-- cmd...]
 cbox down [name]
