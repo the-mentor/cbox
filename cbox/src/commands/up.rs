@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use boxlite::{BoxCommand, BoxStatus, BoxliteOptions, BoxliteRuntime, LiteBox};
+use boxlite::{BoxCommand, BoxliteOptions, BoxliteRuntime, LiteBox};
 
-use crate::{attach, boxopts, config, env, envfile, mitm_ca, naming, secrets, sidecar};
+use crate::{attach, boxopts, config, env, envfile, naming, secrets, sidecar};
 
 pub struct UpArgs {
     pub name: Option<String>,
@@ -169,16 +169,6 @@ pub async fn run(args: UpArgs) -> Result<()> {
                     changed.join(", ")
                 );
             }
-        }
-
-        // A resumed box reloads its saved MITM CA without checking its
-        // 24-hour expiry. A stopped one can be handed a fresh CA by deleting
-        // it before `start()`; a running one can't without killing whatever
-        // is attached, so it only gets a warning. See `mitm_ca`.
-        match litebox.info().await.map(|i| i.status) {
-            Ok(BoxStatus::Running) => mitm_ca::warn_if_expiring(&home, &name),
-            Ok(_) => mitm_ca::renew_before_start(&home, &name),
-            Err(e) => eprintln!("cbox: warning: could not read {name}'s status to check its MITM CA: {e}"),
         }
     }
 
