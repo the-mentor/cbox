@@ -4,10 +4,12 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use boxlite::{BoxCommand, BoxStatus, BoxliteOptions, BoxliteRuntime, LiteBox};
 
-use crate::{attach, boxopts, config, env, envfile, mitm_ca, naming, netpolicy, secrets, sidecar};
+use crate::{
+    attach, boxopts, config, env, envfile, mitm_ca, naming, netdrift, netpolicy, secrets, sidecar,
+};
 
 pub struct UpArgs {
     pub name: Option<String>,
@@ -126,6 +128,8 @@ pub async fn run(args: UpArgs) -> Result<()> {
         detach: args.detach,
         network,
     };
+    let secret_hosts = netpolicy::secret_hosts(&built.secrets);
+    let runs_claude = flags.cmd.first().map(String::as_str) == Some("claude");
     let options = boxopts::build(&flags, built.secrets, plain)?;
 
     println!("cbox: starting {name} ({})", resolved.source.describe());
@@ -134,10 +138,66 @@ pub async fn run(args: UpArgs) -> Result<()> {
     // sitting there Stopped, and that must be resumed, not rejected. `-f`
     // above already removed any existing box under this name, so on that
     // path this always creates fresh.
-    let (litebox, created) = runtime
-        .get_or_create(options, Some(name.clone()))
+    let (mut litebox, mut created) = runtime
+        .get_or_create(options.clone(), Some(name.clone()))
         .await
         .context("failed to create or reuse the box")?;
+
+    if created {
+        for line in netpolicy::policy_lines(&flags.network, &secret_hosts, runs_claude) {
+            eprintln!("{line}");
+        }
+    } else {
+        // get_or_create ignores a reused box's options and BoxLite does not
+        // compare network policy on reuse, so check it here: a requested
+        // --allow-net must never be silently dropped (docs/design/allow-net.md).
+        let info = litebox.info().await.context("failed to read the existing box's settings")?;
+        let recorded = netpolicy::Recorded::from_info(info.network.as_ref());
+        if netdrift::needs_prompt(&flags.network, &recorded) {
+            let running = info.status == BoxStatus::Running;
+            let text = netdrift::prompt_text(&name, &recorded, &flags.network, running);
+            let choice = tokio::task::spawn_blocking(move || {
+                netdrift::choose(&mut netdrift::TtyPrompter, &text)
+            })
+            .await
+            .context("the network-policy prompt failed")?;
+            match choice {
+                netdrift::Choice::Recreate => {
+                    drop(litebox);
+                    runtime
+                        .remove(&name, true)
+                        .await
+                        .context("failed to remove the box to recreate it")?;
+                    litebox = runtime
+                        .create(options, Some(name.clone()))
+                        .await
+                        .context("failed to recreate the box")?;
+                    created = true;
+                    for line in netpolicy::policy_lines(&flags.network, &secret_hosts, runs_claude) {
+                        eprintln!("{line}");
+                    }
+                }
+                netdrift::Choice::Continue => {
+                    eprintln!("cbox: continuing with existing policy: {}", recorded.describe());
+                }
+                netdrift::Choice::Abort => {
+                    bail!("aborted; box {name} left untouched");
+                }
+                netdrift::Choice::NoTerminal => {
+                    bail!(
+                        "box {name} was created with egress: {}; you asked for: {}. \
+                         No terminal to confirm on; rerun with -f/--force to recreate it.",
+                        recorded.describe(),
+                        flags.network.describe()
+                    );
+                }
+            }
+        } else {
+            for line in reused_policy_lines(&recorded, runs_claude) {
+                eprintln!("{line}");
+            }
+        }
+    }
 
     if created {
         // Best-effort, like the git bootstrap below: `cbox list` losing the
@@ -156,6 +216,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
         // silently -- unless this says so, that's invisible until something
         // fails (e.g. a rotated token 401ing), which is precisely the
         // failure class this whole project exists to prevent.
+        // Network policy is checked separately above (netdrift).
         println!("{}", reuse_message(&name));
         if let Some(existing) = sidecar::read(&home) {
             let changed = sidecar::changed_secrets(&existing.secret_hashes, &secret_hashes);
@@ -391,14 +452,25 @@ async fn run_git_bootstrap(litebox: &LiteBox) {
 fn reuse_message(name: &str) -> String {
     format!(
         "cbox: reusing existing box {name}; its configuration (credentials, mounts, \
-         disk size, memory, CPUs) dates from when it was first created. Run with \
-         -f/--force to recreate it with today's settings instead."
+         disk size, memory, CPUs, network policy) dates from when it was first created. \
+         Run with -f/--force to recreate it with today's settings instead."
     )
+}
+
+/// What a reused box's recorded policy looks like, when nothing was
+/// requested: a restricted box must never look open just because the flags
+/// were left off this time. Secret hosts aren't known for a reused box, so
+/// they're omitted.
+fn reused_policy_lines(recorded: &netpolicy::Recorded, runs_claude: bool) -> Vec<String> {
+    match recorded {
+        netpolicy::Recorded::Known(p) => netpolicy::policy_lines(p, &[], runs_claude),
+        netpolicy::Recorded::Unknown => Vec::new(),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{reuse_message, secure_box_home, sweep_disk_images};
+    use super::{reuse_message, reused_policy_lines, secure_box_home, sweep_disk_images};
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
@@ -407,6 +479,26 @@ mod tests {
         assert!(msg.contains("memory"), "{msg}");
         assert!(msg.contains("CPUs"), "{msg}");
         assert!(msg.contains("-f/--force"), "{msg}");
+    }
+
+    #[test]
+    fn the_reuse_message_names_the_network_policy_as_fixed_at_creation() {
+        let msg = reuse_message("demo");
+        assert!(msg.contains("network policy"), "{msg}");
+    }
+
+    #[test]
+    fn reuse_without_flags_reports_the_recorded_policy() {
+        use crate::netpolicy::{Policy, Recorded, resolve};
+        assert!(reused_policy_lines(&Recorded::Known(Policy::Open), true).is_empty());
+        assert!(reused_policy_lines(&Recorded::Unknown, true).is_empty());
+
+        let p = resolve(&["@npm".to_string()], false).unwrap();
+        let lines = reused_policy_lines(&Recorded::Known(p), true);
+        assert!(lines[0].starts_with("cbox: egress restricted to: "), "{lines:?}");
+
+        let lines = reused_policy_lines(&Recorded::Known(Policy::Disabled), true);
+        assert_eq!(lines[0], "cbox: network disabled");
     }
 
     #[test]
