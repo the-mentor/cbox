@@ -31,6 +31,23 @@ RUN set -eu; IFS=,; \
     for m in $MARKETPLACES; do claude plugin marketplace add "$m"; done; \
     for p in $PLUGINS; do claude plugin install --scope user "$p"; done
 
+# Private marketplaces/plugins, same format as above. Set via CBOX_PRIVATE_* in
+# .env, never here: this repo is public. `just build-image` passes a GitHub token
+# as a BuildKit secret, mounted for this RUN only. git reads it through a
+# credential helper set in env vars scoped to this RUN, so it never lands in
+# a layer, ~/.gitconfig, or the clone's remote URL. No-op when unset.
+ARG PRIVATE_MARKETPLACES=""
+ARG PRIVATE_PLUGINS=""
+RUN --mount=type=secret,id=gh_token,uid=1000 set -eu; \
+    [ -n "$PRIVATE_MARKETPLACES" ] || exit 0; \
+    [ -s /run/secrets/gh_token ] || { echo "PRIVATE_MARKETPLACES set but no gh_token secret" >&2; exit 1; }; \
+    export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 \
+        GIT_CONFIG_KEY_0=credential.https://github.com.helper \
+        GIT_CONFIG_VALUE_0='!f() { test "$1" = get && echo username=x-access-token && echo "password=$(cat /run/secrets/gh_token)"; }; f'; \
+    IFS=,; \
+    for m in $PRIVATE_MARKETPLACES; do claude plugin marketplace add "$m"; done; \
+    for p in $PRIVATE_PLUGINS; do claude plugin install --scope user "$p"; done
+
 # copy oh-my-posh statusline config
 COPY --chown=sandbox-user:sandbox-user mojada-claude.omp.json /home/sandbox-user/mojada-claude.omp.json
 
