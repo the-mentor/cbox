@@ -7,7 +7,7 @@ who did what or when, only what the config is and why it has to be that way.
 
 ## Shape
 
-agentgateway (`cr.agentgateway.dev/agentgateway`, pinned at `v1.5.0`) runs as a long-lived
+agentgateway (`cr.agentgateway.dev/agentgateway`, pinned at `v1.6.0`) runs as a long-lived
 Docker Compose service on the host, alongside two sibling containers:
 
 - **`mcp-gateway`** (port 15003) — serves `/mcp` and `/sse`, multiplexing MCP tool targets.
@@ -16,7 +16,7 @@ Docker Compose service on the host, alongside two sibling containers:
 - **`llm-gateway`** (port 15002) — two Anthropic-Messages-API routes, `/claude` (subscription
   passthrough) and `/api` (keyed), described below.
 - **`ui-gateway`** (port 15000) — the admin UI: config viewer, MCP tool playground, and (at
-  `v1.5.0`) Logs, Analytics, Costs, Models, Providers, Guardrails, Keys, and Policies pages —
+  `v1.6.0`) Logs, Analytics, Costs, Models, Providers, Guardrails, Keys, and Policies pages —
   behind HTTP basic auth.
 - **`github-mcp`** — GitHub's official MCP server image, run as a sibling compose service
   with no published host port, reachable only from `agentgateway` over the compose network.
@@ -221,8 +221,9 @@ regardless of the catalog. Database configured + catalog missing: real token cou
 cost column. Catalog configured + database missing: requests get priced but nowhere to
 display it. `config.modelCatalog` points at the tracked `agentgateway/model-costs.json`
 (`file: /etc/agentgateway/model-costs.json`, mounted `:ro`); `Catalog::resolve` is a bare
-exact-match on the model id, no date-suffix stripping, so a missing model still counts tokens
-with cost stuck null.
+exact-match on the model id, no date-suffix stripping. From v1.6.0 the binary embeds a
+built-in catalog that prices common public models with no config at all, and the file acts as
+an overlay on it, so only a model missing from both counts tokens with cost stuck null.
 
 **Prometheus metrics are always collected, currently unreachable.**
 `gen_ai_client_token_usage`/`gen_ai_client_cost` are registered unconditionally
@@ -255,8 +256,8 @@ empty and the canary appears nowhere; under `full` it gets one row containing th
 cache-read and cache-creation tokens, so input counts in the UI, spans, and `requests.db`
 jumped sharply for Claude Code (which caches heavily) versus v1.4.1 rows — cost is unchanged.
 The provider's raw figures are in `llm.providerInputTokens`/`llm.providerTotalTokens`.
-`AGENTGATEWAY_LEGACY_LLM_USAGE_TOKEN_SEMANTICS=true` restores the old behavior but is slated
-for removal after 1.5, so it's deliberately not set.
+The `AGENTGATEWAY_LEGACY_LLM_USAGE_TOKEN_SEMANTICS` escape hatch that restored the old behavior
+was removed in v1.6.0.
 
 **Don't use the UI's "Refresh base costs" button.** Since `modelCatalog` has a configured
 `File` source (`ui.rs:637-645`), the button takes the branch at `ui.rs:676-678` that sets
@@ -272,7 +273,7 @@ is already declared in `config.yaml`.
 These were non-obvious enough, and costly enough to re-derive, that they're worth stating
 plainly. All checked against the schema pinned to the `v1.4.1` image tag
 (`https://raw.githubusercontent.com/agentgateway/agentgateway/v1.4.1/schema/config.json`),
-and re-checked on the bump to `v1.5.0` (none of the properties this config uses were removed):
+and re-checked on the bumps to `v1.5.0` and `v1.6.0` (none of the properties this config uses were removed):
 
 - `AnthropicProvider` accepts only `model` (`additionalProperties: false`) — there is no
   `baseUrl` on the provider itself, which is why the upstream override for `/api` lives on

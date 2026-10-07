@@ -10,7 +10,7 @@
 # references only — never paste a literal credential here. Tracked in git.
 #
 # Design and rationale: docs/design/agentgateway.md. Schema pinned at
-# https://raw.githubusercontent.com/agentgateway/agentgateway/v1.5.0/schema/config.json
+# https://raw.githubusercontent.com/agentgateway/agentgateway/v1.6.0/schema/config.json
 
 gateways:
   mcp-gateway:
@@ -225,8 +225,9 @@ config:
       url: /var/lib/agentgateway/requests.db
 
   modelCatalog:
-    # Exact-match lookup on the model id — no date-suffix stripping. Missing
-    # model = tokens counted, cost stays null. Fix by grepping
+    # Overlay on the built-in catalog (v1.6.0+). Exact-match lookup on the
+    # model id — no date-suffix stripping. A model in neither = tokens
+    # counted, cost stays null. Fix by grepping
     # `just gateway-logs` for "no catalog entry for provider/model" and
     # adding that id to model-costs.json (mounted :ro in docker-compose.yml).
     - file: /etc/agentgateway/model-costs.json
