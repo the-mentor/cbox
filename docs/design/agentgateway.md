@@ -20,7 +20,7 @@ Docker Compose service on the host, alongside two sibling containers:
   behind HTTP basic auth.
 - **`github-mcp`** — GitHub's official MCP server image, run as a sibling compose service
   with no published host port, reachable only from `agentgateway` over the compose network.
-- **`jaeger`** (port 16686) — OTLP-gRPC trace backend for `config.tracing`; only its
+- **`jaeger`** (port 16686) — OTLP-gRPC trace backend for `frontendPolicies.tracing`; only its
   read-only trace-viewer UI is published, not the `4317` collection port `agentgateway`
   reaches it on over the compose network. See Telemetry below.
 
@@ -200,14 +200,14 @@ image-pull cost, not something to default on.
 
 ## Telemetry
 
-Four independent pieces: `config.tracing` and `config.logging.database` (both under
-`config:` in `config.yaml`), agentgateway's built-in model catalog (nothing to configure), plus
+Four independent pieces: `frontendPolicies.tracing` (it replaced `config.tracing`, which
+v1.6.0 deprecates with a startup warning), `config.logging.database`, agentgateway's built-in model catalog (nothing to configure), plus
 `config.statsAddr` (not configured here). Before this block was added, the admin UI's Logs/Analytics/Costs pages
 existed but sat visibly empty — this split explains why.
 
 **Traces are export-only.** The admin UI has no traces page at v1.4.1 or v1.5.0 (no `Traces.tsx`,
-no trace API under `ui/src/api/`; v1.5.0's "trajectory" view reads the request-log DB, not spans), so `config.tracing` only controls *export*: OTLP/gRPC to
-`jaeger:4317` (the new `jaeger` sibling, see Shape above), viewed at its own UI on
+no trace API under `ui/src/api/`; v1.5.0's "trajectory" view reads the request-log DB, not spans), so `frontendPolicies.tracing` only controls *export*: OTLP/gRPC to
+`jaeger:4317` (`host:` is host:port with no scheme, unlike the old `otlpEndpoint` URL) (the new `jaeger` sibling, see Shape above), viewed at its own UI on
 `127.0.0.1:16686`. `randomSampling: true` is load-bearing — Claude Code sends no incoming
 trace context, so without it agentgateway never starts a span, and the endpoint sits
 configured but silent with no error. Traces surface indirectly in agentgateway's own UI only

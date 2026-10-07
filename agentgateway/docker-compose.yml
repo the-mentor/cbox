@@ -97,7 +97,7 @@ services:
     # service name. Do NOT publish a host port.
     restart: unless-stopped
 
-  # OTLP-gRPC trace backend for config.yaml's `config.tracing`. all-in-one
+  # OTLP-gRPC trace backend for config.yaml's `frontendPolicies.tracing`. all-in-one
   # accepts OTLP gRPC directly (COLLECTOR_OTLP_ENABLED below) — no separate
   # otel-collector needed.
   jaeger:

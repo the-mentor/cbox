@@ -206,17 +206,11 @@ routes:
                 /v1/messages/count_tokens: anthropicTokenCount
                 "*": passthrough
 
-# Telemetry: traces (Jaeger) and request-log DB (per-request tokens and cost
-# in the admin UI). Cost comes from agentgateway's built-in model catalog
-# (v1.6.0+), so no modelCatalog is configured. See docs/design/agentgateway.md.
+# Telemetry: request-log DB (per-request tokens and cost in the admin UI);
+# traces are under frontendPolicies below. Cost comes from agentgateway's
+# built-in model catalog (v1.6.0+), so no modelCatalog is configured. See
+# docs/design/agentgateway.md.
 config:
-  tracing:
-    otlpEndpoint: http://jaeger:4317
-    otlpProtocol: grpc
-    # Defaults to false; must be true since Claude Code never sends trace
-    # context. Without it: valid endpoint, zero spans, no error.
-    randomSampling: true
-
   logging:
     database:
       # Non-postgres:// value = SQLite; sqlx creates the file but not the
@@ -235,6 +229,14 @@ config:
 # 1.4.1-era way to capture content): that field is written to requests.db
 # regardless of the llm mode, silently defeating metadata.
 frontendPolicies:
+  # Traces to Jaeger (OTLP gRPC). Replaces the config.tracing block, deprecated
+  # in v1.6.0. host is host:port, no scheme.
+  tracing:
+    host: jaeger:4317
+    protocol: grpc
+    # Defaults to false; must be true since Claude Code never sends trace
+    # context. Without it: valid endpoint, zero spans, no error.
+    randomSampling: true
   accessLog:
     database:
       llm: metadata
