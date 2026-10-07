@@ -52,11 +52,6 @@ services:
       # a fresh clone gets a working default login. Gitignored — never
       # commit this file, it's a live credential.
       - ./htpasswd:/etc/agentgateway/htpasswd:ro
-      # Cost catalog for config.yaml's `config.modelCatalog`. Tracked in git
-      # (holds no credential, unlike htpasswd) rather than generated at boot:
-      # no new tooling, reviewable, user controls exact model ids. Tradeoff:
-      # prices go stale and need manual updates.
-      - ./model-costs.json:/etc/agentgateway/model-costs.json:ro
       # Backs config.yaml's `config.logging.database.url`. Named (not bind-
       # mounted) so `docker compose down` doesn't leave a root-owned file in
       # the repo checkout. Docker creates it root:root, but agentgateway runs

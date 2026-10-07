@@ -200,9 +200,9 @@ image-pull cost, not something to default on.
 
 ## Telemetry
 
-Four independent pieces: `config.tracing`, `config.logging.database`, and
-`config.modelCatalog` (all under `config:` in `config.yaml`), plus `config.statsAddr` (not
-configured here). Before this block was added, the admin UI's Logs/Analytics/Costs pages
+Four independent pieces: `config.tracing` and `config.logging.database` (both under
+`config:` in `config.yaml`), agentgateway's built-in model catalog (nothing to configure), plus
+`config.statsAddr` (not configured here). Before this block was added, the admin UI's Logs/Analytics/Costs pages
 existed but sat visibly empty — this split explains why.
 
 **Traces are export-only.** The admin UI has no traces page at v1.4.1 or v1.5.0 (no `Traces.tsx`,
@@ -217,13 +217,13 @@ key into Jaeger, not a rendered trace.
 **Tokens/cost have two independent failure modes.** `config.logging.database.url`
 (`/var/lib/agentgateway/requests.db`, SQLite, on the `agentgateway-logs` volume) is what the
 Logs/Analytics pages read tokens, duration, and cost from at all — without it, no rows,
-regardless of the catalog. Database configured + catalog missing: real token counts, blank
-cost column. Catalog configured + database missing: requests get priced but nowhere to
-display it. `config.modelCatalog` points at the tracked `agentgateway/model-costs.json`
-(`file: /etc/agentgateway/model-costs.json`, mounted `:ro`); `Catalog::resolve` is a bare
-exact-match on the model id, no date-suffix stripping. From v1.6.0 the binary embeds a
-built-in catalog that prices common public models with no config at all, and the file acts as
-an overlay on it, so only a model missing from both counts tokens with cost stuck null.
+regardless of the catalog. Pricing comes from the catalog embedded in the agentgateway binary
+(v1.6.0+, upstream's `catalog/model-catalog.json`), which covers current Claude models and
+updates with each image bump — so `config.modelCatalog` is deliberately unset. Lookup is a
+bare exact-match on the model id, no date-suffix stripping: a model the catalog lacks still
+counts tokens, but its cost stays null. If that happens (or you need non-list prices, e.g. a
+LiteLLM upstream behind `/api`), add `config.modelCatalog: [{file: ...}]` pointing at a
+mounted JSON file — it overlays the built-in rates rather than replacing them.
 
 **Prometheus metrics are always collected, currently unreachable.**
 `gen_ai_client_token_usage`/`gen_ai_client_cost` are registered unconditionally
@@ -259,14 +259,13 @@ The provider's raw figures are in `llm.providerInputTokens`/`llm.providerTotalTo
 The `AGENTGATEWAY_LEGACY_LLM_USAGE_TOKEN_SEMANTICS` escape hatch that restored the old behavior
 was removed in v1.6.0.
 
-**Don't use the UI's "Refresh base costs" button.** Since `modelCatalog` has a configured
-`File` source (`ui.rs:637-645`), the button takes the branch at `ui.rs:676-678` that sets
-`base_costs_file` to that same path — not the `config.yaml`-persist branch, which only runs
-with no `File` source. It calls `refresh_models_dev_base_catalog` (`llm/cost/refresh.rs:20-33` at v1.4.1; `llm/catalog/refresh.rs` from v1.5.0)
-to fetch `models.dev`'s catalog live, then tries to write it onto
-`/etc/agentgateway/model-costs.json` — which fails since that mount is `:ro`, so nothing's
-overwritten, but the unwanted live fetch still happens. No reason to click it when the catalog
-is already declared in `config.yaml`.
+**Don't use the UI's "Refresh base costs" button.** With no `modelCatalog` file source
+configured, `refresh_base_costs` (`ui.rs` at v1.6.0) fetches upstream's catalog live from
+`agentgateway.dev/model-catalog` and tries to write it to `base-costs.json` next to the config
+file — `/base-costs.json` in the container, which the non-root gateway user can't write, so it
+fails after the unwanted live fetch. Upstream also warns the button pulls from `main`, whose
+catalog format may be ahead of the pinned image. The built-in catalog already updates with
+each image bump; bump the image instead.
 
 ## Facts established against the schema
 
