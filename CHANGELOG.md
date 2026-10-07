@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.12](https://github.com/the-mentor/cbox/compare/v0.1.11...v0.1.12) (2026-10-07)
+
+
+### Features
+
+* **custom:** bake in plugins from private marketplaces ([#88](https://github.com/the-mentor/cbox/issues/88)) ([5221b4e](https://github.com/the-mentor/cbox/commit/5221b4ed45c4ad689790ad115b117ee5111224f3))
+
 ## [0.1.11](https://github.com/the-mentor/cbox/compare/v0.1.10...v0.1.11) (2026-10-04)
 
 
