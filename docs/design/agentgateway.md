@@ -7,7 +7,7 @@ who did what or when, only what the config is and why it has to be that way.
 
 ## Shape
 
-agentgateway (`cr.agentgateway.dev/agentgateway`, pinned at `v1.5.0`) runs as a long-lived
+agentgateway (`cr.agentgateway.dev/agentgateway`, pinned at `v1.6.0`) runs as a long-lived
 Docker Compose service on the host, alongside two sibling containers:
 
 - **`mcp-gateway`** (port 15003) — serves `/mcp` and `/sse`, multiplexing MCP tool targets.
@@ -16,11 +16,11 @@ Docker Compose service on the host, alongside two sibling containers:
 - **`llm-gateway`** (port 15002) — two Anthropic-Messages-API routes, `/claude` (subscription
   passthrough) and `/api` (keyed), described below.
 - **`ui-gateway`** (port 15000) — the admin UI: config viewer, MCP tool playground, and (at
-  `v1.5.0`) Logs, Analytics, Costs, Models, Providers, Guardrails, Keys, and Policies pages —
+  `v1.6.0`) Logs, Analytics, Costs, Models, Providers, Guardrails, Keys, and Policies pages —
   behind HTTP basic auth.
 - **`github-mcp`** — GitHub's official MCP server image, run as a sibling compose service
   with no published host port, reachable only from `agentgateway` over the compose network.
-- **`jaeger`** (port 16686) — OTLP-gRPC trace backend for `config.tracing`; only its
+- **`jaeger`** (port 16686) — OTLP-gRPC trace backend for `frontendPolicies.tracing`; only its
   read-only trace-viewer UI is published, not the `4317` collection port `agentgateway`
   reaches it on over the compose network. See Telemetry below.
 
@@ -200,14 +200,14 @@ image-pull cost, not something to default on.
 
 ## Telemetry
 
-Four independent pieces: `config.tracing`, `config.logging.database`, and
-`config.modelCatalog` (all under `config:` in `config.yaml`), plus `config.statsAddr` (not
-configured here). Before this block was added, the admin UI's Logs/Analytics/Costs pages
+Four independent pieces: `frontendPolicies.tracing` (it replaced `config.tracing`, which
+v1.6.0 deprecates with a startup warning), `config.logging.database`, agentgateway's built-in model catalog (nothing to configure), plus
+`config.statsAddr` (not configured here). Before this block was added, the admin UI's Logs/Analytics/Costs pages
 existed but sat visibly empty — this split explains why.
 
 **Traces are export-only.** The admin UI has no traces page at v1.4.1 or v1.5.0 (no `Traces.tsx`,
-no trace API under `ui/src/api/`; v1.5.0's "trajectory" view reads the request-log DB, not spans), so `config.tracing` only controls *export*: OTLP/gRPC to
-`jaeger:4317` (the new `jaeger` sibling, see Shape above), viewed at its own UI on
+no trace API under `ui/src/api/`; v1.5.0's "trajectory" view reads the request-log DB, not spans), so `frontendPolicies.tracing` only controls *export*: OTLP/gRPC to
+`jaeger:4317` (`host:` is host:port with no scheme, unlike the old `otlpEndpoint` URL) (the new `jaeger` sibling, see Shape above), viewed at its own UI on
 `127.0.0.1:16686`. `randomSampling: true` is load-bearing — Claude Code sends no incoming
 trace context, so without it agentgateway never starts a span, and the endpoint sits
 configured but silent with no error. Traces surface indirectly in agentgateway's own UI only
@@ -217,12 +217,13 @@ key into Jaeger, not a rendered trace.
 **Tokens/cost have two independent failure modes.** `config.logging.database.url`
 (`/var/lib/agentgateway/requests.db`, SQLite, on the `agentgateway-logs` volume) is what the
 Logs/Analytics pages read tokens, duration, and cost from at all — without it, no rows,
-regardless of the catalog. Database configured + catalog missing: real token counts, blank
-cost column. Catalog configured + database missing: requests get priced but nowhere to
-display it. `config.modelCatalog` points at the tracked `agentgateway/model-costs.json`
-(`file: /etc/agentgateway/model-costs.json`, mounted `:ro`); `Catalog::resolve` is a bare
-exact-match on the model id, no date-suffix stripping, so a missing model still counts tokens
-with cost stuck null.
+regardless of the catalog. Pricing comes from the catalog embedded in the agentgateway binary
+(v1.6.0+, upstream's `catalog/model-catalog.json`), which covers current Claude models and
+updates with each image bump — so `config.modelCatalog` is deliberately unset. Lookup is a
+bare exact-match on the model id, no date-suffix stripping: a model the catalog lacks still
+counts tokens, but its cost stays null. If that happens (or you need non-list prices, e.g. a
+LiteLLM upstream behind `/api`), add `config.modelCatalog: [{file: ...}]` pointing at a
+mounted JSON file — it overlays the built-in rates rather than replacing them.
 
 **Prometheus metrics are always collected, currently unreachable.**
 `gen_ai_client_token_usage`/`gen_ai_client_cost` are registered unconditionally
@@ -255,24 +256,23 @@ empty and the canary appears nowhere; under `full` it gets one row containing th
 cache-read and cache-creation tokens, so input counts in the UI, spans, and `requests.db`
 jumped sharply for Claude Code (which caches heavily) versus v1.4.1 rows — cost is unchanged.
 The provider's raw figures are in `llm.providerInputTokens`/`llm.providerTotalTokens`.
-`AGENTGATEWAY_LEGACY_LLM_USAGE_TOKEN_SEMANTICS=true` restores the old behavior but is slated
-for removal after 1.5, so it's deliberately not set.
+The `AGENTGATEWAY_LEGACY_LLM_USAGE_TOKEN_SEMANTICS` escape hatch that restored the old behavior
+was removed in v1.6.0.
 
-**Don't use the UI's "Refresh base costs" button.** Since `modelCatalog` has a configured
-`File` source (`ui.rs:637-645`), the button takes the branch at `ui.rs:676-678` that sets
-`base_costs_file` to that same path — not the `config.yaml`-persist branch, which only runs
-with no `File` source. It calls `refresh_models_dev_base_catalog` (`llm/cost/refresh.rs:20-33` at v1.4.1; `llm/catalog/refresh.rs` from v1.5.0)
-to fetch `models.dev`'s catalog live, then tries to write it onto
-`/etc/agentgateway/model-costs.json` — which fails since that mount is `:ro`, so nothing's
-overwritten, but the unwanted live fetch still happens. No reason to click it when the catalog
-is already declared in `config.yaml`.
+**Don't use the UI's "Refresh base costs" button.** With no `modelCatalog` file source
+configured, `refresh_base_costs` (`ui.rs` at v1.6.0) fetches upstream's catalog live from
+`agentgateway.dev/model-catalog` and tries to write it to `base-costs.json` next to the config
+file — `/base-costs.json` in the container, which the non-root gateway user can't write, so it
+fails after the unwanted live fetch. Upstream also warns the button pulls from `main`, whose
+catalog format may be ahead of the pinned image. The built-in catalog already updates with
+each image bump; bump the image instead.
 
 ## Facts established against the schema
 
 These were non-obvious enough, and costly enough to re-derive, that they're worth stating
 plainly. All checked against the schema pinned to the `v1.4.1` image tag
 (`https://raw.githubusercontent.com/agentgateway/agentgateway/v1.4.1/schema/config.json`),
-and re-checked on the bump to `v1.5.0` (none of the properties this config uses were removed):
+and re-checked on the bumps to `v1.5.0` and `v1.6.0` (none of the properties this config uses were removed):
 
 - `AnthropicProvider` accepts only `model` (`additionalProperties: false`) — there is no
   `baseUrl` on the provider itself, which is why the upstream override for `/api` lives on
