@@ -1,5 +1,7 @@
 # cbox
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/the-mentor/cbox)
+
 Build and run [Claude Code](https://github.com/anthropics/claude-code) inside a
 [BoxLite](https://boxliteai.com) microVM, with an MCP config baked in that points Claude
 Code at a host-side [agentgateway](https://agentgateway.dev). One `just` command builds the
