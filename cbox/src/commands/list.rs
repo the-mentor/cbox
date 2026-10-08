@@ -24,7 +24,7 @@ pub async fn run(all: bool) -> Result<()> {
     let cwd = std::env::current_dir().context("cannot read current directory")?;
     let here = naming::resolve(None, &cwd).name;
 
-    let root = config::box_home("_").parent().unwrap().to_path_buf();
+    let root = config::boxes_root();
     let Ok(entries) = std::fs::read_dir(&root) else {
         println!("cbox: no boxes yet");
         return Ok(());

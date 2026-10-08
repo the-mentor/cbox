@@ -97,8 +97,9 @@ Docker. They share only the image tag and `registries.local.json`.
 | per-box `BOXLITE_HOME` layout | `gateway-generate-ui-password` |
 | `registries.local.json` parsing | `install`, `install-boxlite`, `uninstall` |
 
-`clean-cache` moves because it performs surgery on BoxLite's own sqlite index. Whether it
-survives at all is **open** — see Open questions.
+`clean-cache` moves because it performs surgery on BoxLite's own sqlite index. It survives
+the move as that same surgery — the SDK offers no replacement (see Open questions) — and
+`just clean-cache` now forwards to `cbox clean-cache`.
 
 ## Front door
 
@@ -631,9 +632,21 @@ These can still change the design.
   it — see the process-model section above and `cbox/tests/secrets_survive.md`. The fallback
   route keeps substitution, so the control socket remains an optimization for lock contention
   rather than a credential requirement.
-- **Does the SDK replace `clean-cache`'s sqlite surgery?** `runtime.images()` exists; whether
-  it exposes tag→digest invalidation is unchecked. If not, the `DELETE FROM image_index`
-  workaround ports as-is and the design should say so plainly rather than pretend otherwise.
+- ~~**Does the SDK replace `clean-cache`'s sqlite surgery?**~~ **Settled: it does not**
+  (read from source, boxlite 0.10.5). `runtime.images()` returns an `ImageHandle` whose only
+  methods are `pull` and `list`; the index's `remove` lives on `ImageIndexStore` in the
+  crate-private `db` module, and `ImageStore::pull` returns the cached manifest for any
+  reference with a complete `image_index` row without consulting the registry. So
+  `cbox clean-cache` is the `DELETE FROM image_index` workaround, ported as-is: it opens
+  `<home>/db/boxlite.db` with `rusqlite` (the version boxlite itself links), deletes the custom
+  image's row, and unlinks `manifests/`, `configs/`, `layers/` and `extracted/` entries no
+  remaining row references, in every `boxes/*` home. It is coupled to a schema this repo does
+  not own. A schema it doesn't recognise makes it fail for that home and roll back the row
+  delete before any blob is touched — the shell recipe instead read a failed query as "nothing
+  referenced" and swept every blob. Disk-images stay out of it for the reason in
+  `general.md`. The sqlite3 CLI is no longer needed, so the old "no `sqlite3`" skip is gone;
+  `just clean-cache` skips instead when the cbox binary is missing or predates the verb. The
+  right fix is tag invalidation in BoxLite itself, after which this verb should be deleted.
 - **Does substitution cover `x-api-key`?** Decides whether Anthropic can ever leave the
   gateway. Only `Authorization` is verified.
 - **Does Node trust the MITM CA?** Node ships its own CA store and ignores the system store.
@@ -652,5 +665,5 @@ These can still change the design.
    secrets-survival integration check with it — `exec` cannot be called done until the
    fallback path is known to keep substitution.
 3. Add observability, then `--allow-net`, then resource limits, then `cp`/`--publish`.
-4. Settle `clean-cache` — port the sqlite workaround or replace it, and record which.
+4. ~~Settle `clean-cache`~~ — ported as the sqlite workaround; see Open questions.
 5. Revisit Anthropic only if the `x-api-key` and Node CA questions both resolve favorably.
