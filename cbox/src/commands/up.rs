@@ -4,10 +4,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
-use boxlite::{BoxCommand, BoxliteOptions, BoxliteRuntime, LiteBox};
+use anyhow::{Context, Result, bail};
+use boxlite::{BoxCommand, BoxStatus, BoxliteOptions, BoxliteRuntime, LiteBox};
 
-use crate::{attach, boxopts, config, env, envfile, naming, secrets, sidecar};
+use crate::{attach, boxopts, config, env, envfile, naming, netdrift, netpolicy, secrets, sidecar};
 
 pub struct UpArgs {
     pub name: Option<String>,
@@ -27,12 +27,17 @@ pub struct UpArgs {
     /// comment for the full reasoning; default is `false`, matching what
     /// the pre-cbox justfile actually passed to `boxlite run`.
     pub detach: bool,
+    /// `--allow-net` rules, unresolved.
+    pub allow_net: Vec<String>,
+    /// `--network disabled`.
+    pub network_disabled: bool,
 }
 
 pub async fn run(args: UpArgs) -> Result<()> {
     let cwd = std::env::current_dir().context("cannot read current directory")?;
     let resolved = naming::resolve(args.name.as_deref(), &cwd);
     let name = resolved.name;
+    let network = netpolicy::resolve(&args.allow_net, args.network_disabled)?;
 
     // Load the env file, if any, before anything below reads the process
     // environment: passthrough selection, secret source lookup, and GitHub
@@ -66,6 +71,8 @@ pub async fn run(args: UpArgs) -> Result<()> {
     let passthrough = env::passthrough_vars();
     let mut plain = env::compose(&args.env_flags, &passthrough, &built.source_vars)?;
     env::add_gateway_placeholder(&mut plain);
+    let anthropic_base_url =
+        plain.iter().find(|(k, _)| k == "ANTHROPIC_BASE_URL").map(|(_, v)| v.clone());
     plain.extend(built.env.clone());
     plain.push((
         "TERM".into(),
@@ -119,7 +126,16 @@ pub async fn run(args: UpArgs) -> Result<()> {
         memory_gb: args.memory_gb,
         cpus: args.cpus,
         detach: args.detach,
+        network,
     };
+    let secret_hosts = netpolicy::secret_hosts(&built.secrets);
+    // Per-secret hosts for the sidecar, so a later reuse can name them.
+    let secret_hosts_by_name: std::collections::BTreeMap<String, Vec<String>> = built
+        .secrets
+        .iter()
+        .map(|s| (s.name.clone(), s.hosts.clone()))
+        .collect();
+    let runs_claude = flags.cmd.first().map(String::as_str) == Some("claude");
     let options = boxopts::build(&flags, built.secrets, plain)?;
 
     println!("cbox: starting {name} ({})", resolved.source.describe());
@@ -128,16 +144,121 @@ pub async fn run(args: UpArgs) -> Result<()> {
     // sitting there Stopped, and that must be resumed, not rejected. `-f`
     // above already removed any existing box under this name, so on that
     // path this always creates fresh.
-    let (litebox, created) = runtime
-        .get_or_create(options, Some(name.clone()))
+    let (mut litebox, mut created) = runtime
+        .get_or_create(options.clone(), Some(name.clone()))
         .await
         .context("failed to create or reuse the box")?;
+
+    // Only meaningful where the requested policy is actually applied (a new
+    // or recreated box), so it's printed in those two arms.
+    let direct_warning = netpolicy::direct_anthropic_warning(
+        &flags.network,
+        runs_claude,
+        anthropic_base_url.as_deref(),
+    );
+
+    if created {
+        for line in netpolicy::policy_lines(&flags.network, &secret_hosts, runs_claude) {
+            eprintln!("{line}");
+        }
+        if let Some(w) = &direct_warning {
+            eprintln!("{w}");
+        }
+    } else {
+        // get_or_create ignores a reused box's options and BoxLite does not
+        // compare network policy on reuse, so check it here: a requested
+        // --allow-net must never be silently dropped (docs/design/allow-net.md).
+        let info = litebox.info().await.context("failed to read the existing box's settings")?;
+        let recorded = netpolicy::Recorded::from_info(info.network.as_ref());
+        // Which secrets the box was created with, and their hosts when the
+        // sidecar recorded them: BoxLite doesn't expose a reused box's
+        // secrets. Older sidecars have names only.
+        let existing = sidecar::read(&home);
+        let box_secret_names: Vec<String> = existing
+            .as_ref()
+            .map(|e| e.secret_hashes.keys().cloned().collect())
+            .unwrap_or_default();
+        let box_secret_hosts: Vec<String> = existing
+            .as_ref()
+            .map(|e| {
+                let mut hosts: Vec<String> =
+                    e.secret_hosts.values().flatten().map(|h| h.to_ascii_lowercase()).collect();
+                hosts.sort();
+                hosts.dedup();
+                hosts
+            })
+            .unwrap_or_default();
+        if netdrift::needs_prompt(&flags.network, &recorded) {
+            let running = matches!(
+                info.status,
+                BoxStatus::Running | BoxStatus::Stopping | BoxStatus::Paused
+            );
+            let text = netdrift::prompt_text(&name, &recorded, &flags.network, running);
+            let choice = tokio::task::spawn_blocking(move || {
+                netdrift::choose(&mut netdrift::TtyPrompter, &text)
+            })
+            .await
+            .context("the network-policy prompt failed")?;
+            match choice {
+                netdrift::Choice::Recreate => {
+                    drop(litebox);
+                    runtime
+                        .remove(&name, true)
+                        .await
+                        .context("failed to remove the box to recreate it")?;
+                    litebox = runtime
+                        .create(options, Some(name.clone()))
+                        .await
+                        .context(
+                            "the old box was removed but recreating it failed; \
+                             rerun `cbox up` to create it",
+                        )?;
+                    created = true;
+                    for line in netpolicy::policy_lines(&flags.network, &secret_hosts, runs_claude) {
+                        eprintln!("{line}");
+                    }
+                    if let Some(w) = &direct_warning {
+                        eprintln!("{w}");
+                    }
+                }
+                netdrift::Choice::Continue => {
+                    for line in continued_policy_lines(
+                        &recorded,
+                        &box_secret_names,
+                        &box_secret_hosts,
+                        runs_claude,
+                    ) {
+                        eprintln!("{line}");
+                    }
+                }
+                netdrift::Choice::Abort => {
+                    bail!("aborted; box {name} left untouched");
+                }
+                netdrift::Choice::NoTerminal => {
+                    bail!(
+                        "box {name} was created with egress: {}; you asked for: {}. \
+                         No terminal to confirm on; rerun with -f/--force to recreate it.",
+                        recorded.describe(),
+                        flags.network.describe()
+                    );
+                }
+            }
+        } else {
+            for line in
+                reused_policy_lines(&recorded, &box_secret_names, &box_secret_hosts, runs_claude)
+            {
+                eprintln!("{line}");
+            }
+        }
+    }
 
     if created {
         // Best-effort, like the git bootstrap below: `cbox list` losing the
         // origin column for this one box is far better than `cbox up`
         // failing over a metadata write.
-        if let Err(e) = sidecar::write(&home, &flags.invocation_dir, &secret_hashes) {
+        if let Err(e) =
+            sidecar::write(&home, &flags.invocation_dir, &secret_hashes, &secret_hosts_by_name)
+        {
             eprintln!(
                 "cbox: warning: could not record this box's origin ({e}); \
                  `cbox list` won't show a directory for it."
@@ -150,6 +271,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
         // silently -- unless this says so, that's invisible until something
         // fails (e.g. a rotated token 401ing), which is precisely the
         // failure class this whole project exists to prevent.
+        // Network policy is checked separately above (netdrift).
         println!("{}", reuse_message(&name));
         if let Some(existing) = sidecar::read(&home) {
             let changed = sidecar::changed_secrets(&existing.secret_hashes, &secret_hashes);
@@ -375,14 +497,64 @@ async fn run_git_bootstrap(litebox: &LiteBox) {
 fn reuse_message(name: &str) -> String {
     format!(
         "cbox: reusing existing box {name}; its configuration (credentials, mounts, \
-         disk size, memory, CPUs) dates from when it was first created. Run with \
-         -f/--force to recreate it with today's settings instead."
+         disk size, memory, CPUs, network policy) dates from when it was first created. \
+         Run with -f/--force to recreate it with today's settings instead."
     )
+}
+
+/// What a reused box's recorded policy looks like, when nothing was
+/// requested: a restricted box must never look open just because the flags
+/// were left off this time. BoxLite doesn't expose a reused box's secrets,
+/// so the sidecar's `secret_hosts` name them; a sidecar from before that
+/// field existed has only `secret_names`, which stand in for them.
+fn reused_policy_lines(
+    recorded: &netpolicy::Recorded,
+    secret_names: &[String],
+    secret_hosts: &[String],
+    runs_claude: bool,
+) -> Vec<String> {
+    match recorded {
+        netpolicy::Recorded::Known(p) => {
+            let mut lines = netpolicy::policy_lines(p, secret_hosts, runs_claude);
+            if matches!(p, netpolicy::Policy::Allow(_))
+                && secret_hosts.is_empty()
+                && !secret_names.is_empty()
+            {
+                lines.push(format!(
+                    "cbox: egress also allowed on :443 to the hosts of this box's secrets ({})",
+                    secret_names.join(", ")
+                ));
+            }
+            lines
+        }
+        netpolicy::Recorded::Unknown => {
+            vec!["cbox: box network policy unknown (not recorded by BoxLite)".to_string()]
+        }
+    }
+}
+
+/// The `[c]` answer to the drift prompt: say so, then show what the box
+/// actually enforces, same as a reuse without flags.
+fn continued_policy_lines(
+    recorded: &netpolicy::Recorded,
+    secret_names: &[String],
+    secret_hosts: &[String],
+    runs_claude: bool,
+) -> Vec<String> {
+    let mut lines =
+        vec![format!("cbox: continuing with existing policy: {}", recorded.describe())];
+    if matches!(recorded, netpolicy::Recorded::Known(_)) {
+        lines.extend(reused_policy_lines(recorded, secret_names, secret_hosts, runs_claude));
+    }
+    lines
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{reuse_message, secure_box_home, sweep_disk_images};
+    use super::{
+        continued_policy_lines, reuse_message, reused_policy_lines, secure_box_home,
+        sweep_disk_images,
+    };
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
@@ -391,6 +563,75 @@ mod tests {
         assert!(msg.contains("memory"), "{msg}");
         assert!(msg.contains("CPUs"), "{msg}");
         assert!(msg.contains("-f/--force"), "{msg}");
+    }
+
+    #[test]
+    fn the_reuse_message_names_the_network_policy_as_fixed_at_creation() {
+        let msg = reuse_message("demo");
+        assert!(msg.contains("network policy"), "{msg}");
+    }
+
+    #[test]
+    fn reuse_without_flags_reports_the_recorded_policy() {
+        use crate::netpolicy::{Policy, Recorded, resolve};
+        assert!(reused_policy_lines(&Recorded::Known(Policy::Open), &[], &[], true).is_empty());
+        let lines = reused_policy_lines(&Recorded::Unknown, &[], &[], true);
+        assert_eq!(lines, ["cbox: box network policy unknown (not recorded by BoxLite)"]);
+
+        let p = resolve(&["@npm".to_string()], false).unwrap();
+        let lines = reused_policy_lines(&Recorded::Known(p), &[], &[], true);
+        assert!(lines[0].starts_with("cbox: egress restricted to: "), "{lines:?}");
+
+        let lines = reused_policy_lines(&Recorded::Known(Policy::Disabled), &[], &[], true);
+        assert_eq!(lines[0], "cbox: network disabled");
+    }
+
+    #[test]
+    fn a_reused_allow_list_box_names_its_secrets_but_other_policies_do_not() {
+        use crate::netpolicy::{Policy, Recorded, resolve};
+        let names = vec!["gh".to_string(), "npm".to_string()];
+        let p = resolve(&["@npm".to_string()], false).unwrap();
+        let lines = reused_policy_lines(&Recorded::Known(p.clone()), &names, &[], true);
+        assert_eq!(
+            lines.last().unwrap(),
+            "cbox: egress also allowed on :443 to the hosts of this box's secrets (gh, npm)"
+        );
+        let lines = reused_policy_lines(&Recorded::Known(p), &[], &[], true);
+        assert!(!lines.iter().any(|l| l.contains("secrets")), "{lines:?}");
+        for other in [Policy::Open, Policy::Disabled] {
+            let lines = reused_policy_lines(&Recorded::Known(other), &names, &[], true);
+            assert!(!lines.iter().any(|l| l.contains("secrets")), "{lines:?}");
+        }
+    }
+
+    #[test]
+    fn a_reused_allow_list_box_names_its_secret_hosts_when_the_sidecar_has_them() {
+        use crate::netpolicy::{Recorded, resolve};
+        let names = vec!["gh".to_string(), "gh_basic".to_string()];
+        let hosts = vec!["api.github.com".to_string(), "github.com".to_string()];
+        let p = resolve(&["@npm".to_string()], false).unwrap();
+        let lines = reused_policy_lines(&Recorded::Known(p), &names, &hosts, true);
+        assert_eq!(
+            lines.last().unwrap(),
+            "cbox: egress also allowed on :443 to api.github.com, github.com \
+             (secret hosts bypass the allow-list)"
+        );
+        assert!(!lines.iter().any(|l| l.contains("this box's secrets")), "{lines:?}");
+    }
+
+    #[test]
+    fn continuing_prints_the_existing_policy_in_full() {
+        use crate::netpolicy::{Recorded, resolve};
+        let p = resolve(&["@npm".to_string()], false).unwrap();
+        let names = vec!["gh".to_string()];
+        let lines = continued_policy_lines(&Recorded::Known(p), &names, &[], true);
+        assert!(lines[0].starts_with("cbox: continuing with existing policy"), "{lines:?}");
+        assert!(lines.iter().any(|l| l.starts_with("cbox: egress restricted to: ")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("the gateway IP opens every")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("hosts of this box's secrets (gh)")), "{lines:?}");
+
+        let lines = continued_policy_lines(&Recorded::Unknown, &names, &[], true);
+        assert_eq!(lines.len(), 1, "{lines:?}");
     }
 
     #[test]
