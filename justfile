@@ -260,45 +260,26 @@ ci-local *args:
     export DOCKER_HOST="$host"
     act pull_request -W .github/workflows/ci.yml -j build --matrix os:ubuntu-latest {{args}}
 
-# Refresh the custom image and sweep orphaned image blobs from boxlite's cache.
-# BoxLite caches image tags immutably and has no `rmi`, so a rebuilt :latest is
-# ignored until its cached tag->digest row is dropped; then the next
-# `boxlite run` re-pulls from the registry. We also delete blob files
-# (manifests/configs/layers/extracted) no longer referenced by any image in
-# boxlite's index. Disk-images are left alone on purpose: boxlite does not
-# record which image a disk-image belongs to, so an orphaned one can't be told
-# apart from a live one without risking a costly (or breaking) re-pull.
+# Refresh the custom image and sweep orphaned image blobs from boxlite's cache,
+# across every per-name box home. BoxLite caches image tags immutably and has
+# no `rmi`, so a rebuilt :latest is ignored until its cached tag->digest row is
+# dropped; then the next `boxlite run` re-pulls from the registry. The work is
+# `cbox clean-cache` (see cbox/src/commands/clean_cache.rs and
+# docs/design/cbox.md); disk-images are left alone on purpose there.
+#
+# build-image runs this, and `just build` doesn't need the cbox binary for
+# anything else, so a missing or pre-clean-cache binary skips with a note
+# rather than failing the build.
 clean-cache:
     #!/usr/bin/env sh
     set -eu
-    command -v sqlite3 >/dev/null 2>&1 || { echo "clean-cache: sqlite3 not found; skipping" >&2; exit 0; }
-    root="${BOXLITE_HOME:-$HOME/.boxlite}/boxes"
-    [ -d "$root" ] || { echo "clean-cache: no box homes under $root; skipping" >&2; exit 0; }
-    for dir in "$root"/*/; do
-      [ -d "$dir" ] || continue
-      home="${dir%/}"
-      db="$home/db/boxlite.db"
-      img="$home/images"
-      [ -f "$db" ] || continue
-      # Drop the custom tag so the next `boxlite run` re-pulls the pushed image.
-      sqlite3 "$db" "DELETE FROM image_index WHERE reference='{{registry}}/library/{{custom_tag}}:latest';"
-      # Blobs still referenced by any remaining image (filename form: sha256-...).
-      keep="$(mktemp)"
-      { sqlite3 "$db" "SELECT manifest_digest FROM image_index;"
-        sqlite3 "$db" "SELECT config_digest FROM image_index;"
-        sqlite3 "$db" "SELECT value FROM image_index, json_each(layers);"
-      } | tr ':' '-' | sort -u > "$keep"
-      for f in "$img"/manifests/* "$img"/configs/* "$img"/layers/* "$img"/extracted/*; do
-        [ -e "$f" ] || continue
-        key="$(basename "$f" | sed 's/\.json$//; s/\.tar\.gz$//')"
-        grep -qx "$key" "$keep" || rm -rf "$f"
-      done
-      rm -f "$keep"
-    done
+    [ -x "{{cbox_bin}}" ] || { echo "clean-cache: cbox binary not found at {{cbox_bin}}; skipping (run 'just build-cbox' or 'just install-cbox')" >&2; exit 0; }
+    "{{cbox_bin}}" clean-cache --help >/dev/null 2>&1 || { echo "clean-cache: {{cbox_bin}} predates clean-cache; skipping (rebuild it with 'just build-cbox')" >&2; exit 0; }
+    exec "{{cbox_bin}}" clean-cache --reference "{{registry}}/library/{{custom_tag}}:latest"
 
 # Build images and the cbox binary, then boot the box and launch Claude Code.
 # Usage: just up-dev [box-name] [-f] [-c] [-v host:box ...] [-e KEY[=VALUE] ...] [-i image] [-d] [-- cmd...]
-up-dev *args: build build-cbox (up args)
+up-dev *args: build-cbox build (up args)
 
 cbox_bin := justfile_directory() + "/cbox/target/release/cbox"
 

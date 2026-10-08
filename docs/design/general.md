@@ -48,7 +48,8 @@ template.
 
 BoxLite also caches pulled images by tag, and that cache is the trap: once `cbox-custom:latest` has been pulled once, BoxLite will keep serving the cached digest for
 that tag even after a rebuild pushes a new one — there's no `boxlite rmi` to invalidate it.
-`just clean-cache` (run automatically at the end of `build-image`) works around this by
+`just clean-cache` (run automatically at the end of `build-image`, and a forward to `cbox
+clean-cache`) works around this by
 deleting the cached tag→digest row for the custom image directly from BoxLite's own sqlite
 index, plus sweeping any blob files (manifests/configs/layers/extracted) that no longer have a
 referencing row, so the next `boxlite run` is forced to re-pull. Disk-images are deliberately

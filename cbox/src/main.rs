@@ -99,6 +99,15 @@ enum Commands {
         #[arg(short, long)]
         all: bool,
     },
+    /// Drop a cached image tag so the next `up` re-pulls it, and delete
+    /// image blobs no remaining image references, across every per-name home.
+    #[command(name = "clean-cache")]
+    CleanCache {
+        /// The cached reference to drop: the custom image as the justfile
+        /// pushes it to the local registry.
+        #[arg(long, default_value = "localhost:5551/library/cbox-custom:latest")]
+        reference: String,
+    },
 }
 
 #[tokio::main]
@@ -123,6 +132,7 @@ async fn main() -> Result<()> {
         Commands::Exec { name, config, cmd } => commands::exec::run(name, cmd, config).await?,
         Commands::Down { name } => commands::down::run(name).await?,
         Commands::List { all } => commands::list::run(all).await?,
+        Commands::CleanCache { reference } => commands::clean_cache::run(&reference)?,
     }
     Ok(())
 }
