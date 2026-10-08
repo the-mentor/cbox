@@ -10,6 +10,9 @@ boxlite = "=0.10.5"
 clap = { version = "4", features = ["derive"] }
 crossterm = "0.29"
 futures = "0.3"
+# Same version and features boxlite itself links, so this adds no second
+# sqlite build. Used only by clean-cache, for BoxLite's image index.
+rusqlite = { version = "0.39", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }

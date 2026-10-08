@@ -71,11 +71,17 @@ pub fn resolve_config_path(explicit: Option<&Path>) -> Option<PathBuf> {
 /// Each box name gets its own BOXLITE_HOME, which is what lets two boxes run
 /// at once — BoxLite locks the whole home directory, not the individual box.
 pub fn box_home(name: &str) -> PathBuf {
+    boxes_root().join(name)
+}
+
+/// The directory holding every per-name home, for the verbs that walk them
+/// all (`list`, `clean-cache`).
+pub fn boxes_root() -> PathBuf {
     let root = std::env::var("BOXLITE_HOME").unwrap_or_else(|_| {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
         format!("{home}/.boxlite")
     });
-    PathBuf::from(root).join("boxes").join(name)
+    PathBuf::from(root).join("boxes")
 }
 
 #[cfg(test)]

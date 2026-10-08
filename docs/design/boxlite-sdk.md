@@ -178,7 +178,8 @@ motivated the work — `GH_TOKEN`. The Anthropic half is untested.
   the credential if the scoping is broken, which is precisely the case being tested. Doing this
   properly needs a local HTTPS endpoint whose certificate the box already trusts; a plain HTTP
   listener would not be intercepted and would produce a false pass.
-- **Does the SDK path still need the `clean-cache` sqlite workaround?** The tag→digest cache
+- ~~**Does the SDK path still need the `clean-cache` sqlite workaround?**~~ Yes, settled in
+  `cbox.md`'s Open questions: the SDK exposes no invalidation. The tag→digest cache
   described in `general.md` is a property of the runtime, not the CLI, so probably yes — but an
   in-process runtime may expose invalidation properly and let that workaround be deleted.
 
