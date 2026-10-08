@@ -1,5 +1,11 @@
 # cbox
 
+[![CI](https://github.com/the-mentor/cbox/actions/workflows/ci.yml/badge.svg)](https://github.com/the-mentor/cbox/actions/workflows/ci.yml)
+[![base-image](https://github.com/the-mentor/cbox/actions/workflows/base-image.yml/badge.svg)](https://github.com/the-mentor/cbox/actions/workflows/base-image.yml)
+[![Release](https://img.shields.io/github/v/release/the-mentor/cbox)](https://github.com/the-mentor/cbox/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/the-mentor/cbox)](LICENSE)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/the-mentor/cbox)
+
 Build and run [Claude Code](https://github.com/anthropics/claude-code) inside a
 [BoxLite](https://boxliteai.com) microVM, with an MCP config baked in that points Claude
 Code at a host-side [agentgateway](https://agentgateway.dev). One `just` command builds the
