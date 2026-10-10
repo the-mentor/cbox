@@ -16,75 +16,6 @@ gateway    := "docker compose -f agentgateway/docker-compose.yml" + `[ -f agentg
 default:
     @just --list
 
-# Install the boxlite CLI itself (a prerequisite for this repo) by downloading
-# the release tarball directly from GitHub (no curl|sh pipe) and verifying its
-# sha256 checksum before installing. Installs the latest release by default;
-# pass a version (e.g. v0.10.5) to pin. Installs into ~/bin by default; pass a
-# directory to install elsewhere.
-# Usage: just install-boxlite [version] [dir]
-install-boxlite version="" dir=(env_var('HOME') + "/bin"):
-    #!/usr/bin/env sh
-    set -eu
-    repo="boxlite-ai/boxlite"
-    install_dir="{{dir}}"
-
-    case "$(uname -s)-$(uname -m)" in
-      Darwin-arm64) target="aarch64-apple-darwin" ;;
-      Darwin-x86_64) echo "install-boxlite: macOS Intel is not supported; BoxLite requires Apple Silicon" >&2; exit 1 ;;
-      Linux-x86_64) target="x86_64-unknown-linux-gnu" ;;
-      Linux-aarch64|Linux-arm64) target="aarch64-unknown-linux-gnu" ;;
-      *) echo "install-boxlite: unsupported platform $(uname -s)-$(uname -m)" >&2; exit 1 ;;
-    esac
-
-    fetch() {
-      # $1 = url, $2 = output path
-      if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --proto '=https' --tlsv1.2 -o "$2" "$1"
-      elif command -v wget >/dev/null 2>&1; then
-        wget -qO "$2" "$1"
-      else
-        echo "install-boxlite: need curl or wget" >&2; exit 1
-      fi
-    }
-
-    version="{{version}}"
-    if [ -z "$version" ]; then
-      echo "Resolving latest boxlite release..." >&2
-      tmp_release="$(mktemp)"
-      fetch "https://api.github.com/repos/${repo}/releases/latest" "$tmp_release"
-      version="$(grep -m1 '"tag_name"' "$tmp_release" | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/')"
-      rm -f "$tmp_release"
-      [ -n "$version" ] || { echo "install-boxlite: could not resolve latest version" >&2; exit 1; }
-    fi
-
-    archive="boxlite-cli-${version}-${target}.tar.gz"
-    base_url="https://github.com/${repo}/releases/download/${version}"
-
-    tmpdir="$(mktemp -d)"
-    trap 'rm -rf "$tmpdir"' EXIT
-
-    echo "Downloading ${archive} (${version})..." >&2
-    fetch "${base_url}/${archive}" "${tmpdir}/${archive}"
-    fetch "${base_url}/${archive}.sha256" "${tmpdir}/${archive}.sha256"
-
-    expected="$(awk '{print $1}' "${tmpdir}/${archive}.sha256")"
-    if command -v sha256sum >/dev/null 2>&1; then
-      actual="$(sha256sum "${tmpdir}/${archive}" | awk '{print $1}')"
-    else
-      actual="$(shasum -a 256 "${tmpdir}/${archive}" | awk '{print $1}')"
-    fi
-    [ "$actual" = "$expected" ] || { echo "install-boxlite: checksum mismatch (expected $expected, got $actual)" >&2; exit 1; }
-
-    mkdir -p "$install_dir"
-    tar --no-same-owner -xzf "${tmpdir}/${archive}" -C "$tmpdir" boxlite
-    install -m 0755 "${tmpdir}/boxlite" "${install_dir}/boxlite"
-    echo "Installed ${install_dir}/boxlite (${version})" >&2
-    case ":$PATH:" in
-      *":${install_dir}:"*) : ;;
-      *) echo "Note: ${install_dir} is not on your PATH. Add this to your shell rc file:" >&2
-         echo "  export PATH=\"${install_dir}:\$PATH\"" >&2 ;;
-    esac
-
 # Symlink the cb wrapper (bin/cb) onto PATH so `cb up-dev` etc. work from
 # any directory. Installs into ~/bin by default; pass a directory to
 # install elsewhere.
@@ -263,7 +194,7 @@ ci-local *args:
 # Refresh the custom image and sweep orphaned image blobs from boxlite's cache.
 # BoxLite caches image tags immutably and has no `rmi`, so a rebuilt :latest is
 # ignored until its cached tag->digest row is dropped; then the next
-# `boxlite run` re-pulls from the registry. We also delete blob files
+# `cbox up` that creates a box re-pulls from the registry. We also delete blob files
 # (manifests/configs/layers/extracted) no longer referenced by any image in
 # boxlite's index. Disk-images are left alone on purpose: boxlite does not
 # record which image a disk-image belongs to, so an orphaned one can't be told
@@ -280,7 +211,7 @@ clean-cache:
       db="$home/db/boxlite.db"
       img="$home/images"
       [ -f "$db" ] || continue
-      # Drop the custom tag so the next `boxlite run` re-pulls the pushed image.
+      # Drop the custom tag so the next box creation re-pulls the pushed image.
       sqlite3 "$db" "DELETE FROM image_index WHERE reference='{{registry}}/library/{{custom_tag}}:latest';"
       # Blobs still referenced by any remaining image (filename form: sha256-...).
       keep="$(mktemp)"

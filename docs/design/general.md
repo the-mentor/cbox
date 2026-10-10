@@ -38,7 +38,7 @@ build workflow, and the local-only `just build-local` fallback.
 ## Image handoff through a local registry
 
 BoxLite does not read Docker's local image store — a `docker build` alone doesn't make an
-image visible to a `boxlite run`. `just build-image` bridges that gap by pushing the custom
+image visible to BoxLite. `just build-image` bridges that gap by pushing the custom
 image to a local `registry:2` (started by `local-development/registry/docker-compose.yml`),
 and BoxLite pulls from there instead. BoxLite is pointed at `registries.local.json`
 (gitignored) via `--config` rather than the tracked `registries.json` directly: `just
@@ -51,7 +51,7 @@ that tag even after a rebuild pushes a new one — there's no `boxlite rmi` to i
 `just clean-cache` (run automatically at the end of `build-image`) works around this by
 deleting the cached tag→digest row for the custom image directly from BoxLite's own sqlite
 index, plus sweeping any blob files (manifests/configs/layers/extracted) that no longer have a
-referencing row, so the next `boxlite run` is forced to re-pull. Disk-images are deliberately
+referencing row, so the next box creation is forced to re-pull. Disk-images are deliberately
 left out of that sweep: BoxLite's index doesn't record which image a given disk-image belongs
 to, so an orphaned one can't be told apart from a live one without risking a costly, or
 outright breaking, re-pull. `cbox up -f` sweeps them instead, after the recreated box has
@@ -95,28 +95,20 @@ before a pull that will really hit the registry: the first pull, a new tag, or r
 ## Running multiple boxes: per-box `BOXLITE_HOME` and its lock
 
 Each box name gets its own `BOXLITE_HOME`
-(`${BOXLITE_HOME:-$HOME/.boxlite}/boxes/<name>`), passed to every `boxlite` invocation via
-`--home`. This split exists because of a BoxLite behavior that isn't optional: BoxLite takes an
-exclusive filesystem lock on the *entire* `BOXLITE_HOME` directory for as long as a `boxlite
-run`/`exec` process is attached to it, not just a lock scoped to the one box inside it. Two
-boxes sharing a home therefore can't run concurrently — the second `boxlite run` fails with
+(`${BOXLITE_HOME:-$HOME/.boxlite}/boxes/<name>`, `config::box_home` in `cbox/src/config.rs`),
+and `cbox` opens a separate BoxLite runtime on it. This split exists because of a BoxLite
+behavior that isn't optional: a runtime takes an exclusive filesystem lock on the *entire*
+`BOXLITE_HOME` directory for as long as it is open, not just a lock scoped to the one box inside
+it. Two boxes sharing a home therefore can't run concurrently — the second runtime fails with
 `Failed to acquire runtime lock ... Another BoxliteRuntime is already using directory`. Giving
 each box name its own home sidesteps the shared lock entirely, which is what lets `just up
 box-a` and `just up box-b` run at the same time from separate terminals — the underlying lock
 is on the directory, not on the box name, so there's no way to make two boxes coexist inside
 one home.
 
-That same lock is also why `just shell <name>` only succeeds once the `just up <name>` session
-for that box has exited: `shell` opens `boxlite exec`, which is its own local runtime process
-and takes the identical per-home lock that `run` already holds. This is a limitation of
-BoxLite's CLI process model — every invocation is its own runtime — not something specific to
-this repo's layout, and per-box homes don't fix it, because it's a lock on the one home a given
-box actually lives in.
-
-A shared `boxlite serve` daemon would sidestep the per-process lock differently: many boxes,
-one long-lived runtime, one lock held by the daemon instead of by each transient CLI
-invocation. That would let `shell` and `up` for the *same* box coexist, which per-box homes
-cannot do. It isn't viable yet, though — its REST API doesn't currently forward `-v`/`-c` bind
-mounts into the box (boxlite-ai/boxlite#942), and this repo depends on those mounts to get the
-host workspace into `/workspace`. Until that lands upstream, per-box homes are the only
-available way to run more than one box at a time.
+The same lock would stop `just exec <name>` while `just up <name>` is still attached, since a
+second runtime on that home can't open. `cbox` gets around it rather than fighting it: `cbox up`
+keeps its runtime open and serves exec sessions over a per-box control socket (`cbox.sock` in
+the box's home), so `cbox exec` connects there instead of opening a runtime of its own. Only
+when no live socket exists does `exec` fall back to opening the runtime itself, and only then
+can the lock error appear. See `docs/design/cbox.md` for the socket protocol.
