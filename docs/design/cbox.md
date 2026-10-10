@@ -95,7 +95,7 @@ Docker. They share only the image tag and `registries.local.json`.
 | `logs`, `inspect`, `stats`, `cp` | `registry-up`, `registry-down`, `registry-login` |
 | `clean-cache` | `gateway-up`, `gateway-down`, `gateway-logs` |
 | per-box `BOXLITE_HOME` layout | `gateway-generate-ui-password` |
-| `registries.local.json` parsing | `install`, `install-boxlite`, `uninstall` |
+| `registries.local.json` parsing | `install`, `uninstall`, `build-cbox`, `install-cbox` |
 
 `clean-cache` moves because it performs surgery on BoxLite's own sqlite index. Whether it
 survives at all is **open** — see Open questions.

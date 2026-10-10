@@ -11,6 +11,11 @@ Build and run [Claude Code](https://github.com/anthropics/claude-code) inside a
 Code at a host-side [agentgateway](https://agentgateway.dev). One `just` command builds the
 image and boots the box.
 
+Boxes are driven by `cbox`, a small Rust binary in `cbox/` that embeds BoxLite as a library
+(BoxLite's runtime is compiled into it), so there is no separate `boxlite` CLI to install. The
+`justfile` is the front door: Docker-side recipes (building images, the local registry, the
+gateway) run directly, and `up`/`exec`/`down`/`list` forward to `cbox`.
+
 This repo covers both halves: the **box side** (building the image, running the VM) and the
 **host side** (`agentgateway/`, run with `just gateway-up`). The box's baked MCP config points
 at `http://host.boxlite.internal:15003/mcp`, which the gateway serves. The gateway can also
@@ -18,14 +23,18 @@ broker Anthropic traffic — with an API key it holds the key host-side so the V
 
 ## How it works
 
-- **Two-layer image.** `base/` builds `cbox-base` (Debian + Node 20 + Claude
-  Code) — slow, rebuilt rarely. `custom/` layers `cbox-custom` on top, baking
-  `custom/claude.json` in as `/root/.claude.json` (theme, onboarding, and a user-scoped
-  `agentgateway` MCP server). Nothing is baked into `/workspace`, so mounting a host
-  directory there clobbers no config.
+- **Two-layer image.** `base/` builds `cbox-base` (Debian trixie + Node 26 + Claude Code,
+  plus `gh`, `uv`, `pre-commit`, `lazygit` and oh-my-posh), running as a non-root
+  `sandbox-user` with passwordless `sudo`. CI publishes it to
+  `ghcr.io/the-mentor/cbox-base` on every release and weekly, so you normally never build it
+  yourself. `custom/` layers `cbox-custom` on top, baking `custom/claude.json` in as
+  `/home/sandbox-user/.claude.json` (theme, onboarding, and a user-scoped `agentgateway` MCP
+  server) and installing the plugins listed in `custom/Dockerfile`. Nothing is baked into
+  `/workspace`, so mounting a host directory there clobbers no config. See
+  `docs/design/images.md`.
 - **Image handoff via a local registry.** BoxLite does not read Docker's local image
   store, so the custom image is pushed to a local `registry:2` (managed by docker compose
-  under `local-development/registry/`) and BoxLite pulls it from there. BoxLite is actually
+  under `local-development/registry/`) and `cbox` pulls it from there. `cbox` is actually
   pointed at `registries.local.json` (gitignored), auto-created from the tracked
   `registries.json` template the first time you run `just up`/`up-dev`, so it's safe to add
   authenticated registries (e.g. ECR via `just registry-login`, see below) locally without
@@ -50,22 +59,47 @@ broker Anthropic traffic — with an API key it holds the key host-side so the V
 
 ## Prerequisites
 
-- [`docker`](https://docs.docker.com/get-docker/) with `docker compose`
-- [`boxlite`](https://boxliteai.com) CLI — install the latest into `~/bin` with
-  `just install-boxlite`, or pin a version with `just install-boxlite v0.10.5` (see below)
+- An Apple Silicon Mac, or Linux x86_64 with KVM (`/dev/kvm`) — what BoxLite's microVMs need.
+  Prebuilt `cbox` binaries exist for exactly these two; anything else has to build from source.
+- [`docker`](https://docs.docker.com/get-docker/) with `docker compose`, for building the image,
+  the local registry and the gateway
 - [`just`](https://github.com/casey/just)
+- `sqlite3` (optional) — used by `just clean-cache` to refresh BoxLite's image cache after a
+  rebuild; without it the step is skipped with a warning
+- To build `cbox` from source instead of downloading it: a Rust toolchain and `protoc >= 3.12`
+  (`brew install protobuf` / `apt install protobuf-compiler`)
 
 ## Setup
 
-Install the `boxlite` CLI if you don't already have it — this downloads the release tarball
-directly from [GitHub releases](https://github.com/boxlite-ai/boxlite/releases) (no piped
-install script), verifies its sha256 checksum, and installs into `~/bin` by default:
+Get the `cbox` binary. Either download a prebuilt one from the
+[latest release](https://github.com/the-mentor/cbox/releases/latest), or compile it:
 
 ```bash
-just install-boxlite                    # latest release, installed to ~/bin
-just install-boxlite v0.10.5             # pin a specific version
-just install-boxlite "" /usr/local/bin  # install to a different directory
+just install-cbox           # download the latest release's binary for this platform
+just install-cbox v0.1.12   # pin a specific release
+just build-cbox             # or compile it from source (cargo build --release)
+just version                # check which cbox is installed
 ```
+
+Both put it at `cbox/target/release/cbox`, the path the `up`/`exec`/`down`/`list` recipes run;
+they fail with a pointer to these two recipes if it's missing. `just up-dev` runs `build-cbox`
+for you. Use `install-cbox` unless you're changing `cbox/` itself — a downloaded binary can't
+reflect local edits.
+
+Optionally, install the `cb` wrapper so you can run cbox from any directory, not just from
+inside this repo:
+
+```bash
+just install           # symlinks bin/cb into ~/bin (or: just install /usr/local/bin)
+cd ~/src/my-project
+cb up -c               # same as `just up -c`, run from here
+```
+
+`cb` takes every recipe `just` does (`cb up`, `cb exec`, `cb down`, `cb list`, ...). Running it
+from a project directory is what you want day to day: the box name is derived from that
+project's git repo, and `-c` mounts that directory (not this repo) onto `/workspace`. Make sure
+the install directory is on your `PATH`; `just uninstall` removes the symlink. See
+[Running from anywhere](#running-from-anywhere).
 
 Copy the env template and set your credentials:
 
@@ -109,23 +143,29 @@ like ECR, without ever touching the tracked `registries.json`.
 ## Usage
 
 ```bash
-just up-dev            # build custom on the published base (pushed to the local registry) then boot the box
-just up                # boot the box without rebuilding (images must already be built)
+just up-dev            # build custom on the published base, build cbox, then boot the box
+just up                # boot the box without rebuilding (image and cbox must already exist)
 just build             # start the local registry, build custom on the published base, push custom
-just shell             # open a session in the running box
-just list              # list running boxes
-just down                        # stop and remove the box
+just build-local       # build base/ locally too, for changing base/ itself
+just exec              # open a session in the running box (alias: just shell)
+just list              # list running boxes (-a includes stopped ones)
+just down              # stop and remove the box
+just clean-cache       # make BoxLite re-pull a rebuilt image (build runs it for you)
 just gateway-up                  # start the host-side agentgateway (MCP + Anthropic routes)
 just gateway-down                # stop it
 just gateway-logs                # follow its logs
 just gateway-generate-ui-password # change the admin UI's default credentials, see below
+just ci-local          # run CI's Linux build job locally via nektos/act
+just install           # put the cb wrapper on PATH, so `cb <recipe>` works from any directory
+just uninstall         # remove it
 ```
 
 Use `just up-dev` the first time (or after changing the image); use `just up` for a fast
-boot once the images are built. Both run Claude Code interactively inside the box, so they
-need a valid `CLAUDE_CODE_OAUTH_TOKEN` in `.env`.
+boot once the image is built. Both run Claude Code interactively inside the box, so `.env`
+needs one of the Claude auth sets above. `-- <cmd>` launches something else instead (e.g.
+`just up -- bash`).
 
-`build`, `build-image`, and `build-base` forward any extra arguments to `docker build`. `build`
+`build`, `build-image`, `build-base`, and `build-local` forward any extra arguments to `docker build`. `build`
 and `build-image` build only `custom/`, on top of `CBOX_BASE_IMAGE` (the published
 `ghcr.io/the-mentor/cbox-base:latest` by default — see `docs/design/images.md`):
 
@@ -145,10 +185,10 @@ image. Claude Code's in-box auto-updater is off either way (`DISABLE_AUTOUPDATER
 `custom/settings.json`), since the npm global prefix is root-owned and the box's disk would lose
 the update on the next `-f` anyway.
 
-The `agentgateway` MCP server is configured user-scoped in `/root/.claude.json`, so Claude
+The `agentgateway` MCP server is configured user-scoped in `/home/sandbox-user/.claude.json`, so Claude
 Code points at the host gateway in any project — including a mounted host directory.
 
-`up`, `up-dev`, `shell`, and `down` take an optional box name (default: derived from the
+`up`, `up-dev`, `exec`/`shell`, and `down` take an optional box name (default: derived from the
 enclosing git repo's root directory, falling back to the cwd's name; pin one with `CBOX_NAME`), so you
 can run several boxes side by side. `up`/`up-dev` also accept `-f`/`--force` to replace an existing box of the same name with a
 fresh one (without it, a name collision resumes the existing box instead — see below):
@@ -167,17 +207,21 @@ disk and box record survive, and running `just up` again against the same name r
 resumed box keeps the credentials, mounts, disk size, memory and CPUs it had when first created, so `cbox`
 warns on resume and specifically calls out any secret whose value has changed since (e.g. a
 rotated token) — `-f` is how to pick up today's settings instead. Pass `-d`/`--detach` to keep
-the old always-running behavior, so the box stays up and `just exec`/`just shell` can reach it
-without a `just up` first.
+the box running after the terminal closes, so `just exec` can reach it later. `just exec` also
+works while `just up` is still attached — it opens a second session in the same box — and
+against a stopped box it starts it first.
 
 `up`/`up-dev` also accept `-c`/`--cwd` (mount the host current directory onto `/workspace`),
 `-v host:box` (mount an arbitrary host folder, repeatable), `-e KEY=VALUE` (inject an
-extra environment variable into the box, repeatable), and `-i`/`--image` (boot a different
-image path instead of the locally built `cbox-custom`):
+extra environment variable into the box, repeatable), `-i`/`--image` (boot a different
+image path instead of the locally built `cbox-custom`), and `--disk-size <GB>`,
+`--memory <GB>` and `--cpus <N>` (defaults 10 GB, 4 GiB and 2 — set when a box is created, so
+use `-f` to change them on an existing one):
 
 ```bash
 just up -e test=1 -e test2=2   # boot with test=1 and test2=2 set in the box
 just up -i localhost:5551/library/cbox-custom:v2   # boot a specific tag
+just up -f --memory 8 --cpus 4 # recreate the box with more resources
 ```
 
 Other recipes: `just registry-up` / `just registry-down` manage the local registry
@@ -313,7 +357,15 @@ the repo, including recipes' relative paths (e.g. `registries.json`). `-c`/`--cw
 `just`'s `invocation_directory()` rather than `$PWD` so it mounts the directory you actually
 ran the command from, not the repo's own directory.
 
+`cbox` itself can also be run directly (`cbox up`, `cbox exec`, `cbox down`, `cbox list`, plus
+`cbox name` to show which box name a directory resolves to). Outside `just`, nothing loads
+`.env` or passes `--config` for you, so it reads credentials from `--env-file`,
+`$CBOX_ENV_FILE`, or `~/.config/cbox/env` (never a `.env` in the current directory), and
+registries from `--config`, `$CBOX_REGISTRIES`, or `~/.config/cbox/registries.json`. See
+`docs/design/cbox.md`.
+
 ## Windows
 
-`just` recipes run under `sh`. On Windows, install Git Bash and add
-`set windows-shell := ["bash", "-cu"]` near the top of the `justfile`, or run under WSL.
+Not supported natively: there is no Windows `cbox` binary, and BoxLite needs KVM. WSL2 with
+nested virtualization (so `/dev/kvm` exists inside it) is the only route, using the Linux
+instructions above; it is untested.
