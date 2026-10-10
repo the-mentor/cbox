@@ -86,6 +86,21 @@ they fail with a pointer to these two recipes if it's missing. `just up-dev` run
 for you. Use `install-cbox` unless you're changing `cbox/` itself — a downloaded binary can't
 reflect local edits.
 
+Optionally, install the `cb` wrapper so you can run cbox from any directory, not just from
+inside this repo:
+
+```bash
+just install           # symlinks bin/cb into ~/bin (or: just install /usr/local/bin)
+cd ~/src/my-project
+cb up -c               # same as `just up -c`, run from here
+```
+
+`cb` takes every recipe `just` does (`cb up`, `cb exec`, `cb down`, `cb list`, ...). Running it
+from a project directory is what you want day to day: the box name is derived from that
+project's git repo, and `-c` mounts that directory (not this repo) onto `/workspace`. Make sure
+the install directory is on your `PATH`; `just uninstall` removes the symlink. See
+[Running from anywhere](#running-from-anywhere).
+
 Copy the env template and set your credentials:
 
 ```bash
@@ -141,6 +156,8 @@ just gateway-down                # stop it
 just gateway-logs                # follow its logs
 just gateway-generate-ui-password # change the admin UI's default credentials, see below
 just ci-local          # run CI's Linux build job locally via nektos/act
+just install           # put the cb wrapper on PATH, so `cb <recipe>` works from any directory
+just uninstall         # remove it
 ```
 
 Use `just up-dev` the first time (or after changing the image); use `just up` for a fast
