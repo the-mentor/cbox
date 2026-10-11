@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.13](https://github.com/the-mentor/cbox/compare/v0.1.12...v0.1.13) (2026-10-11)
+
+
+### Features
+
+* **custom:** override default plugins via CBOX_MARKETPLACES/CBOX_PLUGINS in .env ([#94](https://github.com/the-mentor/cbox/issues/94)) ([f875456](https://github.com/the-mentor/cbox/commit/f8754568d74aacb5f7d386fc76a9434f62b8fde4))
+
 ## [0.1.12](https://github.com/the-mentor/cbox/compare/v0.1.11...v0.1.12) (2026-10-07)
 
 
