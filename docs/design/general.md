@@ -18,7 +18,8 @@ tweak (a new plugin, a `claude.json` change) rebuilds only the fast layer.
 
 The custom layer bakes `custom/claude.json` in as `/home/sandbox-user/.claude.json` — the theme, the
 onboarding-complete flag, and the user-scoped `agentgateway` MCP server entry — and installs
-whatever plugin marketplaces and plugins are listed in its `MARKETPLACES`/`PLUGINS` build args.
+whatever plugin marketplaces and plugins are listed in its `CBOX_MARKETPLACES`/`CBOX_PLUGINS` build args;
+setting the same names in `.env` replaces those defaults for `just build-image`.
 Private ones go in `CBOX_PRIVATE_MARKETPLACES`/`CBOX_PRIVATE_PLUGINS` in the gitignored `.env`
 instead, since this repo is public. `just build-image` hands docker a GitHub token (`GH_TOKEN`,
 else `gh auth token`) as a BuildKit secret, mounted for the one `RUN` that installs them;

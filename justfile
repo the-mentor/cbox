@@ -115,23 +115,27 @@ build-base *args:
 # private repos. The token (GH_TOKEN, else `gh auth token`) goes to docker as a
 # BuildKit secret read from the environment, never a build arg or argv, so
 # it's in neither `docker history` nor `ps`. Unset = no gh, no token needed.
+# CBOX_MARKETPLACES/CBOX_PLUGINS (in .env) replace the build args of the same
+# name in custom/Dockerfile; unset keeps the Dockerfile's defaults.
 # Usage: just build-image [docker-build-args...]
 build-image *args: registry-up
     #!/usr/bin/env bash
     set -euo pipefail
-    private=()
+    extra=()
+    [ -z "${CBOX_MARKETPLACES:-}" ] || extra+=(--build-arg "CBOX_MARKETPLACES=$CBOX_MARKETPLACES")
+    [ -z "${CBOX_PLUGINS:-}" ] || extra+=(--build-arg "CBOX_PLUGINS=$CBOX_PLUGINS")
     if [ -n "${CBOX_PRIVATE_MARKETPLACES:-}" ]; then
         export GH_TOKEN="${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}"
         if [ -z "$GH_TOKEN" ]; then
             echo "CBOX_PRIVATE_MARKETPLACES is set but there's no GitHub token: set GH_TOKEN in .env or run gh auth login" >&2
             exit 1
         fi
-        private=(--secret id=gh_token,env=GH_TOKEN
-            --build-arg "PRIVATE_MARKETPLACES=$CBOX_PRIVATE_MARKETPLACES"
-            --build-arg "PRIVATE_PLUGINS=${CBOX_PRIVATE_PLUGINS:-}")
+        extra+=(--secret id=gh_token,env=GH_TOKEN
+            --build-arg "CBOX_PRIVATE_MARKETPLACES=$CBOX_PRIVATE_MARKETPLACES"
+            --build-arg "CBOX_PRIVATE_PLUGINS=${CBOX_PRIVATE_PLUGINS:-}")
     fi
-    # ${private[@]+...}: macOS bash 3.2 treats an empty array as unset under set -u.
-    docker build {{args}} {{ if base_image =~ '/' { "--pull" } else { "" } }} ${private[@]+"${private[@]}"} --build-arg BASE_IMAGE={{base_image}} -t {{custom_tag}} custom/
+    # ${extra[@]+...}: macOS bash 3.2 treats an empty array as unset under set -u.
+    docker build {{args}} {{ if base_image =~ '/' { "--pull" } else { "" } }} ${extra[@]+"${extra[@]}"} --build-arg BASE_IMAGE={{base_image}} -t {{custom_tag}} custom/
     docker tag {{custom_tag}} {{registry}}/library/{{custom_tag}}
     docker push {{registry}}/library/{{custom_tag}}
     just clean-cache
