@@ -115,15 +115,15 @@ build-base *args:
 # private repos. The token (GH_TOKEN, else `gh auth token`) goes to docker as a
 # BuildKit secret read from the environment, never a build arg or argv, so
 # it's in neither `docker history` nor `ps`. Unset = no gh, no token needed.
-# CBOX_MARKETPLACES/CBOX_PLUGINS (in .env) replace custom/Dockerfile's default
-# MARKETPLACES/PLUGINS lists; unset keeps the defaults.
+# CBOX_MARKETPLACES/CBOX_PLUGINS (in .env) replace the build args of the same
+# name in custom/Dockerfile; unset keeps the Dockerfile's defaults.
 # Usage: just build-image [docker-build-args...]
 build-image *args: registry-up
     #!/usr/bin/env bash
     set -euo pipefail
     extra=()
-    [ -z "${CBOX_MARKETPLACES:-}" ] || extra+=(--build-arg "MARKETPLACES=$CBOX_MARKETPLACES")
-    [ -z "${CBOX_PLUGINS:-}" ] || extra+=(--build-arg "PLUGINS=$CBOX_PLUGINS")
+    [ -z "${CBOX_MARKETPLACES:-}" ] || extra+=(--build-arg "CBOX_MARKETPLACES=$CBOX_MARKETPLACES")
+    [ -z "${CBOX_PLUGINS:-}" ] || extra+=(--build-arg "CBOX_PLUGINS=$CBOX_PLUGINS")
     if [ -n "${CBOX_PRIVATE_MARKETPLACES:-}" ]; then
         export GH_TOKEN="${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}"
         if [ -z "$GH_TOKEN" ]; then
@@ -131,8 +131,8 @@ build-image *args: registry-up
             exit 1
         fi
         extra+=(--secret id=gh_token,env=GH_TOKEN
-            --build-arg "PRIVATE_MARKETPLACES=$CBOX_PRIVATE_MARKETPLACES"
-            --build-arg "PRIVATE_PLUGINS=${CBOX_PRIVATE_PLUGINS:-}")
+            --build-arg "CBOX_PRIVATE_MARKETPLACES=$CBOX_PRIVATE_MARKETPLACES"
+            --build-arg "CBOX_PRIVATE_PLUGINS=${CBOX_PRIVATE_PLUGINS:-}")
     fi
     # ${extra[@]+...}: macOS bash 3.2 treats an empty array as unset under set -u.
     docker build {{args}} {{ if base_image =~ '/' { "--pull" } else { "" } }} ${extra[@]+"${extra[@]}"} --build-arg BASE_IMAGE={{base_image}} -t {{custom_tag}} custom/
