@@ -1,0 +1,3 @@
+# Pinned here, not as Dockerfile ARGs, so Dependabot (pip ecosystem) can bump them.
+uv==0.12.21
+pre-commit==4.6.2
