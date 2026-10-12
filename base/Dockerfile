@@ -38,7 +38,7 @@ RUN mv /usr/local/bin/claude /usr/local/bin/claude-real \
     && ln -sf /usr/local/bin/claude-wrapper /usr/local/bin/cc
 
 # renovate: datasource=pypi depName=uv
-ARG UV_VERSION=0.12.21
+ARG UV_VERSION=0.13.0
 RUN pip install --no-cache-dir --break-system-packages "uv==${UV_VERSION}"
 
 # A uv tool venv keeps pre-commit's deps (e.g. a newer packaging) away from
