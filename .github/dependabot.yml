@@ -7,10 +7,6 @@ updates:
     groups:
       actions:
         patterns: ['*']
-  - package-ecosystem: pip
-    directory: /base
-    schedule:
-      interval: weekly
   - package-ecosystem: cargo
     directory: /cbox
     schedule:
