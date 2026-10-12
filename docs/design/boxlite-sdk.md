@@ -65,6 +65,8 @@ gateway must be correct, not the gateway. Do not treat it as a deletion.
 
 **Verified.** `--allow-net` exists on the CLI today, needs no SDK, and takes repeatable
 hosts/IPs with `*.example.com` wildcards and CIDRs; everything else is DNS-sinkholed.
+*Corrected:* BoxLite (0.10.4 and 0.10.5) does not filter DNS. IP/CIDR rules match the destination address
+and hostname rules match the TLS SNI / HTTP Host; see `docs/design/allow-net.md`.
 
 What it gives is **egress containment**: an agent that has been prompt-injected, or a poisoned
 dependency, cannot reach an arbitrary destination to send this repo's source anywhere. Given
