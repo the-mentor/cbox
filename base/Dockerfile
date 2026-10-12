@@ -39,7 +39,9 @@ RUN mv /usr/local/bin/claude /usr/local/bin/claude-real \
 
 ARG UV_VERSION=0.12.21
 ARG PRE_COMMIT_VERSION=4.6.2
-RUN pip install --no-cache-dir --break-system-packages "uv==${UV_VERSION}" "pre-commit==${PRE_COMMIT_VERSION}"
+# --ignore-installed: pre-commit's deps can need newer versions of Debian-owned
+# packages (e.g. packaging), which pip can't uninstall; install alongside them in /usr/local.
+RUN pip install --no-cache-dir --break-system-packages --ignore-installed "uv==${UV_VERSION}" "pre-commit==${PRE_COMMIT_VERSION}"
 
 # Run as a generic non-root user, with passwordless sudo for apt installs and
 # the like. The node image's own uid-1000 user is renamed rather than adding a
