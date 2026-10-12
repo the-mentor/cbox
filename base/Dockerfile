@@ -37,11 +37,13 @@ RUN mv /usr/local/bin/claude /usr/local/bin/claude-real \
     && ln -sf /usr/local/bin/claude-wrapper /usr/local/bin/claude \
     && ln -sf /usr/local/bin/claude-wrapper /usr/local/bin/cc
 
+# renovate: datasource=pypi depName=uv
 ARG UV_VERSION=0.12.21
 RUN pip install --no-cache-dir --break-system-packages "uv==${UV_VERSION}"
 
 # A uv tool venv keeps pre-commit's deps (e.g. a newer packaging) away from
 # Debian's, which pip can't uninstall. Shared dirs so sandbox-user can run it.
+# renovate: datasource=pypi depName=pre-commit
 ARG PRE_COMMIT_VERSION=4.6.2
 RUN UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin \
     uv tool install --no-cache "pre-commit==${PRE_COMMIT_VERSION}"
