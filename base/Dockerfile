@@ -38,10 +38,13 @@ RUN mv /usr/local/bin/claude /usr/local/bin/claude-real \
     && ln -sf /usr/local/bin/claude-wrapper /usr/local/bin/cc
 
 ARG UV_VERSION=0.12.21
+RUN pip install --no-cache-dir --break-system-packages "uv==${UV_VERSION}"
+
+# A uv tool venv keeps pre-commit's deps (e.g. a newer packaging) away from
+# Debian's, which pip can't uninstall. Shared dirs so sandbox-user can run it.
 ARG PRE_COMMIT_VERSION=4.6.2
-# --ignore-installed: pre-commit's deps can need newer versions of Debian-owned
-# packages (e.g. packaging), which pip can't uninstall; install alongside them in /usr/local.
-RUN pip install --no-cache-dir --break-system-packages --ignore-installed "uv==${UV_VERSION}" "pre-commit==${PRE_COMMIT_VERSION}"
+RUN UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin \
+    uv tool install --no-cache "pre-commit==${PRE_COMMIT_VERSION}"
 
 # Run as a generic non-root user, with passwordless sudo for apt installs and
 # the like. The node image's own uid-1000 user is renamed rather than adding a
