@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.14](https://github.com/the-mentor/cbox/compare/v0.1.13...v0.1.14) (2026-10-12)
+
+
+### Bug Fixes
+
+* **base:** install pre-commit as a uv tool so its deps don't clash with Debian's packaging ([#96](https://github.com/the-mentor/cbox/issues/96)) ([6ab03eb](https://github.com/the-mentor/cbox/commit/6ab03eb4f8191ebe38ec097c700230fc94ca2f90))
+
 ## [0.1.13](https://github.com/the-mentor/cbox/compare/v0.1.12...v0.1.13) (2026-10-11)
 
 
