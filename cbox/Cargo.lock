@@ -296,9 +296,9 @@ dependencies = [
 
 [[package]]
 name = "boxlite"
-version = "0.10.5"
+version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afd580cb48f62daaf1cb4b18ff92d3ddbd7c14c9791f4ff395db5c7a2d83c1c1"
+checksum = "3bee1b083b8e153442c8b4887f7a34610312a8497f8ed5b06d371db585683ef8"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -370,9 +370,9 @@ dependencies = [
 
 [[package]]
 name = "boxlite-shared"
-version = "0.10.5"
+version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e664aff0b6da189e313dd85e8d380d4c35f7ce14b3c12d6c8c6c48044a4075ee"
+checksum = "bddbdb42337394558c079653764558d5ecff7097adff9d8737448409de289cf1"
 dependencies = [
  "futures",
  "prost",
@@ -388,9 +388,9 @@ dependencies = [
 
 [[package]]
 name = "bubblewrap-sys"
-version = "0.10.5"
+version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45d4229c757d7596904f5f21d48354493eda71b23bc8f06d3c85a2be0c116577"
+checksum = "c1875087def242534c6662e3a0f7f5db408a8e09241b8460af111de8eb42b718"
 dependencies = [
  "num_cpus",
 ]
@@ -879,9 +879,9 @@ dependencies = [
 
 [[package]]
 name = "e2fsprogs-sys"
-version = "0.10.5"
+version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "736c7133cad980e2a0ac1513b5a0ccb80d043b9228c8c83e2bf6d7c1acde7391"
+checksum = "4ef4a6151a595971f866f35dddf4e4671534c85c8ebcd8c42cccbe78988d4e54"
 dependencies = [
  "num_cpus",
 ]
@@ -1716,9 +1716,9 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "libkrun-sys"
-version = "0.10.5"
+version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b9501b16d94c9258632ee6eaf1f5d02b8462db2c17ab5526bbe0247770d2abf"
+checksum = "309f2714bf25ea66bddc8dfe505cc751662d9aeff0a06129706a6dfbf4f337fd"
 dependencies = [
  "libc",
  "num_cpus",
