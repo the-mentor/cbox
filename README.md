@@ -23,6 +23,59 @@ broker Anthropic traffic — with an API key it holds the key host-side so the V
 
 ## How it works
 
+```mermaid
+flowchart LR
+    subgraph host["Host machine"]
+        env[".env<br/>(real secrets)"]
+        cbox["cbox binary<br/>(embeds BoxLite runtime)"]
+        registry["local registry<br/>(cbox-custom image)"]
+        workspace["host folders<br/>(-c / -v mounts)"]
+
+        subgraph boxlite["BoxLite networking (per box)"]
+            mitm["MITM secret proxy<br/>placeholder → real GH token<br/>for github.com / api.github.com only"]
+        end
+
+        subgraph gw["agentgateway (docker compose, 127.0.0.1 ports)"]
+            mcpgw[":15003 /mcp<br/>MCP gateway"]
+            llmgw[":15002 /claude (passthrough)<br/>:15002 /api (attaches API key)"]
+            ui[":15000 admin UI<br/>(basic auth)"]
+            ghmcp["github-mcp<br/>(no published port)"]
+        end
+    end
+
+    subgraph vm["BoxLite microVM: the sandbox boundary"]
+        claude["Claude Code<br/>as sandbox-user"]
+        tools["gh / git / shell"]
+        ws["/workspace"]
+    end
+
+    anthropic(["Anthropic API"])
+    github(["GitHub"])
+    internet(["Rest of the internet"])
+
+    env -- "forwarded vars + secret placeholders" --> cbox
+    registry -- "pull image" --> cbox
+    cbox -- "boots and attaches" --> vm
+    workspace -. "mounted into" .-> ws
+
+    claude -- "MCP via host.boxlite.internal" --> mcpgw
+    claude -- "Anthropic via host.boxlite.internal<br/>(when ANTHROPIC_BASE_URL is set)" --> llmgw
+    claude -. "direct, when no gateway is used" .-> anthropic
+    mcpgw --> ghmcp --> github
+    llmgw --> anthropic
+
+    tools -- "HTTPS with placeholder token" --> mitm --> github
+    vm -. "unrestricted egress (no allow-list yet)" .-> internet
+```
+
+The microVM is the trust boundary. Real credentials stay on the host side of it: the
+gateway holds the Anthropic API key (keyed `/api` mode) and its own GitHub token, and the
+per-box MITM proxy swaps the box's `GH_TOKEN` placeholder for the real value only on
+GitHub-bound traffic. Two caveats matter. Every published gateway port is reachable from
+inside every box through `host.boxlite.internal`, so loopback binding does not keep the box
+out (see `docs/design/agentgateway.md`). And outbound internet access is not filtered, so the
+box can still reach any host directly (see `docs/design/cbox.md`).
+
 - **Two-layer image.** `base/` builds `cbox-base` (Debian trixie + Node 26 + Claude Code,
   plus `gh`, `uv`, `pre-commit`, `lazygit` and oh-my-posh), running as a non-root
   `sandbox-user` with passwordless `sudo`. CI publishes it to
