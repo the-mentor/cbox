@@ -49,17 +49,17 @@ template.
 
 BoxLite caches pulled images by tag. Up to 0.10.5 that cache was a trap: once
 `cbox-custom:latest` had been pulled, BoxLite kept serving the cached digest for that tag
-even after a rebuild pushed a new one, and `just clean-cache` had to delete the tag's row from
-BoxLite's sqlite index to force a re-pull. Since 0.10.7, a box whose disk is being built asks
-the registry what the tag points to and reuses cached layers, so a rebuild reaches the next
-new box (`cbox up -f`, or a new name) on its own. An existing box keeps the build it was made
-from across restarts. For a box made before 0.10.7 that build is found through the tag's
-cache row, so `clean-cache` must not drop that row, and no longer does. What `just
-clean-cache` (run automatically at the end of `build-image`) still does is sweep blob files
-(manifests/configs/layers/extracted) that no longer have a referencing row. Disk-images are deliberately
-left out of that sweep: BoxLite's index doesn't record which image a given disk-image belongs
-to, so an orphaned one can't be told apart from a live one without risking a costly, or
-outright breaking, re-pull. `cbox up -f` sweeps them instead, after the recreated box has
+even after a rebuild pushed a new one, and a `just clean-cache` recipe deleted the tag's row
+from BoxLite's sqlite index to force a re-pull. Since 0.10.7, a box whose disk is being built
+asks the registry what the tag points to and reuses cached layers, so a rebuild reaches the
+next new box (`cbox up -f`, or a new name) on its own. An existing box keeps the build it was
+made from across restarts. For a box made before 0.10.7 that build is found through the tag's
+cache row, so nothing should drop that row. `clean-cache` was removed with the 0.10.7 upgrade.
+Its other half, deleting blob files no row referenced, freed almost nothing once 0.10.7
+started indexing every pulled build. So image blobs now accumulate, one build per rebuild,
+until a box home is deleted. Disk-images are a separate matter: BoxLite's index doesn't record
+which image a given disk-image belongs to, so an orphaned one can't be told apart from a live
+one by the index alone. `cbox up -f` sweeps them instead, after the recreated box has
 started: every box disk is a qcow2 naming its disk-image as its backing file, so any
 disk-image no qcow2 in the home points at is unused and gets deleted.
 

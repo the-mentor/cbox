@@ -138,7 +138,6 @@ build-image *args: registry-up
     docker build {{args}} {{ if base_image =~ '/' { "--pull" } else { "" } }} ${extra[@]+"${extra[@]}"} --build-arg BASE_IMAGE={{base_image}} -t {{custom_tag}} custom/
     docker tag {{custom_tag}} {{registry}}/library/{{custom_tag}}
     docker push {{registry}}/library/{{custom_tag}}
-    just clean-cache
 
 # Usage: just build [docker-build-args...]
 build *args: (build-image args)
@@ -195,38 +194,6 @@ ci-local *args:
     export DOCKER_HOST="$host"
     act pull_request -W .github/workflows/ci.yml -j build --matrix os:ubuntu-latest {{args}}
 
-# Sweep orphaned image blobs from boxlite's cache: delete blob files
-# (manifests/configs/layers/extracted) no longer referenced by any image in
-# boxlite's index. This used to also drop the custom tag's row so a rebuilt
-# :latest got re-pulled; since boxlite 0.10.7 every new box asks the registry
-# for a tag itself, and the tag's row is what a box created before 0.10.7
-# restarts from, so it is left alone (see docs/design/general.md).
-# Disk-images are left alone on purpose: boxlite does not
-# record which image a disk-image belongs to, so an orphaned one can't be told
-# apart from a live one without risking a costly (or breaking) re-pull.
-clean-cache:
-    #!/usr/bin/env sh
-    set -eu
-    command -v sqlite3 >/dev/null 2>&1 || { echo "clean-cache: sqlite3 not found; skipping" >&2; exit 0; }
-    root="${BOXLITE_HOME:-$HOME/.boxlite}/boxes"
-    [ -d "$root" ] || { echo "clean-cache: no box homes under $root; skipping" >&2; exit 0; }
-    for dir in "$root"/*/; do
-      [ -d "$dir" ] || continue
-      home="${dir%/}"
-      db="$home/db/boxlite.db"
-      img="$home/images"
-      [ -f "$db" ] || continue
-      # Blobs still referenced by any remaining image (filename form: sha256-...).
-      keep="$(mktemp)"
-      { sqlite3 "$db" "SELECT manifest_digest FROM image_index;"
-        sqlite3 "$db" "SELECT config_digest FROM image_index;"
-        sqlite3 "$db" "SELECT value FROM image_index, json_each(layers);"
-      } | tr ':' '-' | sort -u > "$keep"
-      for f in "$img"/manifests/* "$img"/configs/* "$img"/layers/* "$img"/extracted/*; do
-        [ -e "$f" ] || continue
-        key="$(basename "$f" | sed 's/\.json$//; s/\.tar\.gz$//')"
-        grep -qx "$key" "$keep" || rm -rf "$f"
-      done
       rm -f "$keep"
     done
 

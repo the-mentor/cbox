@@ -179,8 +179,8 @@ motivated the work — `GH_TOKEN`. The Anthropic half is untested.
   properly needs a local HTTPS endpoint whose certificate the box already trusts; a plain HTTP
   listener would not be intercepted and would produce a false pass.
 - **Does the SDK path still need the `clean-cache` sqlite workaround?** Answered by BoxLite
-  0.10.7: a new disk re-checks a tag against the registry, so the tag drop is gone. Only the
-  blob sweep remains (see `cbox.md`).
+  0.10.7: a new disk re-checks a tag against the registry, so `clean-cache` was removed (see
+  `cbox.md`).
 
 ## Language
 

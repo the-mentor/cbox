@@ -8,7 +8,7 @@ Phase 1 shipped `up`, `exec`, `down`, `list`, `name`, derived box naming, the Gi
 two-secret credential model, environment-file loading, and the control socket that lets `exec`
 run while `up` is attached. Deferred to phase 2: `logs`, `inspect`, `stats`, `cp`,
 `--allow-net` / `--network disabled`, `-u`, `-p/--publish`,
-`clean-cache`, and moving Anthropic auth onto secrets. Where a section below describes
+and moving Anthropic auth onto secrets. Where a section below describes
 something in that second list, it is a specification rather than a description.
 
 Claims are tagged **verified** (measured against `boxlite 0.9.7`, the CLI, or a live box),
@@ -42,13 +42,12 @@ built for the first time now asks the registry what a tag points to (`ImageManag
 called from `image_for_new_disk` in `litebox/init/tasks/container_rootfs.rs`). Layers already
 cached are reused, and the cache stands in only when the registry gives no answer (unreachable,
 5xx or 429). So a rebuilt `cbox-custom:latest` reaches the next new box without
-`clean-cache` dropping its row, and `clean-cache` no longer does. Second, that pull now fails
+anything dropping its cache row, and `just clean-cache`, which existed to do that, is gone. Second, that pull now fails
 when the registry does answer with an error, cached copy or not. An expired ECR login
 therefore fails a new box, where 0.10.5 quietly used the cache (see `general.md`). Third, a
 restart reads its config from the build its disk was made from, recorded per box as
 `BoxInfo::resolved_image`. A box made before 0.10.7 has no record and reads by tag, whose cache
-row still names the build this host first pulled. That row is why `clean-cache` must leave it
-alone. Smaller changes: `BoxOptions` has a new `mounts` field, which the local runtime refuses
+row still names the build this host first pulled, so nothing may drop that row. Smaller changes: `BoxOptions` has a new `mounts` field, which the local runtime refuses
 if it is non-empty, and cbox leaves it empty. A non-empty `entrypoint` now also discards the
 image's CMD, but cbox sets only `cmd`. `BoxliteError::NotFound` now reads "not found: …",
 and cbox matches the variant, not the text. The SQLite schema is unchanged, so 0.10.5 and
@@ -111,12 +110,12 @@ Docker. They share only the image tag and `registries.local.json`.
 | --- | --- |
 | `up`, `exec`, `down`, `list` | `build-base`, `build-image`, `build` |
 | `logs`, `inspect`, `stats`, `cp` | `registry-up`, `registry-down`, `registry-login` |
-| `clean-cache` | `gateway-up`, `gateway-down`, `gateway-logs` |
-| per-box `BOXLITE_HOME` layout | `gateway-generate-ui-password` |
-| `registries.local.json` parsing | `install`, `uninstall`, `build-cbox`, `install-cbox` |
+| per-box `BOXLITE_HOME` layout | `gateway-up`, `gateway-down`, `gateway-logs` |
+| `registries.local.json` parsing | `gateway-generate-ui-password` |
+| | `install`, `uninstall`, `build-cbox`, `install-cbox` |
 
-`clean-cache` moves because it performs surgery on BoxLite's own sqlite index. Since 0.10.7
-only its blob sweep is still needed (see the 0.10.7 note above and Open questions).
+`clean-cache` was once planned to move here too. It was removed instead, since BoxLite 0.10.7
+made it unnecessary (see the 0.10.7 note above and Open questions).
 
 ## Front door
 
@@ -155,7 +154,6 @@ cbox inspect [name]
 cbox stats [name] [-s]
 cbox cp   <src> <dst>
 cbox name
-cbox clean-cache
 ```
 
 ## Box naming
@@ -649,12 +647,13 @@ These can still change the design.
   it — see the process-model section above and `cbox/tests/secrets_survive.md`. The fallback
   route keeps substitution, so the control socket remains an optimization for lock contention
   rather than a credential requirement.
-- ~~**Does the SDK replace `clean-cache`'s sqlite surgery?**~~ **Settled for the tag drop, read
-  from source at 0.10.7.** A new disk asks the registry for a tag itself, so the `DELETE FROM
-  image_index` step is gone from `clean-cache`. `ImageHandle::remove` exists now but forgets
-  every reference under a name, digest aliases included, which would make old boxes fetch a
-  newer build's config on restart. So it is not a substitute. The blob sweep has no SDK
-  equivalent and stays. Not yet measured on a live box.
+- ~~**Does the SDK replace `clean-cache`'s sqlite surgery?**~~ **Settled by removing it, read
+  from source at 0.10.7.** A new disk asks the registry for a tag itself, so the tag drop is
+  unneeded. Dropping the tag would actually be harmful, because it is how a pre-0.10.7 box
+  finds its build on restart. The blob sweep freed almost nothing once every pulled build got
+  its own index row, so `clean-cache` was deleted outright. `ImageHandle::remove` is not a
+  substitute: it forgets digest aliases too, so old boxes would fetch a newer build's config
+  on restart. Reclaiming old builds is unsolved. Not yet measured on a live box.
 - **Does substitution cover `x-api-key`?** Decides whether Anthropic can ever leave the
   gateway. Only `Authorization` is verified.
 - **Does Node trust the MITM CA?** Node ships its own CA store and ignores the system store.
@@ -673,5 +672,5 @@ These can still change the design.
    secrets-survival integration check with it — `exec` cannot be called done until the
    fallback path is known to keep substitution.
 3. Add observability, then `--allow-net`, then resource limits, then `cp`/`--publish`.
-4. Settle `clean-cache`. The tag drop is gone as of 0.10.7; what remains is porting the blob sweep, or not.
+4. ~~Settle `clean-cache`~~. Removed with the 0.10.7 upgrade, as unnecessary.
 5. Revisit Anthropic only if the `x-api-key` and Node CA questions both resolve favorably.
