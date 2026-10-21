@@ -101,8 +101,8 @@ still attached and, for whatever reason, its control socket didn't come up).
 
 ## Architecture
 
-- **Box side.** The two-layer image, the local-registry image handoff (and the `clean-cache`
-  tag→digest gotcha), and authenticated-registry (ECR) support are all documented in
+- **Box side.** The two-layer image, the local-registry image handoff (and what `clean-cache`
+  still does since BoxLite 0.10.7), and authenticated-registry (ECR) support are all documented in
   `docs/design/general.md` — read it before touching the Dockerfiles or the `justfile`'s
   image/registry recipes. How `cbox-base` gets built and published by CI, its tags, and
   `build-local` are in `docs/design/images.md`. Environment-variable passthrough and GitHub secret substitution are

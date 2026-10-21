@@ -64,8 +64,8 @@ broker Anthropic traffic — with an API key it holds the key host-side so the V
 - [`docker`](https://docs.docker.com/get-docker/) with `docker compose`, for building the image,
   the local registry and the gateway
 - [`just`](https://github.com/casey/just)
-- `sqlite3` (optional) — used by `just clean-cache` to refresh BoxLite's image cache after a
-  rebuild; without it the step is skipped with a warning
+- `sqlite3` (optional) — used by `just clean-cache` to delete image blobs nothing in BoxLite's
+  cache references any more; without it the step is skipped with a warning
 - To build `cbox` from source instead of downloading it: a Rust toolchain and `protoc >= 3.12`
   (`brew install protobuf` / `apt install protobuf-compiler`)
 
@@ -150,7 +150,7 @@ just build-local       # build base/ locally too, for changing base/ itself
 just exec              # open a session in the running box (alias: just shell)
 just list              # list running boxes (-a includes stopped ones)
 just down              # stop and remove the box
-just clean-cache       # make BoxLite re-pull a rebuilt image (build runs it for you)
+just clean-cache       # delete unreferenced image blobs from BoxLite's cache (build runs it for you)
 just gateway-up                  # start the host-side agentgateway (MCP + Anthropic routes)
 just gateway-down                # stop it
 just gateway-logs                # follow its logs

@@ -47,12 +47,16 @@ up`/`up-dev` copy the latter to the former on first run only, so it's safe to ad
 per-machine registry credentials to the local copy without ever touching the tracked
 template.
 
-BoxLite also caches pulled images by tag, and that cache is the trap: once `cbox-custom:latest` has been pulled once, BoxLite will keep serving the cached digest for
-that tag even after a rebuild pushes a new one — there's no `boxlite rmi` to invalidate it.
-`just clean-cache` (run automatically at the end of `build-image`) works around this by
-deleting the cached tag→digest row for the custom image directly from BoxLite's own sqlite
-index, plus sweeping any blob files (manifests/configs/layers/extracted) that no longer have a
-referencing row, so the next box creation is forced to re-pull. Disk-images are deliberately
+BoxLite caches pulled images by tag. Up to 0.10.5 that cache was a trap: once
+`cbox-custom:latest` had been pulled, BoxLite kept serving the cached digest for that tag
+even after a rebuild pushed a new one, and `just clean-cache` had to delete the tag's row from
+BoxLite's sqlite index to force a re-pull. Since 0.10.7, a box whose disk is being built asks
+the registry what the tag points to and reuses cached layers, so a rebuild reaches the next
+new box (`cbox up -f`, or a new name) on its own. An existing box keeps the build it was made
+from across restarts. For a box made before 0.10.7 that build is found through the tag's
+cache row, so `clean-cache` must not drop that row, and no longer does. What `just
+clean-cache` (run automatically at the end of `build-image`) still does is sweep blob files
+(manifests/configs/layers/extracted) that no longer have a referencing row. Disk-images are deliberately
 left out of that sweep: BoxLite's index doesn't record which image a given disk-image belongs
 to, so an orphaned one can't be told apart from a live one without risking a costly, or
 outright breaking, re-pull. `cbox up -f` sweeps them instead, after the recreated box has
@@ -87,11 +91,13 @@ BoxLite itself. `scripts/registry-login.py` fills that gap: piped a password on 
 `--registry <host>`'s `auth` entry in `registries.local.json` — never the tracked
 `registries.json`, so live credentials are never at risk of being committed.
 
-Because BoxLite caches pulled images by tag and never re-hits the registry for a tag it already
-has cached, a short-lived credential only needs to be fresh at the moment of an actual pull —
-not continuously. ECR tokens last 12 hours, so `just registry-login` only needs to be re-run
-before a pull that will really hit the registry: the first pull, a new tag, or right after
-`just clean-cache` has forced a re-pull of an existing tag.
+Since BoxLite 0.10.7, every new box (a new name, or `cbox up -f`) asks the registry what
+its tag points to, even when the image is cached. If the registry can't be reached, the cache
+is used. But if the registry answers with an error, such as a 401 for an expired token, the box
+fails to start. ECR tokens last 12 hours, so re-run `just registry-login` before creating a
+box if the last login is older than that. Resuming an existing box reads only its cache and
+needs no login. (Up to 0.10.5, a cached tag never went back to the registry, so a login only
+had to be fresh for a first pull.)
 
 ## Running multiple boxes: per-box `BOXLITE_HOME` and its lock
 

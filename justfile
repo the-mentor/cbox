@@ -195,12 +195,13 @@ ci-local *args:
     export DOCKER_HOST="$host"
     act pull_request -W .github/workflows/ci.yml -j build --matrix os:ubuntu-latest {{args}}
 
-# Refresh the custom image and sweep orphaned image blobs from boxlite's cache.
-# BoxLite caches image tags immutably and has no `rmi`, so a rebuilt :latest is
-# ignored until its cached tag->digest row is dropped; then the next
-# `cbox up` that creates a box re-pulls from the registry. We also delete blob files
+# Sweep orphaned image blobs from boxlite's cache: delete blob files
 # (manifests/configs/layers/extracted) no longer referenced by any image in
-# boxlite's index. Disk-images are left alone on purpose: boxlite does not
+# boxlite's index. This used to also drop the custom tag's row so a rebuilt
+# :latest got re-pulled; since boxlite 0.10.7 every new box asks the registry
+# for a tag itself, and the tag's row is what a box created before 0.10.7
+# restarts from, so it is left alone (see docs/design/general.md).
+# Disk-images are left alone on purpose: boxlite does not
 # record which image a disk-image belongs to, so an orphaned one can't be told
 # apart from a live one without risking a costly (or breaking) re-pull.
 clean-cache:
@@ -215,8 +216,6 @@ clean-cache:
       db="$home/db/boxlite.db"
       img="$home/images"
       [ -f "$db" ] || continue
-      # Drop the custom tag so the next box creation re-pulls the pushed image.
-      sqlite3 "$db" "DELETE FROM image_index WHERE reference='{{registry}}/library/{{custom_tag}}:latest';"
       # Blobs still referenced by any remaining image (filename form: sha256-...).
       keep="$(mktemp)"
       { sqlite3 "$db" "SELECT manifest_digest FROM image_index;"

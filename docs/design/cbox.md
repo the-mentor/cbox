@@ -15,7 +15,7 @@ Claims are tagged **verified** (measured against `boxlite 0.9.7`, the CLI, or a 
 **read from source** (asserted by the crate's own code but not exercised), or **open**. The
 split is load-bearing: two of the open items can still change the design.
 
-**The crate is now pinned at `boxlite 0.10.5`** (see below for what 0.10.5 changed). The
+**The crate is now pinned at `boxlite 0.10.7`** (see below for what 0.10.5 and 0.10.7 changed). The
 measurements above were taken at 0.9.7. The 0.10.4 upgrade was checked against its source rather than re-measured. Three things
 matter to cbox. First, `auto_remove` is deprecated in favor of `auto_delete`, and cbox sets
 `auto_delete: Some(0)` explicitly, because `None` falls back to `auto_remove`, which
@@ -35,6 +35,24 @@ renewal workaround (#82, reverted). A box created under 0.10.4 still has a 24-ho
 next stop and start, which renews it. Inbound networking now defaults to disabled
 (boxlite#1677). cbox publishes no ports, so this changes nothing today; a future
 `-p/--publish` must enable inbound explicitly.
+
+**0.10.7** (skipping 0.10.6, which it contains), also checked against its source, changes how
+images are resolved, and that reaches cbox in three places. First, a box whose disk is being
+built for the first time now asks the registry what a tag points to (`ImageManager::refresh`,
+called from `image_for_new_disk` in `litebox/init/tasks/container_rootfs.rs`). Layers already
+cached are reused, and the cache stands in only when the registry gives no answer (unreachable,
+5xx or 429). So a rebuilt `cbox-custom:latest` reaches the next new box without
+`clean-cache` dropping its row, and `clean-cache` no longer does. Second, that pull now fails
+when the registry does answer with an error, cached copy or not. An expired ECR login
+therefore fails a new box, where 0.10.5 quietly used the cache (see `general.md`). Third, a
+restart reads its config from the build its disk was made from, recorded per box as
+`BoxInfo::resolved_image`. A box made before 0.10.7 has no record and reads by tag, whose cache
+row still names the build this host first pulled. That row is why `clean-cache` must leave it
+alone. Smaller changes: `BoxOptions` has a new `mounts` field, which the local runtime refuses
+if it is non-empty, and cbox leaves it empty. A non-empty `entrypoint` now also discards the
+image's CMD, but cbox sets only `cmd`. `BoxliteError::NotFound` now reads "not found: …",
+and cbox matches the variant, not the text. The SQLite schema is unchanged, so 0.10.5 and
+0.10.7 binaries can open each other's homes.
 
 **Where the evidence lives.** Every **verified** claim below states its measurement inline, so
 this document stands on its own. The measurements were originally taken by two throwaway
@@ -97,8 +115,8 @@ Docker. They share only the image tag and `registries.local.json`.
 | per-box `BOXLITE_HOME` layout | `gateway-generate-ui-password` |
 | `registries.local.json` parsing | `install`, `uninstall`, `build-cbox`, `install-cbox` |
 
-`clean-cache` moves because it performs surgery on BoxLite's own sqlite index. Whether it
-survives at all is **open** — see Open questions.
+`clean-cache` moves because it performs surgery on BoxLite's own sqlite index. Since 0.10.7
+only its blob sweep is still needed (see the 0.10.7 note above and Open questions).
 
 ## Front door
 
@@ -243,7 +261,7 @@ agent coming up again (~2.2s for `guest_connect` alone, measured), but not a *re
 `--force` keeps meaning what it always meant: remove and recreate from scratch, discarding
 whatever the box had accumulated.
 
-**This is a restart, never a suspend/resume.** BoxLite (0.9.7 through 0.10.5) has no guest-memory
+**This is a restart, never a suspend/resume.** BoxLite (0.9.7 through 0.10.7) has no guest-memory
 snapshot/restore and no libkrun pause-and-resume FFI; `stop()` then `start()` boots a new
 kernel and a new guest agent from the preserved disk. Nothing in cbox should ever describe
 this as "resuming a paused VM" — it resumes the *box* (its disk and identity), not a live
@@ -631,9 +649,12 @@ These can still change the design.
   it — see the process-model section above and `cbox/tests/secrets_survive.md`. The fallback
   route keeps substitution, so the control socket remains an optimization for lock contention
   rather than a credential requirement.
-- **Does the SDK replace `clean-cache`'s sqlite surgery?** `runtime.images()` exists; whether
-  it exposes tag→digest invalidation is unchecked. If not, the `DELETE FROM image_index`
-  workaround ports as-is and the design should say so plainly rather than pretend otherwise.
+- ~~**Does the SDK replace `clean-cache`'s sqlite surgery?**~~ **Settled for the tag drop, read
+  from source at 0.10.7.** A new disk asks the registry for a tag itself, so the `DELETE FROM
+  image_index` step is gone from `clean-cache`. `ImageHandle::remove` exists now but forgets
+  every reference under a name, digest aliases included, which would make old boxes fetch a
+  newer build's config on restart. So it is not a substitute. The blob sweep has no SDK
+  equivalent and stays. Not yet measured on a live box.
 - **Does substitution cover `x-api-key`?** Decides whether Anthropic can ever leave the
   gateway. Only `Authorization` is verified.
 - **Does Node trust the MITM CA?** Node ships its own CA store and ignores the system store.
@@ -652,5 +673,5 @@ These can still change the design.
    secrets-survival integration check with it — `exec` cannot be called done until the
    fallback path is known to keep substitution.
 3. Add observability, then `--allow-net`, then resource limits, then `cp`/`--publish`.
-4. Settle `clean-cache` — port the sqlite workaround or replace it, and record which.
+4. Settle `clean-cache`. The tag drop is gone as of 0.10.7; what remains is porting the blob sweep, or not.
 5. Revisit Anthropic only if the `x-api-key` and Node CA questions both resolve favorably.
