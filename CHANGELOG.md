@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.15](https://github.com/the-mentor/cbox/compare/v0.1.14...v0.1.15) (2026-10-21)
+
+
+### Features
+
+* **cbox:** upgrade boxlite to 0.10.7 and remove clean-cache ([#105](https://github.com/the-mentor/cbox/issues/105)) ([21d104d](https://github.com/the-mentor/cbox/commit/21d104d5a8f572bd4a33cec8e5bc24067e6ade99))
+
 ## [0.1.14](https://github.com/the-mentor/cbox/compare/v0.1.13...v0.1.14) (2026-10-12)
 
 
