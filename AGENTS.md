@@ -85,8 +85,8 @@ images and booting a box (`just up-dev`).
 ## Running multiple boxes at once
 
 `--home` — this is what lets `just up box-a` and `just up box-b` run at the same time from
-separate terminals; see `docs/design/general.md` for why BoxLite requires it. `just list` and
-`just clean-cache` iterate over every `boxes/*` home to cover all box names.
+separate terminals; see `docs/design/general.md` for why BoxLite requires it. `just list`
+iterates over every `boxes/*` home to cover all box names.
 
 `just exec <name>` does **not** require the `just up <name>` session for that box to have
 exited first. `cbox up` binds a per-box control socket (`cbox.sock`, inside that box's home)
@@ -101,8 +101,8 @@ still attached and, for whatever reason, its control socket didn't come up).
 
 ## Architecture
 
-- **Box side.** The two-layer image, the local-registry image handoff (and the `clean-cache`
-  tag→digest gotcha), and authenticated-registry (ECR) support are all documented in
+- **Box side.** The two-layer image, the local-registry image handoff (and why a rebuild needs
+  no cache invalidation since BoxLite 0.10.7), and authenticated-registry (ECR) support are all documented in
   `docs/design/general.md` — read it before touching the Dockerfiles or the `justfile`'s
   image/registry recipes. How `cbox-base` gets built and published by CI, its tags, and
   `build-local` are in `docs/design/images.md`. Environment-variable passthrough and GitHub secret substitution are
