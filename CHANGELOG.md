@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.16](https://github.com/the-mentor/cbox/compare/v0.1.15...v0.1.16) (2026-10-22)
+
+
+### Bug Fixes
+
+* **deps:** bump webpki-roots to 1.0.10 and rustls-webpki to 0.103.16 to distrust compromised eMudhra CAs ([#109](https://github.com/the-mentor/cbox/issues/109)) ([393739f](https://github.com/the-mentor/cbox/commit/393739fa0ba22111d3bcfa114db61f031ad8e82c))
+
 ## [0.1.15](https://github.com/the-mentor/cbox/compare/v0.1.14...v0.1.15) (2026-10-21)
 
 
