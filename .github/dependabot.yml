@@ -12,4 +12,9 @@ updates:
     schedule:
       interval: weekly
     allow:
-      - dependency-name: boxlite
+      - dependency-type: all
+    groups:
+      cargo:
+        patterns: ['*']
+        # boxlite is pinned exactly and changes VM behavior, so it keeps its own PR
+        exclude-patterns: [boxlite]
