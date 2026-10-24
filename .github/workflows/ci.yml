@@ -184,7 +184,18 @@ jobs:
           platforms: linux/amd64
           pull: true
           push: false
+          load: true
+          tags: cbox-custom:ci
           build-args: BASE_IMAGE=${{ needs.base-image.outputs.image || 'ghcr.io/the-mentor/cbox-base:latest' }}
+
+      # Lists every Brotli copy in the image, for checking CVE-2026-111497 fixes.
+      - name: List Brotli copies
+        run: |
+          docker run --rm --user root --entrypoint sh cbox-custom:ci -c '
+            node -p "process.version + \" bundled brotli \" + process.versions.brotli + \" fix marker \" + require(\"zlib\").constants.BROTLI_DECODER_ERROR_FORMAT_BLOCK_SWITCH"
+            dpkg -l | grep -i brotli || echo "no brotli dpkg packages"
+            pip list 2>/dev/null | grep -i brotli || echo "no brotli pip packages"
+            find / -xdev -iname "*brotli*" -not -path "/proc/*" 2>/dev/null'
 
   # The single check the ruleset requires. Passes if every job passed or was
   # skipped for having nothing to check, so jobs and matrices can change
