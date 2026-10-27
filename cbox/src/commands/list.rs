@@ -43,6 +43,7 @@ pub async fn run(all: bool) -> Result<()> {
         let runtime = match BoxliteRuntime::new(BoxliteOptions {
             home_dir: home.clone(),
             image_registries: vec![],
+            image_registry_proxy: None,
         }) {
             Ok(r) => r,
             // A home locked by a running `cbox up` cannot be opened here —

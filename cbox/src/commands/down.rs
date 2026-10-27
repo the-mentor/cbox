@@ -21,6 +21,7 @@ pub async fn run(name: Option<String>) -> Result<()> {
     let runtime = BoxliteRuntime::new(BoxliteOptions {
         home_dir: home.clone(),
         image_registries: vec![],
+        image_registry_proxy: None,
     })
     .context("failed to open the BoxLite runtime")?;
 
