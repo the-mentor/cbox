@@ -15,7 +15,7 @@ Claims are tagged **verified** (measured against `boxlite 0.9.7`, the CLI, or a 
 **read from source** (asserted by the crate's own code but not exercised), or **open**. The
 split is load-bearing: two of the open items can still change the design.
 
-**The crate is now pinned at `boxlite 0.10.7`** (see below for what 0.10.5 and 0.10.7 changed). The
+**The crate is now pinned at `boxlite 0.10.8`** (see below for what 0.10.5, 0.10.7 and 0.10.8 changed). The
 measurements above were taken at 0.9.7. The 0.10.4 upgrade was checked against its source rather than re-measured. Three things
 matter to cbox. First, `auto_remove` is deprecated in favor of `auto_delete`, and cbox sets
 `auto_delete: Some(0)` explicitly, because `None` falls back to `auto_remove`, which
@@ -52,6 +52,12 @@ if it is non-empty, and cbox leaves it empty. A non-empty `entrypoint` now also 
 image's CMD, but cbox sets only `cmd`. `BoxliteError::NotFound` now reads "not found: …",
 and cbox matches the variant, not the text. The SQLite schema is unchanged, so 0.10.5 and
 0.10.7 binaries can open each other's homes.
+
+**0.10.8**, checked against its source, changes little that reaches cbox. `BoxliteOptions` has a
+new `image_registry_proxy` field, a proxy for registry pulls only, and cbox sets it to `None`,
+which leaves pulls following the host's `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` as before.
+Registry pulls now also trust the system certificate store on top of the bundled roots. The
+image cache and tag refresh from 0.10.7 are unchanged, and so is the SQLite schema (v10).
 
 **Where the evidence lives.** Every **verified** claim below states its measurement inline, so
 this document stands on its own. The measurements were originally taken by two throwaway

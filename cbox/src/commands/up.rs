@@ -83,6 +83,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
     let runtime = BoxliteRuntime::new(BoxliteOptions {
         home_dir: home.clone(),
         image_registries: registries,
+        image_registry_proxy: None,
     })
     .context("failed to open the BoxLite runtime")?;
 
