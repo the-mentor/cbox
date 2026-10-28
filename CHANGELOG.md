@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.17](https://github.com/the-mentor/cbox/compare/v0.1.16...v0.1.17) (2026-10-28)
+
+
+### Features
+
+* **cbox:** upgrade boxlite to 0.10.8 ([#115](https://github.com/the-mentor/cbox/issues/115)) ([9483931](https://github.com/the-mentor/cbox/commit/9483931c862a295314165ffb7cc916b325f79300))
+
 ## [0.1.16](https://github.com/the-mentor/cbox/compare/v0.1.15...v0.1.16) (2026-10-22)
 
 
