@@ -10,7 +10,7 @@
 # references only — never paste a literal credential here. Tracked in git.
 #
 # Design and rationale: docs/design/agentgateway.md. Schema pinned at
-# https://raw.githubusercontent.com/agentgateway/agentgateway/v1.6.0/schema/config.json
+# https://raw.githubusercontent.com/agentgateway/agentgateway/v1.7.0/schema/config.json
 
 gateways:
   mcp-gateway:
