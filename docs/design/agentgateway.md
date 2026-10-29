@@ -7,7 +7,7 @@ who did what or when, only what the config is and why it has to be that way.
 
 ## Shape
 
-agentgateway (`cr.agentgateway.dev/agentgateway`, pinned at `v1.6.0`) runs as a long-lived
+agentgateway (`cr.agentgateway.dev/agentgateway`, pinned at `v1.7.0`) runs as a long-lived
 Docker Compose service on the host, alongside two sibling containers:
 
 - **`mcp-gateway`** (port 15003) — serves `/mcp` and `/sse`, multiplexing MCP tool targets.
@@ -16,7 +16,7 @@ Docker Compose service on the host, alongside two sibling containers:
 - **`llm-gateway`** (port 15002) — two Anthropic-Messages-API routes, `/claude` (subscription
   passthrough) and `/api` (keyed), described below.
 - **`ui-gateway`** (port 15000) — the admin UI: config viewer, MCP tool playground, and (at
-  `v1.6.0`) Logs, Analytics, Costs, Models, Providers, Guardrails, Keys, and Policies pages —
+  `v1.7.0`) Logs, Analytics, Costs, Models, Providers, Guardrails, Keys, and Policies pages —
   behind HTTP basic auth.
 - **`github-mcp`** — GitHub's official MCP server image, run as a sibling compose service
   with no published host port, reachable only from `agentgateway` over the compose network.
@@ -146,6 +146,7 @@ violated.
 | Environment expansion is raw-text across the **entire file, including comments** — the loader substitutes every `$word`-shaped token it finds, anywhere, and aborts if any has no matching env var. | A comment that mentions a shell variable by its `$NAME` form (even in prose, even describing something unrelated) crash-loops the gateway on startup, before any port opens. Exactly three real references exist in `config.yaml` today: `$GH_TOKEN`, `$ANTHROPIC_API_KEY`, `$AGENTGATEWAY_ANTHROPIC_UPSTREAM_HOST`. Spell variable names out plainly in comments (`GH_TOKEN`, not `$GH_TOKEN`). |
 | `hostOverride` takes `host:port` only — no scheme, no path. | A bare hostname with no port crash-loops the gateway; `hostOverride` replaces the authority, not the whole URL, and doesn't imply a scheme either (see `backendTLS` below). |
 | `htpasswd` must be a `{file: ...}` reference, never an inline hash string. | Apache-generated htpasswd hashes contain `$`-prefixed segments (one for `apr1`, one for `bcrypt`). An inline hash hits the same raw-text expansion rule above and crash-loops the gateway trying to resolve a segment as an environment variable. |
+| `SESSION_KEY` must be set (v1.7.0+). | With no `config.session.key`, agentgateway tries to write a generated key back into `config.yaml`; ours is mounted read-only, so it logs a warning and serves **unencrypted** MCP session IDs. `just gateway-up` creates a gitignored `agentgateway/session.env` (`SESSION_KEY=<openssl rand -hex 32>`) that compose loads, so sessions are encrypted and survive gateway restarts. Deleting or changing it drops every open MCP session once (clients get a 404 and re-initialize). Never put the key in `config.yaml`, which is tracked. |
 | `basicAuth` needs `mode: strict`. | The schema's default mode is `optional`, which lets a request through with *no* credentials at all — silently defeating the point of putting auth in front of the admin UI. |
 
 ## Decisions worth recording
@@ -272,7 +273,7 @@ each image bump; bump the image instead.
 These were non-obvious enough, and costly enough to re-derive, that they're worth stating
 plainly. All checked against the schema pinned to the `v1.4.1` image tag
 (`https://raw.githubusercontent.com/agentgateway/agentgateway/v1.4.1/schema/config.json`),
-and re-checked on the bumps to `v1.5.0` and `v1.6.0` (none of the properties this config uses were removed):
+and re-checked on the bumps to `v1.5.0`, `v1.6.0`, and `v1.7.0` (none of the properties this config uses were removed):
 
 - `AnthropicProvider` accepts only `model` (`additionalProperties: false`) — there is no
   `baseUrl` on the provider itself, which is why the upstream override for `/api` lives on
