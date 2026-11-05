@@ -115,7 +115,10 @@ This follows the same flow as
    required `build` checks to run.
 2. `googleapis/release-please-action` reads Conventional Commits since the last release. It then
    opens or updates a release PR, and when that PR merges, the next run tags `vX.Y.Z` and
-   publishes the GitHub Release. **There is one release for the whole repo, not one per
+   creates the GitHub Release as a **draft** (`draft: true`); `assets` publishes it. GitHub
+   doesn't create a draft's tag until it's published, so `force-tag-creation: true` makes
+   release-please create the tag itself — without it, the next run can't find the previous
+   release and writes a wrong changelog. **There is one release for the whole repo, not one per
    component.** The config (`release-please-config.json`) uses the `simple` type on the `.`
    package, so the PR bumps the root `CHANGELOG.md` and `.release-please-manifest.json`. It also
    bumps cbox's version in `cbox/Cargo.toml` and `cbox/Cargo.lock` through `extra-files`, which
@@ -143,8 +146,14 @@ landed on, so the first changelog doesn't list the whole history.
 
 It doesn't build anything. It downloads the `cbox-*` artifacts from the ci run that triggered it
 (`actions/download-artifact` with `run-id`, which needs `actions: read`), then runs `gh release
-upload <tag> ... --clobber`. So the released binaries are the ones ci tested, from the same commit
-and the same compiler.
+upload <tag> ... --clobber` against the draft and `gh release edit <tag> --draft=false` to publish
+it. So the released binaries are the ones ci tested, from the same commit and the same compiler.
+
+Uploading before publishing is what makes this work with GitHub's immutable releases (repository
+Settings → General → Releases): once a release is published and immutable, its tag and assets
+can't change, so a publish-then-upload flow would ship a release with no binaries. If `assets`
+fails, the release stays a draft — not visible at `releases/latest`, so `just install-cbox` keeps
+getting the previous release — until the job is re-run; `--clobber` makes that re-run safe.
 
 Every release PR changes `CHANGELOG.md`, and `changes` treats that as a reason to build, so the
 artifacts exist. `cbox/` alone isn't enough: a `Release-As` equal to the current version (which

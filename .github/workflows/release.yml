@@ -37,7 +37,11 @@ jobs:
           permission-pull-requests: write
       # One release for the whole repo: opens/updates a release PR that bumps
       # CHANGELOG.md and cbox's Cargo.toml/Cargo.lock; merging it tags vX.Y.Z and
-      # publishes the GitHub release. Later artifacts (e.g. images) hang off the same tag.
+      # creates the GitHub release as a draft (release-please-config.json:
+      # draft + force-tag-creation, so the tag exists right away). `assets`
+      # publishes it once the binaries are attached, because an immutable
+      # release can't take uploads after publishing. Later artifacts (e.g.
+      # images) hang off the same tag.
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
         with:
@@ -66,9 +70,13 @@ jobs:
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           BRANCH: release-please--branches--main
 
-  # Only when a release was just published: attach the binaries the
-  # triggering ci run built. The release PR's merge bumps cbox/Cargo.toml, so
-  # ci's build ran for that commit and the binaries carry the new version.
+  # Only when a release was just created: attach the binaries the triggering
+  # ci run built to the draft, then publish it, which locks it once immutable
+  # releases are on. If this job fails, the release stays a draft (invisible to
+  # releases/latest, so `just install-cbox` keeps serving the previous one)
+  # until a re-run; --clobber makes the re-run safe. The release PR's merge
+  # bumps cbox/Cargo.toml, so ci's build ran for that commit and the binaries
+  # carry the new version.
   # ponytail: if two merges land before ci finishes, the release can be created
   # by the later run, whose ci may have skipped the build; the download then
   # fails and a re-run of the release PR's run fixes it.
@@ -88,7 +96,9 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - run: gh release upload "$TAG" dist/cbox-linux-x86_64 dist/cbox-macos-arm64 --clobber
+      - run: |
+          gh release upload "$TAG" dist/cbox-linux-x86_64 dist/cbox-macos-arm64 --clobber
+          gh release edit "$TAG" --draft=false
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
