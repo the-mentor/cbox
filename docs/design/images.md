@@ -21,6 +21,18 @@ bakes in per-repo config (plugins, `claude.json`) and is cheap to build, so ther
 gain by publishing it, and every consumer building it themselves keeps its contents auditable
 without trusting a shared image.
 
+### `cbox-base-rust`
+
+`ghcr.io/the-mentor/cbox-base-rust` (public) is `base-rust/`: `cbox-base` plus apt's `rustup`
+with the toolchain pinned to `ci.yml`'s `RUST_VERSION` (bump both together), `rustfmt`, `clippy`,
+`protobuf-compiler` and `build-essential`, so cbox can be built and tested inside a box. `base/`'s
+`/usr/local/bin/cc` → Claude Code shorthand shadows the C compiler rustc links through, so the
+image sets `CC=gcc` and the `CARGO_TARGET_*_LINKER=gcc` variables rather than removing the
+shorthand. It gets every tag `cbox-base` gets, always built on the `cbox-base`
+from the same run (on `:latest` when that run pushed nothing, e.g. fork PRs), so the two never
+drift apart. Use it by building `custom/` on it:
+`CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base-rust:latest just build`.
+
 ## Tags
 
 | Tag | Written by | For |
@@ -28,7 +40,7 @@ without trusting a shared image.
 | `vX.Y.Z` | `release.yml`, after `release-please` cuts a release | pinning the exact base a release shipped with |
 | `latest` | every release, and the weekly rebuild | what `custom/Dockerfile` and `just build` use by default |
 | `YYYY-MM-DD` | the weekly scheduled rebuild | pinning a known-good base from before a bad upstream release, without waiting for the next `vX.Y.Z` |
-| `pr-<n>` | `ci.yml`, for a same-repo PR that changes `base/`, `base-image.yml`, or `ci.yml` | trying that PR's base before merge, including in `custom-image`'s own build |
+| `pr-<n>` | `ci.yml`, for a same-repo PR that changes `base/`, `base-rust/`, `base-image.yml`, `image.yml`, or `ci.yml` | trying that PR's base before merge, including in `custom-image`'s own build |
 
 ## `base-image.yml`
 
@@ -50,6 +62,9 @@ fails in seconds instead of after both architecture builds.
 
 GitHub disables a scheduled workflow after 60 days with no repository activity, which would
 silently stop the weekly refresh; re-enable it from the workflow's page under the Actions tab.
+
+`prep` then calls `image.yml` (another reusable workflow, holding the `build` and `merge` jobs
+below) twice: once for `base/`, then once for `base-rust/` on the base just pushed.
 
 The `build` job is a matrix of native runners — `linux/amd64` on `ubuntu-26.04`, `linux/arm64` on
 `ubuntu-26.04-arm` — with no QEMU emulation. `.github/actionlint.yaml` lists both labels because

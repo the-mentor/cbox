@@ -51,7 +51,7 @@ jobs:
             rust=true base=true custom=true
           else
             match '^(cbox/|\.github/workflows/ci\.yml$|CHANGELOG\.md$)' && rust=true || rust=false
-            match '^(base/|\.github/workflows/(base-image|ci)\.yml$)' && base=true || base=false
+            match '^(base/|base-rust/|\.github/workflows/(base-image|image|ci)\.yml$)' && base=true || base=false
             match '^(custom/|\.github/workflows/ci\.yml$)' && custom=true || custom=false
             # A new base can break custom/, so check them together.
             [ "$base" = true ] && custom=true

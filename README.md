@@ -85,6 +85,10 @@ box can still reach any host directly (see `docs/design/cbox.md`).
   server) and installing the plugins listed in `custom/Dockerfile`. Nothing is baked into
   `/workspace`, so mounting a host directory there clobbers no config. See
   `docs/design/images.md`.
+- **Rust variant.** `base-rust/` builds `cbox-base-rust`: `cbox-base` plus Rust (pinned to
+  ci.yml's version, with `rustfmt`/`clippy`), `protoc` and a C toolchain — everything needed to
+  develop cbox itself in a box. Published alongside `cbox-base` with the same tags; use it with
+  `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base-rust:latest just build`.
 - **Image handoff via a local registry.** BoxLite does not read Docker's local image
   store, so the custom image is pushed to a local `registry:2` (managed by docker compose
   under `local-development/registry/`) and `cbox` pulls it from there. `cbox` is actually
