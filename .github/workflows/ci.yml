@@ -126,8 +126,9 @@ jobs:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
 
-  # Same-repo PRs publish :pr-<number> so a base/ change can be tried before
-  # merge (CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:pr-<n> just build).
+  # Same-repo PRs publish cbox-base and cbox-base-rust as :pr-<number> so a
+  # base/ or base-rust/ change can be tried before merge
+  # (CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:pr-<n> just build).
   # Fork and Dependabot tokens can't write packages, so those only build.
   # Publishing from main happens in release.yml and the weekly schedule.
   base-image:

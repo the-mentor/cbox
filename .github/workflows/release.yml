@@ -94,9 +94,10 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
 
-  # Publishes cbox-base:<release tag> and moves :latest. Built from the
-  # released commit (not main's tip, which may have moved on) with the cache
-  # skipped, so the image carries today's upstream packages.
+  # Publishes cbox-base and cbox-base-rust as :<release tag> and moves
+  # :latest. Built from the released commit (not main's tip, which may have
+  # moved on) with the cache skipped, so the images carry today's upstream
+  # packages.
   base-image:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'

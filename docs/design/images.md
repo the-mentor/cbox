@@ -1,6 +1,7 @@
 # Base image: build and publish
 
-This covers `.github/workflows/base-image.yml` and how it's called from `ci.yml` and
+This covers `.github/workflows/base-image.yml` (and the `image.yml` it calls for `base/` and
+`base-rust/`) and how it's called from `ci.yml` and
 `release.yml`, plus the local-build side in `custom/Dockerfile` and the `justfile`. For the
 two-layer image itself (why it's split, what each layer bakes in), see `docs/design/general.md`.
 This is not a change log — it doesn't track who did what or when, only what the setup is and why.
@@ -29,8 +30,8 @@ with the toolchain pinned to `ci.yml`'s `RUST_VERSION` (bump both together), `ru
 `/usr/local/bin/cc` → Claude Code shorthand shadows the C compiler rustc links through, so the
 image sets `CC=gcc` and the `CARGO_TARGET_*_LINKER=gcc` variables rather than removing the
 shorthand. It gets every tag `cbox-base` gets, always built on the `cbox-base`
-from the same run (on `:latest` when that run pushed nothing, e.g. fork PRs), so the two never
-drift apart. Use it by building `custom/` on it:
+from the same run (on `:latest` when that run pushed nothing, e.g. fork PRs). `cbox-base`'s tags
+move first, though, so if the `rust` job fails the two drift until it's re-run. Use it by building `custom/` on it:
 `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base-rust:latest just build`.
 
 ## Tags
@@ -63,8 +64,10 @@ fails in seconds instead of after both architecture builds.
 GitHub disables a scheduled workflow after 60 days with no repository activity, which would
 silently stop the weekly refresh; re-enable it from the workflow's page under the Actions tab.
 
-`prep` then calls `image.yml` (another reusable workflow, holding the `build` and `merge` jobs
-below) twice: once for `base/`, then once for `base-rust/` on the base just pushed.
+After `prep`, the `base` and `rust` jobs each call `image.yml` (another reusable workflow,
+holding the `build` and `merge` jobs below): `base` for `base/`, then `rust` for `base-rust/` on
+the base `base` just pushed, or on `cbox-base:latest` when nothing was pushed. A broken
+`base-rust/` therefore fails the whole `base-image` job (and CI) even when `base/` built fine.
 
 The `build` job is a matrix of native runners — `linux/amd64` on `ubuntu-26.04`, `linux/arm64` on
 `ubuntu-26.04-arm` — with no QEMU emulation. `.github/actionlint.yaml` lists both labels because
@@ -81,7 +84,7 @@ leaves `:latest` (or a release tag) pointing at an amd64-only or arm64-only imag
 runs `imagetools inspect` on the first tag and fails the run unless both `amd64` and `arm64` show
 up in the manifest list, so a bug in the merge step itself can't silently publish a single-arch tag.
 
-The build cache (`type=gha`, scoped per architecture) is used on PR builds, and skipped
+The build cache (`type=gha`, scoped per image directory and architecture) is used on PR builds, and skipped
 (`no-cache: true`) on the weekly and release builds. `base/`'s install steps — `npm install -g
 @anthropic-ai/claude-code`, the oh-my-posh installer, `apt upgrade` — have fixed command text, so
 Docker's cache would keep serving them from before even when upstream has moved on. PR builds
@@ -92,7 +95,7 @@ upstream turn it off.
 ## Callers
 
 `ci.yml`'s `base-image` job runs only on `pull_request`, when the `changes` job's `base` output is
-true (paths under `base/`, or either workflow file). It always builds, but only pushes
+true (paths under `base/` or `base-rust/`, or `base-image.yml`, `image.yml` or `ci.yml`). It always builds, but only pushes
 `pr-<n>` when the PR is same-repo and not from Dependabot — fork and Dependabot tokens can't write
 packages. `custom-image` then builds `custom/` on top: on `pr-<n>` when `base-image` pushed one,
 otherwise on `:latest`. Both jobs feed into the `CI` gate alongside `build`, so a broken `base/` or
@@ -132,7 +135,8 @@ build-cbox && just up` (`just up-dev` always builds against the published base).
 | Weekly build fails | `:latest` is left alone, and GitHub emails the failure. Re-run through `workflow_dispatch`. |
 | A bad upstream release gets baked into `:latest` | Pin a dated tag with `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:<date> just build`. |
 | The release's image job fails | The release and binaries exist without `:vX.Y.Z`. Re-run the failed job. |
-| One architecture fails | `merge` doesn't run, so no tag moves. The architecture that did build leaves an untagged image behind. |
+| One architecture fails | That image's `merge` doesn't run, so none of its tags move. The architecture that did build leaves an untagged image behind. |
+| `base-rust/` fails after `base/` pushed | `cbox-base`'s tags have already moved; `cbox-base-rust`'s haven't. Re-run the failed `rust` jobs. |
 | Fork or Dependabot PR | The base builds without pushing, and `custom-image` builds on `:latest`. |
 | Weekly and release runs overlap | Both push `:latest`, and the last one wins. Both build commits on `main`. This is accepted. |
 | Stale PR tags, dated tags, untagged images | Not cleaned up. A cleanup workflow can come later if storage matters. |
@@ -140,12 +144,13 @@ build-cbox && just up` (`just up-dev` always builds against the published base).
 ## One-time setup
 
 GHCR creates a new package as private on its first push. After that first push, make `cbox-base`
-public in the package's own settings, so pulls need no login and fork PRs can still build
-`custom/` against it.
+and `cbox-base-rust` public in each package's own settings, so pulls need no login and fork PRs
+can still build `custom/` against `cbox-base`.
 
 Rollout, in order:
 1. On the implementation PR, confirm `:pr-<n>` built multi-arch and `custom-image` passed.
-2. Merge, then make the `cbox-base` package public in its GHCR package settings.
+2. Merge, then make the `cbox-base` and `cbox-base-rust` packages public in their GHCR package
+   settings.
 3. Right after merge, run `base-image.yml` via `workflow_dispatch` to publish `latest` and a
    dated tag — nothing has pushed `:latest` yet at this point.
 4. Until `:latest` exists, `just build`/`just up-dev` can't pull a base to build against; use
