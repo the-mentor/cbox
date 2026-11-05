@@ -10,8 +10,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Same pinned version as ci.yml's RUST_VERSION, so the box builds cbox with the
-# release compiler; bump both together. Shared homes owned by sandbox-user so
-# cargo's registry cache and `rustup component add` work without sudo.
+# release compiler; Renovate bumps both in one PR. Shared homes owned by
+# sandbox-user so cargo's registry cache and `rustup component add` work
+# without sudo.
+# renovate: datasource=github-releases depName=rust-lang/rust
 ARG RUST_VERSION=1.98.1
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \

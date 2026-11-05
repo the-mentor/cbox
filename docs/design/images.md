@@ -26,7 +26,7 @@ without trusting a shared image.
 ### `cbox-base-rust`
 
 `ghcr.io/the-mentor/cbox-base-rust` (public) is `base-rust/`: `cbox-base` plus apt's `rustup`
-with the toolchain pinned to `ci.yml`'s `RUST_VERSION` (bump both together), `rustfmt`, `clippy`,
+with the toolchain pinned to `ci.yml`'s `RUST_VERSION` (Renovate bumps both in one PR, via matching `# renovate:` comments), `rustfmt`, `clippy`,
 `protobuf-compiler` and `build-essential`, so cbox can be built and tested inside a box. `base/`'s
 `/usr/local/bin/cc` → Claude Code shorthand shadows the C compiler rustc links through, so the
 image sets `CC=gcc` and the `CARGO_TARGET_*_LINKER=gcc` variables rather than removing the
