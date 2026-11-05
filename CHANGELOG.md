@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.20](https://github.com/the-mentor/cbox/compare/v0.1.19...v0.1.20) (2026-11-05)
+
+
+### Features
+
+* disable Claude commit/PR attribution via built-in attribution setting ([#124](https://github.com/the-mentor/cbox/issues/124)) ([791cd1e](https://github.com/the-mentor/cbox/commit/791cd1e5397389389784b00b4d59162a4926d7c7))
+
 ## [0.1.19](https://github.com/the-mentor/cbox/compare/v0.1.18...v0.1.19) (2026-11-05)
 
 
