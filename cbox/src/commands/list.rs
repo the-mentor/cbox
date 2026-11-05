@@ -6,7 +6,8 @@
 //! Names are derived from the git root, so without that column there is
 //! nothing on screen tying a box back to the checkout it belongs to. The box
 //! matching the current directory is additionally marked, since the derived
-//! default name is otherwise invisible.
+//! default name is otherwise invisible. SIZE is the disk the box itself
+//! occupies (its `boxes/<id>` dir), excluding the image cache shared by the home.
 
 use anyhow::{Context, Result};
 use boxlite::{BoxStatus, BoxliteOptions, BoxliteRuntime};
@@ -18,6 +19,7 @@ const ID_W: usize = 9;
 const STATUS_W: usize = 10;
 const IMAGE_W: usize = 24;
 const CREATED_W: usize = 16;
+const SIZE_W: usize = 8;
 const ORIGIN_W: usize = 30;
 
 pub async fn run(all: bool) -> Result<()> {
@@ -37,7 +39,9 @@ pub async fn run(all: bool) -> Result<()> {
         if !entry.path().is_dir() {
             continue;
         }
-        let Some(name) = entry.file_name().to_str().map(String::from) else { continue };
+        let Some(name) = entry.file_name().to_str().map(String::from) else {
+            continue;
+        };
         let home = entry.path();
 
         let runtime = match BoxliteRuntime::new(BoxliteOptions {
@@ -57,7 +61,7 @@ pub async fn run(all: bool) -> Result<()> {
                 }
                 // A locked home can't be opened to read its status/sidecar,
                 // so there's nothing but the name to show -- but it still
-                // has to line up under the six-column header, not just the
+                // has to line up under the seven-column header, not just the
                 // NAME cell, or a listing that mixes this with full rows
                 // reads as broken. Reuse `format_row` so it's the same
                 // layout, not a second hand-rolled one.
@@ -67,6 +71,7 @@ pub async fn run(all: bool) -> Result<()> {
                     status: "(in use)".into(),
                     image: String::new(),
                     created: String::new(),
+                    size: String::new(),
                     origin: String::new(),
                     marker: String::new(),
                 };
@@ -92,6 +97,7 @@ pub async fn run(all: bool) -> Result<()> {
                 status: info.status.to_string(),
                 image: info.image.clone(),
                 created: info.created_at.format("%Y-%m-%d %H:%M").to_string(),
+                size: human_size(disk_usage(&home.join("boxes").join(info.id.to_string()))),
                 origin: origin.clone(),
                 marker: marker_for(&name, &here).to_string(),
             };
@@ -115,6 +121,7 @@ struct Row {
     status: String,
     image: String,
     created: String,
+    size: String,
     origin: String,
     marker: String,
 }
@@ -126,6 +133,7 @@ fn print_header() {
         status: "STATUS".into(),
         image: "IMAGE".into(),
         created: "CREATED".into(),
+        size: "SIZE".into(),
         origin: "ORIGIN".into(),
         marker: String::new(),
     };
@@ -143,6 +151,40 @@ fn should_show(status: BoxStatus, all: bool) -> bool {
 /// name matches where `cbox list` was run from.
 fn marker_for(box_name: &str, here: &str) -> &'static str {
     if box_name == here { " <- here" } else { "" }
+}
+
+/// Bytes actually allocated under `path` (blocks, not apparent length, since
+/// box disks are sparse files). Symlinks are not followed; unreadable entries
+/// count as zero rather than failing the listing.
+fn disk_usage(path: &std::path::Path) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return 0;
+    };
+    let own = meta.blocks() * 512;
+    if !meta.is_dir() {
+        return own;
+    }
+    let children = std::fs::read_dir(path)
+        .map(|rd| rd.flatten().map(|e| disk_usage(&e.path())).sum())
+        .unwrap_or(0);
+    own + children
+}
+
+/// `du -h`-style: one decimal below 10 of a unit, whole numbers above.
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "K", "M", "G", "T"];
+    let mut v = bytes as f64;
+    let mut i = 0;
+    while v >= 1024.0 && i < UNITS.len() - 1 {
+        v /= 1024.0;
+        i += 1;
+    }
+    if i == 0 || v >= 10.0 {
+        format!("{:.0}{}", v, UNITS[i])
+    } else {
+        format!("{:.1}{}", v, UNITS[i])
+    }
 }
 
 /// Fit a value into a fixed-width column: truncate (with a trailing `…` so
@@ -174,12 +216,13 @@ fn truncate(s: &str, max: usize) -> String {
 /// marker a reader is also hunting for).
 fn format_row(row: &Row) -> String {
     format!(
-        "{} {} {} {} {} {}{}",
+        "{} {} {} {} {} {} {}{}",
         cell(&row.name, NAME_W),
         cell(&row.id, ID_W),
         cell(&row.status, STATUS_W),
         cell(&row.image, IMAGE_W),
         cell(&row.created, CREATED_W),
+        cell(&row.size, SIZE_W),
         cell(&row.origin, ORIGIN_W),
         row.marker,
     )
@@ -240,6 +283,30 @@ mod tests {
     }
 
     #[test]
+    fn human_size_uses_du_style_units() {
+        assert_eq!(human_size(0), "0B");
+        assert_eq!(human_size(512), "512B");
+        assert_eq!(human_size(1536), "1.5K");
+        assert_eq!(human_size(20 * 1024 * 1024), "20M");
+        assert_eq!(
+            human_size(3 * 1024 * 1024 * 1024 + 300 * 1024 * 1024),
+            "3.3G"
+        );
+    }
+
+    #[test]
+    fn disk_usage_counts_nested_files_and_tolerates_missing_paths() {
+        let dir = std::env::temp_dir().join(format!("cbox-du-test-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub/f"), vec![1u8; 64 * 1024]).unwrap();
+        let used = disk_usage(&dir);
+        let missing = disk_usage(&dir.join("missing"));
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(used >= 64 * 1024, "got {used}");
+        assert_eq!(missing, 0);
+    }
+
+    #[test]
     fn marker_for_flags_only_the_box_matching_the_current_directory() {
         assert_eq!(marker_for("cbox", "cbox"), " <- here");
         assert_eq!(marker_for("other-box", "cbox"), "");
@@ -253,6 +320,7 @@ mod tests {
             status: "running".into(),
             image: "cbox-custom".into(),
             created: "2026-08-18 09:00".into(),
+            size: "1.2G".into(),
             origin: String::new(),
             marker: " <- here".into(),
         };
@@ -267,7 +335,7 @@ mod tests {
     #[test]
     fn in_use_row_still_lines_up_under_the_header() {
         // A locked home can only show a name and "(in use)" -- but it must
-        // occupy the same six cells as every other row, not a short
+        // occupy the same seven cells as every other row, not a short
         // two-column line, or a listing that mixes both looks broken.
         let row = Row {
             name: "locked-box".into(),
@@ -275,6 +343,7 @@ mod tests {
             status: "(in use)".into(),
             image: String::new(),
             created: String::new(),
+            size: String::new(),
             origin: String::new(),
             marker: String::new(),
         };
@@ -285,10 +354,15 @@ mod tests {
             status: "STATUS".into(),
             image: "IMAGE".into(),
             created: "CREATED".into(),
+            size: "SIZE".into(),
             origin: "ORIGIN".into(),
             marker: String::new(),
         });
-        assert_eq!(rendered.len(), header.len(), "in-use row must be the same width as the header");
+        assert_eq!(
+            rendered.len(),
+            header.len(),
+            "in-use row must be the same width as the header"
+        );
         assert!(rendered.contains("locked-box"));
         assert!(rendered.contains("(in use)"));
     }
