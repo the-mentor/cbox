@@ -4,6 +4,10 @@
     "command": "oh-my-posh claude --config $HOME/mojada-claude.omp.json",
     "padding": 0
   },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
   "permissions": {
     "defaultMode": "auto"
   },
