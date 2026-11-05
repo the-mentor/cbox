@@ -6,8 +6,8 @@
 //! Names are derived from the git root, so without that column there is
 //! nothing on screen tying a box back to the checkout it belongs to. The box
 //! matching the current directory is additionally marked, since the derived
-//! default name is otherwise invisible. SIZE is the disk the box itself
-//! occupies (its `boxes/<id>` dir), excluding the image cache shared by the home.
+//! default name is otherwise invisible. SIZE is the whole per-name home (box
+//! disk plus its image cache), since that is what `cbox down` deletes.
 
 use anyhow::{Context, Result};
 use boxlite::{BoxStatus, BoxliteOptions, BoxliteRuntime};
@@ -43,6 +43,8 @@ pub async fn run(all: bool) -> Result<()> {
             continue;
         };
         let home = entry.path();
+        // Plain filesystem walk, so it works even when the home is locked.
+        let size = human_size(disk_usage(&home));
 
         let runtime = match BoxliteRuntime::new(BoxliteOptions {
             home_dir: home.clone(),
@@ -71,7 +73,7 @@ pub async fn run(all: bool) -> Result<()> {
                     status: "(in use)".into(),
                     image: String::new(),
                     created: String::new(),
-                    size: String::new(),
+                    size: size.clone(),
                     origin: String::new(),
                     marker: String::new(),
                 };
@@ -97,7 +99,7 @@ pub async fn run(all: bool) -> Result<()> {
                 status: info.status.to_string(),
                 image: info.image.clone(),
                 created: info.created_at.format("%Y-%m-%d %H:%M").to_string(),
-                size: human_size(disk_usage(&home.join("boxes").join(info.id.to_string()))),
+                size: size.clone(),
                 origin: origin.clone(),
                 marker: marker_for(&name, &here).to_string(),
             };
