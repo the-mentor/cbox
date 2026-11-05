@@ -17,7 +17,8 @@ rebuild keeps `:latest` no more than a week behind.
 
 ## What's published
 
-Only `cbox-base`, to `ghcr.io/the-mentor/cbox-base` (public). `cbox-custom` stays per-person: it
+`cbox-base`, to `ghcr.io/the-mentor/cbox-base`, and its Rust variant `cbox-base-rust` (below),
+both public. `cbox-custom` stays per-person: it
 bakes in per-repo config (plugins, `claude.json`) and is cheap to build, so there's nothing to
 gain by publishing it, and every consumer building it themselves keeps its contents auditable
 without trusting a shared image.
@@ -47,7 +48,7 @@ move first, though, so if the `rust` job fails the two drift until it's re-run. 
 
 A reusable workflow with three triggers:
 - **`workflow_call`**, from `ci.yml` and `release.yml`, with `tags`/`push`/`no-cache`/`ref` inputs
-  and one output, `image` — the full reference of the first pushed tag, empty when nothing was
+  and one output, `image` — the full reference of `cbox-base`'s first pushed tag (never `cbox-base-rust`'s), empty when nothing was
   pushed.
 - **`schedule`**, weekly (`17 6 * * 1`, Monday ~06:00 UTC): builds the repo's default branch,
   pushes `latest` and today's date, cache skipped.
@@ -59,7 +60,7 @@ A reusable workflow with three triggers:
 `tags` accepts commas or newlines in every trigger, because the Run workflow form is a single
 line. `prep` splits and checks each tag against Docker's tag rules (letters, digits, `_`, `.`,
 `-`, at most 128 characters, not starting with `.` or `-`) and fails on an empty list, so a typo
-fails in seconds instead of after both architecture builds.
+fails in seconds instead of after the image builds.
 
 GitHub disables a scheduled workflow after 60 days with no repository activity, which would
 silently stop the weekly refresh; re-enable it from the workflow's page under the Actions tab.
@@ -98,8 +99,8 @@ upstream turn it off.
 true (paths under `base/` or `base-rust/`, or `base-image.yml`, `image.yml` or `ci.yml`). It always builds, but only pushes
 `pr-<n>` when the PR is same-repo and not from Dependabot — fork and Dependabot tokens can't write
 packages. `custom-image` then builds `custom/` on top: on `pr-<n>` when `base-image` pushed one,
-otherwise on `:latest`. Both jobs feed into the `CI` gate alongside `build`, so a broken `base/` or
-`custom/` blocks merge the same way a broken `cbox/` does.
+otherwise on `:latest`. Both jobs feed into the `CI` gate alongside `build`, so a broken `base/`,
+`base-rust/` or `custom/` blocks merge the same way a broken `cbox/` does.
 
 `release.yml`'s `base-image` job runs after `release-please`, only when it just created a release,
 tagging `<release tag>` and `latest`. It builds `ref: github.event.workflow_run.head_sha` — the
@@ -132,7 +133,7 @@ build-cbox && just up` (`just up-dev` always builds against the published base).
 
 | Case | Behaviour |
 | --- | --- |
-| Weekly build fails | `:latest` is left alone, and GitHub emails the failure. Re-run through `workflow_dispatch`. |
+| Weekly build fails | The failing image's `:latest` is left alone (if only `base-rust/` failed, `cbox-base`'s has already moved — see below), and GitHub emails the failure. Re-run through `workflow_dispatch`. |
 | A bad upstream release gets baked into `:latest` | Pin a dated tag with `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:<date> just build`. |
 | The release's image job fails | The release and binaries exist without `:vX.Y.Z`. Re-run the failed job. |
 | One architecture fails | That image's `merge` doesn't run, so none of its tags move. The architecture that did build leaves an untagged image behind. |
@@ -149,8 +150,7 @@ can still build `custom/` against `cbox-base`.
 
 Rollout, in order:
 1. On the implementation PR, confirm `:pr-<n>` built multi-arch and `custom-image` passed.
-2. Merge, then make the `cbox-base` and `cbox-base-rust` packages public in their GHCR package
-   settings.
+2. Merge, then make the `cbox-base` package public in its GHCR package settings.
 3. Right after merge, run `base-image.yml` via `workflow_dispatch` to publish `latest` and a
    dated tag — nothing has pushed `:latest` yet at this point.
 4. Until `:latest` exists, `just build`/`just up-dev` can't pull a base to build against; use

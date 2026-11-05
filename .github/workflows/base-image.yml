@@ -24,7 +24,7 @@ on:
         default: ''
     outputs:
       image:
-        description: Full reference of the first pushed tag; empty when not pushed
+        description: Full reference of cbox-base's first pushed tag; empty when not pushed
         value: ${{ jobs.base.outputs.image }}
   schedule:
     - cron: '17 6 * * 1'
@@ -111,8 +111,9 @@ jobs:
       no-cache: ${{ needs.prep.outputs.no-cache == 'true' }}
       ref: ${{ needs.prep.outputs.ref }}
 
-  # Layered on the base this run just pushed, so both move together; when
-  # nothing was pushed (fork/Dependabot PRs) it checks against :latest.
+  # Layered on the base this run just pushed, so both get the same tags
+  # (cbox-base's move first); when nothing was pushed (fork/Dependabot PRs)
+  # it checks against :latest.
   rust:
     needs: [prep, base]
     uses: ./.github/workflows/image.yml
