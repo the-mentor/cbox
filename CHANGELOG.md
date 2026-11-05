@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.18](https://github.com/the-mentor/cbox/compare/v0.1.17...v0.1.18) (2026-11-05)
+
+
+### Features
+
+* **agentgateway:** upgrade to v1.7.0 ([#117](https://github.com/the-mentor/cbox/issues/117)) ([b8067f4](https://github.com/the-mentor/cbox/commit/b8067f42a30e0e36caca6ccd5736d6d40affdf14))
+
 ## [0.1.17](https://github.com/the-mentor/cbox/compare/v0.1.16...v0.1.17) (2026-10-28)
 
 
