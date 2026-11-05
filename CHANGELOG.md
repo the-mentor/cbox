@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.19](https://github.com/the-mentor/cbox/compare/v0.1.18...v0.1.19) (2026-11-05)
+
+
+### Features
+
+* show each box's disk usage as a SIZE column in cbox list ([#121](https://github.com/the-mentor/cbox/issues/121)) ([a71f3b7](https://github.com/the-mentor/cbox/commit/a71f3b7e811dfc17ff56c191370c95ab6eece3b2))
+
 ## [0.1.18](https://github.com/the-mentor/cbox/compare/v0.1.17...v0.1.18) (2026-11-05)
 
 
