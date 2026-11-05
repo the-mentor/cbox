@@ -55,6 +55,8 @@ gateway-up:
     #!/usr/bin/env sh
     set -eu
     [ -f agentgateway/htpasswd ] || cp agentgateway/htpasswd.default agentgateway/htpasswd
+    # Stable MCP session-encryption key (agentgateway v1.7.0+). Gitignored; a new key drops every open MCP session once.
+    [ -f agentgateway/session.env ] || (umask 077 && echo "SESSION_KEY=$(openssl rand -hex 32)" > agentgateway/session.env)
     {{gateway}} up -d
 
 # Stop the host-side agentgateway

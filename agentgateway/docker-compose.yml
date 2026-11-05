@@ -6,7 +6,7 @@
 # See docs/design/agentgateway.md and the admin UI ports entry below.
 services:
   agentgateway:
-    image: cr.agentgateway.dev/agentgateway:v1.6.0
+    image: cr.agentgateway.dev/agentgateway:v1.7.0
     container_name: agentgateway
     command: ["-f", "/config.yaml"]
     ports:
@@ -45,6 +45,13 @@ services:
       # GITHUB_TOKEN; the trailing :- keeps this empty-but-present, never
       # unset, when neither is set.
       GH_TOKEN: "${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+    # SESSION_KEY: encrypts MCP session IDs (v1.7.0+). config.yaml is
+    # read-only, so without it the gateway can't persist a generated key and
+    # falls back to unencrypted sessions. `just gateway-up` creates this file;
+    # optional so a bare `docker compose up` still starts.
+    env_file:
+      - path: session.env
+        required: false
     volumes:
       - ./config.yaml:/config.yaml:ro
       # Backs the admin UI's basic auth (config.yaml's `ui:` block). `just
