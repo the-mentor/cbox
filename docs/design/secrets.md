@@ -159,7 +159,8 @@ Merge order matters only as noted: 1 before 2; 3 any time after 1.
 - Hosts, env name, and value live together in the OS-store entry; a plain file
   holds only names.
 - Headless Linux with no store is an error, not a file fallback.
-- No command prints a stored value.
+- No command prints a stored value (confirmed by the user: values never come back
+  out of cbox except into a box through `up`).
 - `--env` is **required** on `create` (confirmed by the user): no default is
   guessed, so the box never gets a variable nothing reads. `edit --env` changes it.
 - `delete` asks for confirmation; `-y` skips it.
