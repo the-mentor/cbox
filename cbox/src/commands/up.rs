@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use boxlite::{BoxCommand, BoxliteOptions, BoxliteRuntime, LiteBox};
 
-use crate::{attach, boxopts, config, env, envfile, naming, secrets, sidecar};
+use crate::{attach, boxopts, config, env, envfile, naming, secrets, secretstore, sidecar};
 
 pub struct UpArgs {
     pub name: Option<String>,
@@ -48,20 +48,35 @@ pub async fn run(args: UpArgs) -> Result<()> {
     if secrets::has_github_token() {
         specs.push(secrets::github_spec());
     }
+    // Opened only on first use, so users without stored secrets never touch it.
+    let mut store: Option<Box<dyn secretstore::SecretStore>> = None;
     for flag in &args.secret_flags {
-        specs.push(secrets::parse_secret_flag(flag)?);
+        if secrets::is_store_reference(flag) {
+            if store.is_none() {
+                store = Some(secretstore::open_default()?);
+            }
+            specs.push(secrets::spec_from_store(store.as_deref().unwrap(), flag)?);
+        } else {
+            specs.push(secrets::parse_secret_flag(flag)?);
+        }
     }
+    secrets::check_unique_env(&specs)?;
     let built = secrets::build(&specs)?;
     let has_github = specs.iter().any(|s| s.name == "gh");
 
     // Computed before `built.secrets` is moved into `boxopts::build` below.
     // Never the values themselves -- see `sidecar::hash_secret_value` for
     // why a hash is enough and adequate here.
-    let secret_hashes: std::collections::BTreeMap<String, u64> = built
+    let mut secret_hashes: std::collections::BTreeMap<String, u64> = built
         .secrets
         .iter()
         .map(|s| (s.name.clone(), sidecar::hash_secret_value(&s.value)))
         .collect();
+    for spec in specs.iter().filter(|s| s.stored) {
+        if let Some(value) = &spec.value {
+            secret_hashes.insert(spec.name.clone(), sidecar::hash_stored_secret(value, &spec.hosts, &spec.env_var));
+        }
+    }
 
     let passthrough = env::passthrough_vars();
     let mut plain = env::compose(&args.env_flags, &passthrough, &built.source_vars)?;

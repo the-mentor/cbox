@@ -52,7 +52,7 @@ enum Commands {
         image: String,
         #[arg(long)]
         config: Option<PathBuf>,
-        /// NAME=ENV_VAR@host[,host...]
+        /// NAME (stored with `cbox secret create`) or NAME=ENV_VAR@host[,host...]
         #[arg(long = "secret")]
         secret_flags: Vec<String>,
         /// KEY=VALUE file to load before resolving credentials. Defaults to
