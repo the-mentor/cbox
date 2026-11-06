@@ -145,7 +145,9 @@ its per-box database under the box home, and keeps it there while the box exists
 pipe", protected by "DB file permissions"). That copy is not encrypted; cbox's
 `secure_box_home` makes the box home owner-only (0700). It is removed with the box
 (`cbox down`, or `cbox up -f`, which recreates it). Env-sourced secrets have always
-been kept the same way. The index path honours `$XDG_CONFIG_HOME` (`$XDG_CONFIG_HOME/cbox/secrets.json`, else
+been kept the same way.
+
+**Index location.** The index path honours `$XDG_CONFIG_HOME` (`$XDG_CONFIG_HOME/cbox/secrets.json`, else
 `~/.config/cbox/secrets.json`); unlike this, `registries.json` ignores XDG and uses `--config`,
 `$CBOX_REGISTRIES`, then `~/.config/cbox/registries.json`.
 
