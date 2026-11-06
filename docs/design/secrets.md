@@ -182,7 +182,7 @@ user's; each is small enough to change in review.
 - **Names.** Lowercase letters, digits, `-` and `_`, starting with a letter (the
   name appears inside the `<BOXLITE_SECRET:name>` placeholder). `gh` stays
   reserved. A bare `--secret NAME` that is not in the store fails `up`; it never
-  falls back to a host env var. Two secrets mapping to the same in-box env name
+  falls back to a host env var (confirmed by the user). Two secrets mapping to the same in-box env name
   in one `up` is an error.
 - **Create and delete.** `create` on a name that already exists errors and points
   at `edit`. It checks the store entry, not the index, so an orphan entry without
