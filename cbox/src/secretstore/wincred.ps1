@@ -28,8 +28,13 @@ public static class WinCred {
 '@
 $ErrorActionPreference = 'Stop'
 $u = New-Object System.Text.UTF8Encoding $false; [Console]::InputEncoding = $u; [Console]::OutputEncoding = $u
-switch ($Op) {
-  'set' { [WinCred]::Set($Target, [Console]::In.ReadToEnd().TrimEnd("`r","`n")) }
-  'get' { [Console]::Out.Write([WinCred]::Get($Target)) }
-  'del' { [WinCred]::Del($Target) }
+try {
+  switch ($Op) {
+    'set' { [WinCred]::Set($Target, [Console]::In.ReadToEnd().TrimEnd("`r","`n")) }
+    'get' { [Console]::Out.Write([WinCred]::Get($Target)) }
+    'del' { [WinCred]::Del($Target) }
+  }
+} catch {
+  if ($_.Exception -is [System.ComponentModel.Win32Exception] -and $_.Exception.NativeErrorCode -eq 1168) { [Console]::Error.Write('CBOX_NOT_FOUND'); exit 3 }
+  throw
 }

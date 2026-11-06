@@ -3,8 +3,9 @@
 //! The script (`wincred.ps1`) is compiled into the binary and handed to PowerShell
 //! as base64 on the command line, so no script file ever exists for anyone to edit.
 //! The secret travels over stdin only: never argv (visible in `ps`), never an error.
-//! Verified on Windows PowerShell 5.1 under WSL: stdin, UTF-8, "Element not found",
-//! exit code 1, a 27 KB command line (Windows caps it at 32767; ours is about 6 KB).
+//! The script and flags were verified on Windows PowerShell 5.1 by a spike
+//! (spikes/encodedcommand on the scratch branch); this Rust module has not been run on WSL.
+//! Exit code 3 means "no such entry" (locale-proof); any other non-zero exit is an error.
 
 use super::store::SecretStore;
 use super::{StoredSecret, WSL_MAX_ENTRY_BYTES, check_size};
@@ -31,7 +32,8 @@ fn encode_command(op: &str, target: &str) -> Result<String> {
     if !matches!(op, "set" | "get" | "del") {
         bail!("internal error: unknown credential operation {op:?}");
     }
-    let target_ok = target.starts_with("cbox/")
+    let target_ok = target.len() > "cbox/".len()
+        && target.starts_with("cbox/")
         && target.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_' | b'/'));
     if !target_ok {
         bail!("internal error: credential target {target:?} is outside the allowed charset");
@@ -53,15 +55,21 @@ fn spawn_error(e: &std::io::Error) -> anyhow::Error {
     }
 }
 
+const NOT_FOUND_EXIT: i32 = 3;
+
 struct Outcome {
     stdout: String,
-    /// `None` on success, otherwise PowerShell's stderr (never contains the secret).
-    failure: Option<String>,
+    code: Option<i32>,
+    /// PowerShell's stderr, CR-stripped and truncated (never contains the secret).
+    stderr: String,
 }
 
 impl Outcome {
+    fn ok(&self) -> bool {
+        self.code == Some(0)
+    }
     fn not_found(&self) -> bool {
-        self.failure.as_deref().is_some_and(|e| e.contains("Element not found"))
+        self.code == Some(NOT_FOUND_EXIT)
     }
 }
 
@@ -81,11 +89,12 @@ fn run(op: &str, name: &str, stdin: Option<&str>) -> Result<Outcome> {
     }
     drop(pipe);
     let out = child.wait_with_output().context("waiting for powershell.exe")?;
-    let failure = (!out.status.success()).then(|| {
-        let err = String::from_utf8_lossy(&out.stderr).replace('\r', "");
-        err.trim().chars().take(300).collect()
-    });
-    Ok(Outcome { stdout: String::from_utf8_lossy(&out.stdout).into_owned(), failure })
+    let err = String::from_utf8_lossy(&out.stderr).replace('\r', "");
+    Ok(Outcome {
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        code: out.status.code(),
+        stderr: err.trim().chars().take(300).collect(),
+    })
 }
 
 pub struct WinCredStore;
@@ -102,34 +111,39 @@ impl SecretStore for WinCredStore {
         if out.not_found() {
             return Ok(None);
         }
-        if let Some(e) = out.failure {
-            bail!("reading secret {name:?} from {LABEL}: {e}");
+        if !out.ok() {
+            bail!("reading secret {name:?} from {LABEL}: {}", out.stderr);
         }
         Ok(Some(StoredSecret::from_json(&out.stdout).with_context(|| format!("secret {name:?} in {LABEL}"))?))
     }
     fn exists(&self, name: &str) -> Result<bool> {
         let out = run("get", name, None)?;
-        match out.failure {
-            None => Ok(true),
-            Some(_) if out.not_found() => Ok(false),
-            Some(e) => bail!("reading secret {name:?} from {LABEL}: {e}"),
+        if out.not_found() {
+            return Ok(false);
         }
+        if !out.ok() {
+            bail!("reading secret {name:?} from {LABEL}: {}", out.stderr);
+        }
+        Ok(true)
     }
     fn put(&self, name: &str, s: &StoredSecret) -> Result<()> {
         let json = s.to_json();
         check_size(&json, self.max_entry_bytes())?;
-        match run("set", name, Some(&json))?.failure {
-            None => Ok(()),
-            Some(e) => bail!("writing secret {name:?} to {LABEL}: {e}"),
+        let out = run("set", name, Some(&json))?;
+        if !out.ok() {
+            bail!("writing secret {name:?} to {LABEL}: {}", out.stderr);
         }
+        Ok(())
     }
     fn delete(&self, name: &str) -> Result<bool> {
         let out = run("del", name, None)?;
-        match out.failure {
-            None => Ok(true),
-            Some(_) if out.not_found() => Ok(false),
-            Some(e) => bail!("deleting secret {name:?} from {LABEL}: {e}"),
+        if out.not_found() {
+            return Ok(false);
         }
+        if !out.ok() {
+            bail!("deleting secret {name:?} from {LABEL}: {}", out.stderr);
+        }
+        Ok(true)
     }
 }
 
@@ -152,19 +166,10 @@ mod tests {
 
     #[test]
     fn encode_command_rejects_a_target_outside_the_name_charset() {
-        for bad in ["cbox/a'; calc; '", "cbox/a b", "cbox/A", "other/a", "cbox/a\n", "cbox/é"] {
+        for bad in ["cbox/a'; calc; '", "cbox/a b", "cbox/A", "other/a", "cbox/a\n", "cbox/é", "cbox/"] {
             assert!(encode_command("get", bad).is_err(), "{bad:?}");
         }
         assert!(encode_command("rm", "cbox/a").is_err());
-    }
-
-    #[test]
-    fn script_reads_stdin_and_never_contains_a_value() {
-        assert!(SCRIPT.contains("[Console]::In.ReadToEnd()"));
-        assert!(!SCRIPT.contains("param("), "op and target are prepended, not parameters");
-        // The command line carries only the script plus op and target.
-        let all = decode(&encode_command("set", "cbox/x").unwrap());
-        assert_eq!(all.len(), "$Op='set'; $Target='cbox/x'\n".len() + SCRIPT.len());
     }
 
     #[test]
@@ -186,5 +191,91 @@ mod tests {
         let big = StoredSecret { value: "a".repeat(2600), hosts: vec!["api.example.com".into()], env: "K".into() };
         let err = WinCredStore.put("big", &big).unwrap_err().to_string();
         assert!(err.contains("over the 2560-byte limit"), "{err}");
+    }
+
+    /// Runs `f` with a fake powershell.exe first on PATH. The fake records stdin and argv
+    /// in its directory and behaves per `scenario`: ok:<stdout> | nf | fail:<stderr>.
+    #[cfg(unix)]
+    fn with_fake<T>(scenario: &str, f: impl FnOnce(&std::path::Path) -> T) -> T {
+        use std::os::unix::fs::PermissionsExt;
+        let _lock = crate::test_env_lock::lock();
+        let dir = std::env::temp_dir().join(format!("cbox-fakeps-{}-{}", std::process::id(), scenario.len() + scenario.bytes().map(usize::from).sum::<usize>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("scenario"), scenario).unwrap();
+        let sh = dir.join("powershell.exe");
+        std::fs::write(
+            &sh,
+            "#!/bin/sh\nd=$(dirname \"$0\")\ncat > \"$d/stdin\"\nprintf '%s\\n' \"$@\" > \"$d/args\"\n\
+             s=$(cat \"$d/scenario\")\ncase \"$s\" in\n ok:*) printf '%s' \"${s#ok:}\"; exit 0;;\n nf) exit 3;;\n fail:*) printf '%s\\r\\n' \"${s#fail:}\" >&2; exit 1;;\nesac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let old = std::env::var_os("PATH");
+        let mut path = dir.clone().into_os_string();
+        path.push(":");
+        path.push(old.clone().unwrap_or_default());
+        unsafe { std::env::set_var("PATH", path) };
+        let r = f(&dir);
+        unsafe { std::env::set_var("PATH", old.unwrap_or_default()) };
+        let _ = std::fs::remove_dir_all(&dir);
+        r
+    }
+
+    const JSON: &str = r#"{"value":"sk-abc","hosts":["a.com"],"env":"K"}"#;
+
+    #[test]
+    fn get_maps_exit_codes_to_some_none_and_err() {
+        let some = with_fake(&format!("ok:{JSON}"), |_| WinCredStore.get("x"));
+        assert_eq!(some.unwrap().unwrap().value, "sk-abc");
+        assert!(with_fake("nf", |_| WinCredStore.get("x")).unwrap().is_none());
+        let e = with_fake("fail:boom", |_| WinCredStore.get("x")).unwrap_err().to_string();
+        assert!(e.contains("reading secret \"x\" from Windows Credential Manager: boom"), "{e}");
+        assert!(with_fake("ok:", |_| WinCredStore.get("x")).is_err(), "empty stdout is not valid JSON");
+    }
+
+    #[test]
+    fn exists_does_not_parse_and_maps_exit_codes() {
+        assert!(with_fake("ok:not json", |_| WinCredStore.exists("x")).unwrap());
+        assert!(!with_fake("nf", |_| WinCredStore.exists("x")).unwrap());
+        assert!(with_fake("fail:boom", |_| WinCredStore.exists("x")).is_err());
+    }
+
+    #[test]
+    fn delete_maps_exit_codes() {
+        assert!(with_fake("ok:", |_| WinCredStore.delete("x")).unwrap());
+        assert!(!with_fake("nf", |_| WinCredStore.delete("x")).unwrap());
+        assert!(with_fake("fail:boom", |_| WinCredStore.delete("x")).is_err());
+    }
+
+    #[test]
+    fn put_sends_the_json_on_stdin_only() {
+        let s = StoredSecret { value: "sk-abc".into(), hosts: vec!["a.com".into()], env: "K".into() };
+        let (stdin, args) = with_fake("ok:", |d| {
+            WinCredStore.put("x", &s).unwrap();
+            (std::fs::read_to_string(d.join("stdin")).unwrap(), std::fs::read_to_string(d.join("args")).unwrap())
+        });
+        assert_eq!(stdin, s.to_json());
+        let lines: Vec<&str> = args.lines().collect();
+        assert_eq!(lines[..3], ["-NoProfile", "-NonInteractive", "-EncodedCommand"]);
+        assert!(!args.contains("sk-abc") && !decode(lines[3]).contains("sk-abc"));
+        assert!(decode(lines[3]).starts_with("$Op='set'; $Target='cbox/x'\n"));
+        let e = with_fake("fail:denied", |_| WinCredStore.put("x", &s)).unwrap_err().to_string();
+        assert!(e.contains("denied") && !e.contains("sk-abc"), "{e}");
+    }
+
+    #[test]
+    fn stderr_is_cr_stripped_and_truncated() {
+        let e = with_fake(&format!("fail:{}", "e".repeat(400)), |_| WinCredStore.get("x")).unwrap_err().to_string();
+        assert!(!e.contains('\r') && e.matches('e').count() < 400 + 40 && !e.contains(&"e".repeat(301)));
+    }
+
+    #[test]
+    fn run_reports_a_missing_powershell() {
+        let _lock = crate::test_env_lock::lock();
+        let old = std::env::var_os("PATH");
+        unsafe { std::env::set_var("PATH", "/nonexistent-cbox-dir") };
+        let r = WinCredStore.get("x");
+        unsafe { std::env::set_var("PATH", old.unwrap_or_default()) };
+        assert!(r.unwrap_err().to_string().contains("powershell.exe was not found"));
     }
 }

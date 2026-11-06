@@ -133,8 +133,7 @@ Credential Manager caps a value at 2560 bytes (fine for tokens). It needs WSL in
 `powershell.exe` on PATH; if the program cannot be started, the error names both.
 
 **What is stored where.** One entry per secret in the OS store, under service
-`cbox` with the secret name as the account (the `cbox/<name>` form is the
-Credential Manager target name planned for the WSL store), whose stored value is a small JSON document holding the **value,
+`cbox` with the secret name as the account (on WSL the Credential Manager target is `cbox/<name>`), whose stored value is a small JSON document holding the **value,
 allowed hosts, and in-box env var name**. Keeping the hosts inside the protected
 entry means anything able to widen a secret's hosts could equally read its value.
 A separate plain file `~/.config/cbox/secrets.json` holds only the **list of
@@ -264,8 +263,7 @@ user's; each is small enough to change in review.
   lowercase letters, digits, `-` and `_` (and `encode_command` re-checks it). The secret still travels over stdin
   only. This removes the temporary file, `wslpath`, the UNC script path and
   `-ExecutionPolicy Bypass`. The same script and flags were verified on Windows
-  PowerShell 5.1 under WSL by a spike (stdin free, UTF-8, "Element not found", exit
-  code 1, long command line); the Rust store itself has not been run on real WSL yet. This protects against
+  PowerShell 5.1 under WSL by a spike (stdin free, UTF-8, not-found as exit code 3, other failures as exit code 1, long command line); the Rust store itself has not been run on real WSL yet. This protects against
   tampering with cbox's script, not against other software running as the same
   Windows user, which can call Credential Manager directly (it has no per-app
   access control).
