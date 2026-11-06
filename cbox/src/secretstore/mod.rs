@@ -10,7 +10,7 @@ mod service;
 mod store;
 pub use index::Index;
 pub use service::{EditChanges, EditOutcome, HostChange, ListRow, RowState, check_absent, create, delete, edit, exists, list};
-pub use store::{KeyringStore, SecretStore, open_default};
+pub use store::{SecretStore, open_default};
 use serde::{Deserialize, Serialize};
 
 /// Windows Credential Manager (the planned WSL store) caps an entry at this many bytes.

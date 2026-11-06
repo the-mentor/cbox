@@ -143,7 +143,7 @@ pub fn delete(store: &dyn SecretStore, index_path: &Path, name: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::secretstore::KeyringStore;
+    use crate::secretstore::store::KeyringStore;
     use std::os::unix::fs::PermissionsExt;
 
     fn setup(limit: Option<usize>) -> (KeyringStore, tempdir::D) {
