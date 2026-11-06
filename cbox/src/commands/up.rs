@@ -67,16 +67,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
     // Computed before `built.secrets` is moved into `boxopts::build` below.
     // Never the values themselves -- see `sidecar::hash_secret_value` for
     // why a hash is enough and adequate here.
-    let mut secret_hashes: std::collections::BTreeMap<String, u64> = built
-        .secrets
-        .iter()
-        .map(|s| (s.name.clone(), sidecar::hash_secret_value(&s.value)))
-        .collect();
-    for spec in specs.iter().filter(|s| s.stored) {
-        if let Some(value) = &spec.value {
-            secret_hashes.insert(spec.name.clone(), sidecar::hash_stored_secret(value, &spec.hosts, &spec.env_var));
-        }
-    }
+    let secret_hashes = secrets::resume_hashes(&specs, &built);
 
     let passthrough = env::passthrough_vars();
     let mut plain = env::compose(&args.env_flags, &passthrough, &built.source_vars)?;

@@ -10,12 +10,15 @@
 //! placeholder where the encoded blob belongs, via http.extraHeader, which git
 //! passes through verbatim.
 
+use std::collections::BTreeMap;
+
 use anyhow::{Result, anyhow, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use boxlite::Secret;
 
 use crate::secretstore::{SecretStore, StoredSecret};
+use crate::sidecar;
 
 /// The Basic-auth username GitHub expects when the password is a PAT.
 pub const GH_BASIC_USER: &str = "x-access-token";
@@ -220,6 +223,20 @@ pub fn build(specs: &[SecretSpec]) -> Result<Built> {
     }
 
     Ok(Built { secrets, env, source_vars })
+}
+
+/// Per-secret hashes recorded at creation and compared on resume. Flag-form
+/// (and gh/gh_basic) secrets keep the value-only hash so existing boxes show
+/// no spurious "changed" warning; stored ones also cover hosts and env name.
+pub fn resume_hashes(specs: &[SecretSpec], built: &Built) -> BTreeMap<String, u64> {
+    let mut hashes: BTreeMap<String, u64> =
+        built.secrets.iter().map(|s| (s.name.clone(), sidecar::hash_secret_value(&s.value))).collect();
+    for spec in specs.iter().filter(|s| s.stored) {
+        if let Some(value) = &spec.value {
+            hashes.insert(spec.name.clone(), sidecar::hash_stored_secret(value, &spec.hosts, &spec.env_var));
+        }
+    }
+    hashes
 }
 
 /// Run inside the box after creation when GitHub secrets are present.
@@ -566,5 +583,49 @@ mod tests {
             script.contains("credential.https://github.com.helper"),
             "the blank must be scoped to the same URL, not the generic key: {script}"
         );
+    }
+
+    fn spec(name: &str, env: &str, hosts: &[&str], value: Option<&str>) -> SecretSpec {
+        SecretSpec {
+            name: name.into(),
+            env_var: env.into(),
+            hosts: hosts.iter().map(|h| h.to_string()).collect(),
+            value: value.map(String::from),
+            stored: value.is_some(),
+        }
+    }
+
+    #[test]
+    fn resume_hash_of_a_flag_secret_is_value_only() {
+        let _lock = crate::test_env_lock::lock();
+        let _g = EnvGuard::set("CBOX_T_RESUME", "v1");
+        let specs = [spec("k", "CBOX_T_RESUME", &["a.com"], None)];
+        let h = resume_hashes(&specs, &build(&specs).unwrap());
+        assert_eq!(h["k"], sidecar::hash_secret_value("v1"));
+    }
+
+    #[test]
+    fn resume_hash_of_a_stored_secret_covers_hosts_and_env() {
+        let hash = |hosts: &[&str], env: &str| {
+            let specs = [spec("k", env, hosts, Some("v"))];
+            resume_hashes(&specs, &build(&specs).unwrap())["k"]
+        };
+        let base = hash(&["a.com"], "E");
+        assert_eq!(base, sidecar::hash_stored_secret("v", &["a.com".to_string()], "E"));
+        assert_ne!(base, hash(&["b.com"], "E"));
+        assert_ne!(base, hash(&["a.com"], "F"));
+    }
+
+    #[test]
+    fn resume_hashes_for_gh_keep_both_entries_value_only() {
+        let _lock = crate::test_env_lock::lock();
+        let _g = EnvGuard::set("GH_TOKEN", "ghp_x");
+        let specs = [github_spec()];
+        let built = build(&specs).unwrap();
+        let h = resume_hashes(&specs, &built);
+        assert_eq!(h.len(), 2);
+        for s in &built.secrets {
+            assert_eq!(h[&s.name], sidecar::hash_secret_value(&s.value));
+        }
     }
 }
