@@ -22,20 +22,28 @@ impl Index {
         use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
         use std::io::Write;
         let dir = path.parent().context("index path has no parent")?;
-        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+            .with_context(|| format!("creating {}", dir.display()))?;
         let tmp = path.with_extension("json.tmp");
         // Mode only applies at creation, so drop any stale temp file first.
         match std::fs::remove_file(&tmp) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(e).with_context(|| format!("removing {}", tmp.display()));
+            }
             _ => {}
         }
         let mut f = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .open(&tmp)?;
-        f.write_all(serde_json::to_string(self)?.as_bytes())?;
-        std::fs::rename(&tmp, path).with_context(|| format!("writing {}", path.display()))
+            .open(&tmp)
+            .with_context(|| format!("creating {}", tmp.display()))?;
+        f.write_all(serde_json::to_string(self)?.as_bytes())
+            .with_context(|| format!("writing {}", tmp.display()))?;
+        std::fs::rename(&tmp, path).with_context(|| format!("renaming {} to {}", tmp.display(), path.display()))
     }
 
     pub fn insert(&mut self, name: &str) {

@@ -4,15 +4,26 @@ use std::path::Path;
 
 pub struct ListRow {
     pub name: String,
-    /// `None` = the index has the name but the store entry is gone.
-    pub hosts: Option<Vec<String>>,
-    pub env: Option<String>,
+    pub state: RowState,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum RowState {
+    Ok { hosts: Vec<String>, env: String },
+    /// The index has the name but the store entry is gone.
+    Missing,
+    /// The store entry exists but cannot be read or parsed.
+    Unreadable,
 }
 
 /// Fails if `name` is already stored; callers run it before asking for a value.
 pub fn check_absent(store: &dyn SecretStore, index_path: &Path, name: &str) -> Result<()> {
     validate_name(name)?;
     if store.exists(name)? {
+        // `edit` cannot read a corrupt entry either; the error itself is dropped, it may echo content.
+        if store.get(name).is_err() {
+            bail!("secret {name:?} exists in {} but cannot be read; run `cbox secret delete {name}` and create it again", store.label());
+        }
         if Index::load(index_path)?.names.contains(name) {
             bail!("secret {name:?} already exists; run `cbox secret edit {name}` to change it");
         }
@@ -34,22 +45,24 @@ pub fn create(store: &dyn SecretStore, index_path: &Path, name: &str, s: StoredS
     check_size(&json, store.max_entry_bytes())?;
     store.put(name, &s)?;
     index.insert(name);
-    index.save(index_path)
+    index.save(index_path).map_err(|e| {
+        anyhow!("secret {name:?} was stored in {}, but the index could not be written: {e:#} (run `cbox secret edit {name}` to add it to the index)", store.label())
+    })
 }
 
 pub fn list(store: &dyn SecretStore, index_path: &Path) -> Result<Vec<ListRow>> {
-    Index::load(index_path)?
+    Ok(Index::load(index_path)?
         .names
         .into_iter()
         .map(|name| {
-            let s = store.get(&name)?;
-            Ok(ListRow {
-                hosts: s.as_ref().map(|s| s.hosts.clone()),
-                env: s.map(|s| s.env),
-                name,
-            })
+            let state = match store.get(&name) {
+                Ok(Some(s)) => RowState::Ok { hosts: s.hosts, env: s.env },
+                Ok(None) => RowState::Missing,
+                Err(_) => RowState::Unreadable,
+            };
+            ListRow { name, state }
         })
-        .collect()
+        .collect())
 }
 
 /// Applied in order: replace, then add (deduped), then remove.
@@ -117,13 +130,14 @@ pub fn edit(store: &dyn SecretStore, index_path: &Path, name: &str, c: EditChang
 
 pub fn delete(store: &dyn SecretStore, index_path: &Path, name: &str) -> Result<()> {
     validate_name(name)?;
-    let had_entry = store.delete(name)?;
+    // Load first: a bad index must fail before the entry is gone.
     let mut index = Index::load(index_path)?;
+    let had_entry = store.delete(name)?;
     if !had_entry && !index.names.contains(name) {
         bail!("secret {name:?} not found");
     }
     index.remove(name);
-    index.save(index_path)
+    index.save(index_path).map_err(|e| anyhow!("secret {name:?} was deleted, but the index could not be written: {e:#}"))
 }
 
 #[cfg(test)]
@@ -169,8 +183,7 @@ mod tests {
         let rows = list(&st, &d.index()).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "openai");
-        assert_eq!(rows[0].hosts.as_deref(), Some(&["api.openai.com".to_string()][..]));
-        assert_eq!(rows[0].env.as_deref(), Some("OPENAI_API_KEY"));
+        assert_eq!(rows[0].state, RowState::Ok { hosts: vec!["api.openai.com".into()], env: "OPENAI_API_KEY".into() });
     }
 
     #[test]
@@ -211,7 +224,7 @@ mod tests {
         create(&st, &d.index(), "openai", sec()).unwrap();
         st.delete("openai").unwrap();
         let rows = list(&st, &d.index()).unwrap();
-        assert!(rows[0].hosts.is_none() && rows[0].env.is_none());
+        assert_eq!(rows[0].state, RowState::Missing);
     }
 
     #[test]
@@ -280,8 +293,7 @@ mod tests {
                 }
                 let before = std::fs::read(d.index()).ok();
                 let e = format!("{:#}", create(&st, &d.index(), "bad", sec()).unwrap_err());
-                assert!(e.contains("already exists") && e.contains("cbox secret edit"), "{e}");
-                assert_eq!(e.contains("cbox secret delete"), !in_index, "{e}");
+                assert_eq!(e, "secret \"bad\" exists in mock but cannot be read; run `cbox secret delete bad` and create it again");
                 assert!(!e.contains("LEAKME") && !e.contains("invalid stored secret JSON"), "{e}");
                 assert_eq!(entry.get_password().unwrap(), raw);
                 assert_eq!(std::fs::read(d.index()).ok(), before);
@@ -454,5 +466,70 @@ mod tests {
         let e = format!("{:#}", edit(&st, &d.index(), "k", c).unwrap_err());
         assert!(e.contains("updated") && !e.contains("NEWVALUE"), "{e}");
         assert_eq!(st.get("k").unwrap().unwrap().value, "sk-NEWVALUE");
+    }
+
+    /// A read-only directory holding a valid index: `load` works, `save` cannot.
+    fn read_only_index_dir(d: &tempdir::D, names: &[&str]) {
+        let mut i = Index::default();
+        names.iter().for_each(|n| i.insert(n));
+        i.save(&d.index()).unwrap();
+        std::fs::set_permissions(d.index().parent().unwrap(), std::fs::Permissions::from_mode(0o500)).unwrap();
+    }
+
+    fn unlock(d: &tempdir::D) {
+        std::fs::set_permissions(d.index().parent().unwrap(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    #[test]
+    fn delete_with_a_corrupt_index_keeps_the_store_entry() {
+        let _l = crate::test_env_lock::lock();
+        let (st, d) = setup(None);
+        create(&st, &d.index(), "openai", sec()).unwrap();
+        std::fs::write(d.index(), "not json").unwrap();
+        assert!(delete(&st, &d.index(), "openai").is_err());
+        assert_eq!(st.get("openai").unwrap().unwrap().value, "sk-TOPSECRET");
+    }
+
+    #[test]
+    fn delete_reports_an_index_save_failure_as_deleted() {
+        let _l = crate::test_env_lock::lock();
+        let (st, d) = setup(None);
+        st.put("openai", &sec()).unwrap();
+        read_only_index_dir(&d, &["openai"]);
+        let e = format!("{:#}", delete(&st, &d.index(), "openai").unwrap_err());
+        unlock(&d);
+        assert!(e.starts_with("secret \"openai\" was deleted, but the index could not be written: "), "{e}");
+        assert!(!e.contains("TOPSECRET"), "{e}");
+        assert!(st.get("openai").unwrap().is_none());
+    }
+
+    #[test]
+    fn create_reports_an_index_save_failure_as_stored() {
+        let _l = crate::test_env_lock::lock();
+        let (st, d) = setup(None);
+        read_only_index_dir(&d, &[]);
+        let e = format!("{:#}", create(&st, &d.index(), "openai", sec()).unwrap_err());
+        unlock(&d);
+        assert!(e.starts_with("secret \"openai\" was stored in mock, but the index could not be written: "), "{e}");
+        assert!(e.contains(&d.index().parent().unwrap().display().to_string()), "names the path: {e}");
+        assert!(e.ends_with("(run `cbox secret edit openai` to add it to the index)"), "{e}");
+        assert!(!e.contains("TOPSECRET"), "{e}");
+        assert_eq!(st.get("openai").unwrap().unwrap().value, "sk-TOPSECRET");
+    }
+
+    #[test]
+    fn list_shows_a_corrupt_entry_as_unreadable_next_to_a_healthy_one() {
+        let _l = crate::test_env_lock::lock();
+        let (st, d) = setup(None);
+        create(&st, &d.index(), "good", sec()).unwrap();
+        keyring_core::Entry::new("cbox", "bad").unwrap().set_password(r#"{"value":"sk-LEAKME","hosts":"x","env":"E"}"#).unwrap();
+        let mut i = Index::load(&d.index()).unwrap();
+        i.insert("bad");
+        i.save(&d.index()).unwrap();
+        let rows = list(&st, &d.index()).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!((rows[0].name.as_str(), &rows[0].state), ("bad", &RowState::Unreadable));
+        assert_eq!(rows[1].name, "good");
+        assert!(matches!(rows[1].state, RowState::Ok { .. }));
     }
 }

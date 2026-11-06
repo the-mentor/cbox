@@ -1,5 +1,5 @@
 use crate::config::secrets_index_path;
-use crate::secretstore::{self, EditChanges, EditOutcome, HostChange, ListRow, StoredSecret, open_default, parse_hosts, validate_env, validate_name};
+use crate::secretstore::{self, EditChanges, EditOutcome, HostChange, ListRow, RowState, StoredSecret, open_default, parse_hosts, validate_env, validate_name};
 use anyhow::{Context, Result, bail};
 use clap::Subcommand;
 use std::io::{self, IsTerminal, Read, Write};
@@ -120,9 +120,10 @@ fn hosts_line(o: &EditOutcome) -> Option<String> {
 fn format_list(rows: &[ListRow], label: &str) -> String {
     let cells: Vec<[String; 4]> = rows
         .iter()
-        .map(|r| match (&r.hosts, &r.env) {
-            (Some(h), Some(e)) => [r.name.clone(), h.join(","), e.clone(), label.into()],
-            _ => [r.name.clone(), "(missing value)".into(), "(missing value)".into(), label.into()],
+        .map(|r| match &r.state {
+            RowState::Ok { hosts, env } => [r.name.clone(), hosts.join(","), env.clone(), label.into()],
+            RowState::Missing => [r.name.clone(), "(missing value)".into(), "(missing value)".into(), label.into()],
+            RowState::Unreadable => [r.name.clone(), format!("(unreadable: run cbox secret delete {})", r.name), "-".into(), label.into()],
         })
         .collect();
     let head = ["NAME", "HOSTS", "ENV", "STORE"].map(String::from);
@@ -272,18 +273,26 @@ mod tests {
         assert!(!confirm_delete("n", false, &mut |_| Ok(String::new())).unwrap());
     }
 
-    fn row(name: &str, h: Option<&[&str]>, e: Option<&str>) -> secretstore::ListRow {
-        secretstore::ListRow { name: name.into(), hosts: h.map(|h| h.iter().map(|s| s.to_string()).collect()), env: e.map(String::from) }
+    fn row(name: &str, state: RowState) -> ListRow {
+        ListRow { name: name.into(), state }
+    }
+
+    fn ok(hosts: &[&str], env: &str) -> RowState {
+        RowState::Ok { hosts: hosts.iter().map(|s| s.to_string()).collect(), env: env.into() }
     }
 
     #[test]
     fn list_table_aligns_columns_and_marks_missing_values() {
-        let out = format_list(&[row("openai", Some(&["a.com", "b.com"]), Some("K")), row("x", None, None)], "macOS Keychain");
+        let out = format_list(
+            &[row("openai", ok(&["a.com", "b.com"], "K")), row("x", RowState::Missing), row("bad", RowState::Unreadable)],
+            "macOS Keychain",
+        );
         assert_eq!(
             out,
-            "NAME    HOSTS            ENV              STORE\n\
-             openai  a.com,b.com      K                macOS Keychain\n\
-             x       (missing value)  (missing value)  macOS Keychain\n"
+            "NAME    HOSTS                                     ENV              STORE\n\
+             openai  a.com,b.com                               K                macOS Keychain\n\
+             x       (missing value)                           (missing value)  macOS Keychain\n\
+             bad     (unreadable: run cbox secret delete bad)  -                macOS Keychain\n"
         );
     }
 
