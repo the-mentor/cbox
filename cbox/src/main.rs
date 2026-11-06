@@ -100,6 +100,11 @@ enum Commands {
         #[arg(short, long)]
         all: bool,
     },
+    /// Manage secrets in the OS secret store.
+    Secret {
+        #[command(subcommand)]
+        cmd: commands::secret::SecretCmd,
+    },
 }
 
 #[tokio::main]
@@ -124,6 +129,7 @@ async fn main() -> Result<()> {
         Commands::Exec { name, config, cmd } => commands::exec::run(name, cmd, config).await?,
         Commands::Down { name } => commands::down::run(name).await?,
         Commands::List { all } => commands::list::run(all).await?,
+        Commands::Secret { cmd } => commands::secret::run(cmd)?,
     }
     Ok(())
 }
