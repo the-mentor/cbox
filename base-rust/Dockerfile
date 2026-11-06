@@ -23,6 +23,6 @@ ENV CC=gcc \
 USER sandbox-user
 ENV PATH=/home/sandbox-user/.cargo/bin:$PATH
 # renovate: datasource=github-releases depName=rust-lang/rust
-ARG RUST_VERSION=1.98.1
+ARG RUST_VERSION=1.99.1
 RUN rustup toolchain install "$RUST_VERSION" --profile minimal -c rustfmt -c clippy \
     && rustup default "$RUST_VERSION"

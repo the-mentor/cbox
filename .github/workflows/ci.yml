@@ -15,7 +15,7 @@ env:
   # the cache key tracks it. Renovate bumps it together with
   # base-rust/Dockerfile's copy (same depName, so one PR).
   # renovate: datasource=github-releases depName=rust-lang/rust
-  RUST_VERSION: 1.98.1
+  RUST_VERSION: 1.99.1
 
 jobs:
   # Decides whether the Rust build/test needs to run at all.
