@@ -46,8 +46,8 @@ GOT=$(ps get "$T" </dev/null; echo x); GOT=${GOT%x}
 
 # 3. missing target: "Element not found" on stderr, exit 1
 ps get "cbox-spike/missing-$ID" </dev/null >/dev/null; rc=$?
-grep -q "Element not found" "$ERRF" && ok "3a missing target says 'Element not found'" || bad "3a message" "$(head -c 300 "$ERRF")"
-[ $rc -eq 1 ] && ok "3b missing target exits 1" || bad "3b exit code" "rc=$rc"
+grep -q "CBOX_NOT_FOUND" "$ERRF" && ok "3a missing target prints CBOX_NOT_FOUND (locale-independent)" || bad "3a token" "$(head -c 300 "$ERRF")"
+[ $rc -eq 3 ] && ok "3b missing target exits 3" || bad "3b exit code" "rc=$rc"
 
 # 4. size: 2560 bytes ok, 2561 rejected (script cap) and exits 1
 head -c 2560 /dev/zero | tr '\0' 'a' | ps set "$T" >/dev/null; rc=$?
@@ -77,7 +77,7 @@ else bad "6 inconclusive: set process not seen in the process list" "(try again;
 ps del "$T" </dev/null >/dev/null; rc=$?
 [ $rc -eq 0 ] && ok "7a delete exits 0" || bad "7a delete" "rc=$rc $(head -c 200 "$ERRF")"
 ps del "$T" </dev/null >/dev/null; rc=$?
-[ $rc -eq 1 ] && grep -q "Element not found" "$ERRF" && ok "7b delete of missing exits 1 with 'Element not found'" || bad "7b delete missing" "rc=$rc"
+[ $rc -eq 3 ] && grep -q "CBOX_NOT_FOUND" "$ERRF" && ok "7b delete of missing exits 3 with CBOX_NOT_FOUND" || bad "7b delete missing" "rc=$rc"
 
 # 8. latency
 s=$(date +%s%N); printf x | ps set "$T" >/dev/null; e=$(date +%s%N)
