@@ -91,11 +91,6 @@ fn confirm_delete(name: &str, yes: bool, ask: &mut dyn FnMut(&str) -> io::Result
     Ok(matches!(a.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
 }
 
-/// Fails fast, before any hidden prompt.
-fn check_name(name: &str) -> Result<()> {
-    validate_name(name)
-}
-
 /// Flags given -> the value is untouched and never read; no flags -> read a new value.
 fn edit_changes(
     host: Option<&str>,
@@ -107,14 +102,13 @@ fn edit_changes(
     if let Some(e) = env {
         validate_env(e)?;
     }
-    let hosts = match (host, add, remove) {
-        (Some(h), _, _) => HostChange::Replace(parse_hosts(h)?),
-        (_, Some(a), Some(r)) => HostChange::AddRemove(parse_hosts(a)?, parse_hosts(r)?),
-        (_, Some(a), _) => HostChange::Add(parse_hosts(a)?),
-        (_, _, Some(r)) => HostChange::Remove(parse_hosts(r)?),
-        _ => HostChange::Keep,
+    let list = |s: Option<&str>| s.map(parse_hosts).transpose();
+    let hosts = HostChange {
+        replace: list(host)?,
+        add: list(add)?.unwrap_or_default(),
+        remove: list(remove)?.unwrap_or_default(),
     };
-    let flagged = env.is_some() || !matches!(hosts, HostChange::Keep);
+    let flagged = env.is_some() || host.is_some() || add.is_some() || remove.is_some();
     let value = if flagged { None } else { Some(read()?) };
     Ok(EditChanges { value, hosts, env: env.map(String::from) })
 }
@@ -144,7 +138,7 @@ pub fn run(cmd: SecretCmd) -> Result<()> {
     let index = secrets_index_path().context("cannot locate config directory for the secrets index")?;
     match cmd {
         SecretCmd::Create { name, host, env } => {
-            check_name(&name)?;
+            validate_name(&name)?;
             let hosts = parse_hosts(&host)?;
             validate_env(&env)?;
             secretstore::check_absent(&*store, &index, &name)?;
@@ -165,7 +159,7 @@ pub fn run(cmd: SecretCmd) -> Result<()> {
             print!("{}", format_list(&rows, store.label()));
         }
         SecretCmd::Edit { name, host, add_host, remove_host, env } => {
-            check_name(&name)?;
+            validate_name(&name)?;
             let c = edit_changes(host.as_deref(), add_host.as_deref(), remove_host.as_deref(), env.as_deref(), &mut || {
                 read_value(io::stdin().is_terminal(), &mut io::stdin(), &mut || {
                     rpassword::prompt_password(format!("New value for \"{name}\": "))
@@ -285,9 +279,9 @@ mod tests {
     #[test]
     fn create_and_edit_validate_the_name_before_reading_the_value() {
         for n in ["gh", "gh_basic", "Bad"] {
-            assert!(check_name(n).is_err(), "{n}");
+            assert!(validate_name(n).is_err(), "{n}");
         }
-        check_name("ok").unwrap();
+        validate_name("ok").unwrap();
     }
 
     fn no_read() -> Result<String> {
@@ -306,7 +300,7 @@ mod tests {
             assert!(c.value.is_none());
         }
         let c = edit_changes(None, Some("a.com, b.com"), None, Some("NEW"), &mut no_read).unwrap();
-        assert!(matches!(c.hosts, HostChange::Add(ref h) if h == &["a.com", "b.com"]));
+        assert!(c.hosts.add == ["a.com", "b.com"] && c.hosts.replace.is_none());
         assert_eq!(c.env.as_deref(), Some("NEW"));
         assert!(edit_changes(None, None, None, Some("1bad"), &mut no_read).is_err());
     }
@@ -323,7 +317,7 @@ mod tests {
     fn edit_with_no_flags_replaces_the_value() {
         let c = edit_changes(None, None, None, None, &mut || Ok("newval".into())).unwrap();
         assert_eq!(c.value.as_deref(), Some("newval"));
-        assert!(matches!(c.hosts, HostChange::Keep) && c.env.is_none());
+        assert!(c.hosts.replace.is_none() && c.hosts.add.is_empty() && c.hosts.remove.is_empty() && c.env.is_none());
     }
 
     #[test]

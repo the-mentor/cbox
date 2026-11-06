@@ -52,13 +52,12 @@ pub fn list(store: &dyn SecretStore, index_path: &Path) -> Result<Vec<ListRow>> 
         .collect()
 }
 
-pub enum HostChange {
-    Keep,
-    Replace(Vec<String>),
-    Add(Vec<String>),
-    Remove(Vec<String>),
-    /// `--add-host` and `--remove-host` together: add first, then remove.
-    AddRemove(Vec<String>, Vec<String>),
+/// Applied in order: replace, then add (deduped), then remove.
+#[derive(Default)]
+pub struct HostChange {
+    pub replace: Option<Vec<String>>,
+    pub add: Vec<String>,
+    pub remove: Vec<String>,
 }
 
 pub struct EditChanges {
@@ -86,16 +85,11 @@ pub fn edit(store: &dyn SecretStore, name: &str, c: EditChanges) -> Result<EditO
     validate_name(name)?;
     let mut s = store.get(name)?.ok_or_else(|| anyhow!("secret {name:?} not found; run cbox secret create {name}"))?;
     let old_hosts = s.hosts.clone();
-    match c.hosts {
-        HostChange::Keep => {}
-        HostChange::Replace(h) => s.hosts = h,
-        HostChange::Add(a) => add_hosts(&mut s.hosts, a),
-        HostChange::Remove(r) => s.hosts.retain(|x| !r.contains(x)),
-        HostChange::AddRemove(a, r) => {
-            add_hosts(&mut s.hosts, a);
-            s.hosts.retain(|x| !r.contains(x));
-        }
+    if let Some(h) = c.hosts.replace {
+        s.hosts = h;
     }
+    add_hosts(&mut s.hosts, c.hosts.add);
+    s.hosts.retain(|x| !c.hosts.remove.contains(x));
     if s.hosts.is_empty() {
         bail!("at least one host is required; secret {name:?} was not changed");
     }
@@ -310,10 +304,10 @@ mod tests {
         let _l = crate::test_env_lock::lock();
         let (st, _d) = setup(None);
         put_sec(&st, &["a.com"]);
-        edit(&st, "k", ch(HostChange::AddRemove(v(&["b.com"]), v(&["a.com"])))).unwrap();
+        edit(&st, "k", ch(HostChange { add: v(&["b.com"]), remove: v(&["a.com"]), ..Default::default() })).unwrap();
         assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["b.com"]));
         // Adding and removing the same host empties the list: error, nothing written.
-        let e = edit(&st, "k", ch(HostChange::AddRemove(v(&["b.com"]), v(&["b.com"])))).unwrap_err().to_string();
+        let e = edit(&st, "k", ch(HostChange { add: v(&["b.com"]), remove: v(&["b.com"]), ..Default::default() })).unwrap_err().to_string();
         assert!(e.contains("at least one host"), "{e}");
         assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["b.com"]));
     }
@@ -353,7 +347,7 @@ mod tests {
         let _l = crate::test_env_lock::lock();
         let (st, _d) = setup(None);
         put_sec(&st, &["a.com", "b.com"]);
-        let o = edit(&st, "k", ch(HostChange::Replace(v(&["c.com"])))).unwrap();
+        let o = edit(&st, "k", ch(HostChange { replace: Some(v(&["c.com"])), ..Default::default() })).unwrap();
         assert_eq!((o.old_hosts, o.new_hosts), (v(&["a.com", "b.com"]), v(&["c.com"])));
         assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["c.com"]));
     }
@@ -363,7 +357,7 @@ mod tests {
         let _l = crate::test_env_lock::lock();
         let (st, _d) = setup(None);
         put_sec(&st, &["a.com"]);
-        edit(&st, "k", ch(HostChange::Add(v(&["a.com", "b.com"])))).unwrap();
+        edit(&st, "k", ch(HostChange { add: v(&["a.com", "b.com"]), ..Default::default() })).unwrap();
         assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["a.com", "b.com"]));
     }
 
@@ -372,7 +366,7 @@ mod tests {
         let _l = crate::test_env_lock::lock();
         let (st, _d) = setup(None);
         put_sec(&st, &["a.com", "b.com"]);
-        edit(&st, "k", ch(HostChange::Remove(v(&["a.com", "zzz.com"])))).unwrap();
+        edit(&st, "k", ch(HostChange { remove: v(&["a.com", "zzz.com"]), ..Default::default() })).unwrap();
         assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["b.com"]));
     }
 
@@ -381,7 +375,7 @@ mod tests {
         let _l = crate::test_env_lock::lock();
         let (st, _d) = setup(None);
         put_sec(&st, &["a.com"]);
-        for c in [HostChange::Remove(v(&["a.com"])), HostChange::Replace(vec![])] {
+        for c in [HostChange { remove: v(&["a.com"]), ..Default::default() }, HostChange { replace: Some(vec![]), ..Default::default() }] {
             let e = edit(&st, "k", ch(c)).unwrap_err().to_string();
             assert!(e.contains("at least one host"), "{e}");
         }
@@ -393,10 +387,10 @@ mod tests {
         let _l = crate::test_env_lock::lock();
         let (st, _d) = setup(None);
         put_sec(&st, &["a.com"]);
-        edit(&st, "k", EditChanges { value: Some("v2".into()), hosts: HostChange::Keep, env: Some("NEW".into()) }).unwrap();
+        edit(&st, "k", EditChanges { value: Some("v2".into()), hosts: HostChange::default(), env: Some("NEW".into()) }).unwrap();
         let s = st.get("k").unwrap().unwrap();
         assert_eq!((s.value.as_str(), s.env.as_str()), ("v2", "NEW"));
-        assert!(edit(&st, "k", EditChanges { value: None, hosts: HostChange::Keep, env: Some("1x".into()) }).is_err());
+        assert!(edit(&st, "k", EditChanges { value: None, hosts: HostChange::default(), env: Some("1x".into()) }).is_err());
     }
 
     #[test]
@@ -404,7 +398,7 @@ mod tests {
         let _l = crate::test_env_lock::lock();
         let (st, _d) = setup(Some(100));
         put_sec(&st, &["a.com"]);
-        let e = edit(&st, "k", EditChanges { value: Some("x".repeat(200)), hosts: HostChange::Keep, env: None }).unwrap_err().to_string();
+        let e = edit(&st, "k", EditChanges { value: Some("x".repeat(200)), hosts: HostChange::default(), env: None }).unwrap_err().to_string();
         assert!(e.contains("limit") && !e.contains("xxxx"), "{e}");
         assert_eq!(st.get("k").unwrap().unwrap().value, "v1");
     }
@@ -413,7 +407,7 @@ mod tests {
     fn edit_missing_secret_says_create() {
         let _l = crate::test_env_lock::lock();
         let (st, _d) = setup(None);
-        let e = edit(&st, "x", ch(HostChange::Keep)).unwrap_err().to_string();
+        let e = edit(&st, "x", ch(HostChange::default())).unwrap_err().to_string();
         assert_eq!(e, "secret \"x\" not found; run cbox secret create x");
     }
 }
