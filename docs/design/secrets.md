@@ -1,6 +1,6 @@
 # cbox secrets: design
 
-Status: approved by the user on 2026-11-06. PRs 1, 2 and 4 (store, `up` integration, `edit`) are implemented on branch `feat/secrets-store`; the WSL store is not yet implemented.
+Status: approved by the user on 2026-11-06. PRs 1, 2 and 4 (store, `up` integration, `edit`) are implemented; the WSL and Linux desktop stores are not implemented yet (see the implementation plan and the tracking issues).
 
 ## Intent
 
@@ -21,8 +21,14 @@ shaped so a profile can later refer to a secret by name without a migration.
 ## Goals
 
 - `cbox secret create`, `list`, `edit`, `delete`.
-- Secret values are never written to disk in plaintext by cbox.
-- macOS: the Keychain. WSL: Windows Credential Manager.
+- cbox itself never writes a secret value to disk. The OS store holds the value
+  encrypted, and the secrets index holds names only. BoxLite keeps a copy of the
+  values of the secrets a box was created with in that box's own database under
+  the box home (not encrypted, protected by file permissions; cbox makes the box
+  home owner-only) until the box is removed (`cbox down`, or `cbox up -f`). Secrets
+  from a host env var (the flag form) are kept there the same way.
+- macOS: the Keychain (implemented). WSL: Windows Credential Manager (not
+  implemented yet).
 - `cbox up --secret NAME` takes the value from the store and feeds the existing
   substitution path (`cbox/src/secrets.rs`), unchanged. The box still only sees a
   placeholder; the host-side proxy swaps in the real value, only for the secret's
@@ -43,7 +49,9 @@ shaped so a profile can later refer to a secret by name without a migration.
 
 ## Anti-goals (a failure even if it technically works)
 
-- Any path that writes a secret value to disk unencrypted, including a fallback.
+- Any path where cbox writes a secret value to disk unencrypted, including a
+  fallback. (BoxLite's own per-box copy, described under "What is stored where",
+  is written by BoxLite, not cbox, and goes away with the box.)
 - A secret value on a command line (visible in `ps`, shell history).
 - A command that prints a stored value.
 - A profile or flag that can widen a secret's allowed hosts.
@@ -105,12 +113,12 @@ platform, not the all-in-one `keyring` crate. Register one store at startup with
 | Platform | Store |
 |----------|-------|
 | macOS | `apple-native-keyring-store` (Keychain) |
-| WSL | a small store written in cbox over Windows Credential Manager |
-| Linux desktop | `zbus-secret-service-keyring-store` (later) |
+| WSL | a small store written in cbox over Windows Credential Manager (not implemented yet) |
+| Linux desktop | `zbus-secret-service-keyring-store` (not implemented yet) |
 | anything else | `cbox secret ...` fails with a clear "no secret store available" error |
 
-**WSL store.** Validated by spike (`spike/keyring-wsl`, `spikes/wincred-store/`):
-a custom `keyring-core` store that runs `powershell.exe` through WSL interop and
+**WSL store (not implemented yet).** Validated by a spike (see the implementation
+plan and the WSL store issue): a custom `keyring-core` store that runs `powershell.exe` through WSL interop and
 calls `CredWriteW/CredReadW/CredDeleteW` via a compiled C# type. The secret goes
 over stdin only, never argv. All six spike checks passed on a real WSL machine;
 each call took about 0.5 s (almost all PowerShell startup). Credential Manager
@@ -119,15 +127,25 @@ WSL interop enabled and `powershell.exe` resolvable, and fail with an actionable
 message otherwise. Reading several secrets should use one
 PowerShell run, not one per secret.
 
-**What is stored where.** One entry per secret in the OS store, keyed
-`cbox/<name>`, whose stored value is a small JSON document holding the **value,
+**What is stored where.** One entry per secret in the OS store, under service
+`cbox` with the secret name as the account (the `cbox/<name>` form is the
+Credential Manager target name planned for the WSL store), whose stored value is a small JSON document holding the **value,
 allowed hosts, and in-box env var name**. Keeping the hosts inside the protected
 entry means anything able to widen a secret's hosts could equally read its value.
 A separate plain file `~/.config/cbox/secrets.json` holds only the **list of
 names** (so `list` can enumerate; `keyring-core` search is not implemented by
 every store). If the index and the store disagree (entry removed in Keychain
 Access, say), `list` shows the name as "missing value" and `delete` removes the
-stale name. The index path honours `$XDG_CONFIG_HOME` (`$XDG_CONFIG_HOME/cbox/secrets.json`, else
+stale name. An entry that exists but cannot be read is listed as
+`(unreadable: run cbox secret delete NAME)`, never with any of its content.
+
+**BoxLite's copy.** BoxLite 0.11.0 serializes each `Secret`, value included, into
+its per-box database under the box home, and keeps it there while the box exists
+(its own doc on `Secret.value`: serialized "for DB persistence and shim config
+pipe", protected by "DB file permissions"). That copy is not encrypted; cbox's
+`secure_box_home` makes the box home owner-only (0700). It is removed with the box
+(`cbox down`, or `cbox up -f`, which recreates it). Env-sourced secrets have always
+been kept the same way. The index path honours `$XDG_CONFIG_HOME` (`$XDG_CONFIG_HOME/cbox/secrets.json`, else
 `~/.config/cbox/secrets.json`); unlike this, `registries.json` ignores XDG and uses `--config`,
 `$CBOX_REGISTRIES`, then `~/.config/cbox/registries.json`.
 
@@ -135,9 +153,11 @@ stale name. The index path honours `$XDG_CONFIG_HOME` (`$XDG_CONFIG_HOME/cbox/se
 form `NAME=ENV_VAR@hosts` is unchanged. A lookup builds the same `SecretSpec`
 inputs `secrets::build` already consumes, with the value supplied by the store
 instead of a host env var. A store-backed secret has no host source variable, so
-the in-box env name is still added to the exclusion list `env::compose` takes as
-`secret_vars`, so a host variable or `-e` flag of the same name makes `up` fail
-instead of leaking the real value into the box (see "Details settled in review").
+its in-box env name is dropped from the passthrough list (the guest gets the
+placeholder, and a host variable of that name is not forwarded), and is still added
+to the exclusion list `env::compose` takes as `secret_vars`, so a `-e` flag of the
+same name makes `up` fail instead of leaking a value into the box (see "Details
+settled in review").
 The resume warning needs a small change for store-backed secrets (same section).
 
 **Size limit and edits.** Windows Credential Manager accepts at most 2560 bytes per
@@ -190,11 +210,14 @@ Merge order matters only as noted: 1 before 2; 3 any time after 1.
 A fresh reader of this document raised these. All are the author's calls, not the
 user's; each is small enough to change in review.
 
-- **Passthrough collision.** `env::compose` already bails when a secret's source
-  variable is also passthrough or `-e`. For a store secret the in-box env name
-  plays that role, so it is passed in as an excluded name. A host variable with
-  that name therefore fails `up` with the existing message rather than reaching
-  the box. This is a small change to the `up` wiring, not to `compose` itself.
+- **Passthrough collision.** `env::compose` bails when a secret's source
+  variable is also passthrough or `-e`. That stays true for the flag form. For a
+  store secret the value does not come from the host, so `up` removes its in-box
+  env name from the passthrough list before `compose` (this matters because
+  names like `ANTHROPIC_API_KEY` are on that hardcoded list): the box gets the
+  placeholder and the host variable of that name is not forwarded. The name is
+  still passed in as an excluded name, so `-e NAME=...` fails `up` with the
+  existing message. This is a change to the `up` wiring, not to `compose` itself.
 - **Resume warning.** `sidecar::hash_secret_value` hashes only the value, so
   editing hosts or the env name would go unnoticed on resume. For store-backed
   secrets the hash covers value, hosts and env name. Flag-form secrets keep the
@@ -202,25 +225,30 @@ user's; each is small enough to change in review.
 - **Names.** Lowercase letters, digits, `-` and `_`, starting with a letter (the
   name appears inside the `<BOXLITE_SECRET:name>` placeholder). `gh` and `gh_basic` (the
   two built-in GitHub secrets) stay reserved, in both the store and the flag form. A bare `--secret NAME` that is not in the store fails `up`; it never
-  falls back to a host env var (confirmed by the user). Two secrets mapping to the same in-box env name
-  in one `up` is an error, including the flag form (the GitHub preset is
-  reported as "the GitHub token (GH_TOKEN/GITHUB_TOKEN)").
+  falls back to a host env var (confirmed by the user). Repeating a `--secret`
+  name, or two secrets sharing an in-box env var in one `up`, is an error; this
+  is now also the case for the flag form (the GitHub preset is reported as "the
+  GitHub token (GH_TOKEN/GITHUB_TOKEN)").
 - **Create and delete.** `create` on a name that already exists errors and points
   at `edit`. It checks the store entry, not the index, so an orphan entry without
   an index line reports "exists but not in the index" and offers `edit` (keeps it)
   or `delete`. Order: write the store entry,
-  then the index. `delete` removes the store entry, then the name, and succeeds
-  if either is already gone; if neither exists it fails with
-  `secret "x" not found`. Existence is probed without parsing the entry, so a
-  corrupt entry can still be deleted, and `create` on one reports "already
-  exists" with the `delete` hint.
+  then the index; if the index cannot be written, `create` says the secret was
+  stored and points at `cbox secret edit x` to add it to the index. `delete`
+  loads the index first (a corrupt index fails before the store is touched),
+  removes the store entry, then the name, and succeeds if either is already
+  gone; if neither exists it fails with `secret "x" not found`. If the index
+  cannot be written afterwards it says the secret was deleted. Existence is
+  probed without parsing the entry, so a corrupt entry can still be deleted, and
+  `create` on one (indexed or not) reports `secret "x" exists in <store> but
+  cannot be read; run `cbox secret delete x` and create it again`.
 - **Value input.** Strip one trailing newline from piped input; reject an empty
   value. `edit` with only host or env flags does not prompt for a value; `edit`
   with no flags replaces the value (hidden prompt or piped stdin); with any flag the value is never read.
 - **Other platforms.** The macOS store crate is behind `cfg(target_os = "macos")`
   and CI keeps building on Linux. Without a store, `secret` commands and a bare
   `--secret NAME` fail with the same "no secret store available" error.
-- **WSL store.** Copied from the spike into a module in `cbox/`. **The PowerShell
+- **WSL store (not implemented yet).** To be copied from the spike into a module in `cbox/`. **The PowerShell
   script is never written to disk** (decided by the user, to stop anyone swapping
   it to capture values): it is embedded in the binary with `include_str!` and
   passed to `powershell.exe -NoProfile -NonInteractive -EncodedCommand <base64

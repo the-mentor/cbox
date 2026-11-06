@@ -291,7 +291,8 @@ ignored (no config drift validation)." A reused box keeps whatever credentials, 
 disk size it had when first created — so a rotated GitHub token, for instance, does not reach
 a resumed box until `-f` recreates it. cbox now says so on every reuse (which settings are
 stale, and that `-f` is the fix), and specifically detects a *changed* secret: a hash of each
-secret's value (never the value) is stored in the per-box `cbox.json` sidecar at creation, and
+secret (never the value itself; for a stored secret it covers the value, hosts and in-box env
+name, for the flag form the value only) is stored in the per-box `cbox.json` sidecar at creation, and
 compared on reuse. A mismatch on a secret present in both old and new (i.e. rotated, not merely
 added or dropped) prints a named warning — a warning, not a refusal, because most reuses won't
 have rotated anything and refusing would force a full recreate onto every session regardless
@@ -507,9 +508,19 @@ printed by any command; `list` shows names, hosts and variable names only. `edit
 (`--host` replaces, `--add-host`/`--remove-host` adjust) or `--env`, leaving the value untouched;
 `edit NAME` with no flags replaces the value.
 
+cbox itself never writes a secret value to disk: the OS store holds it encrypted, and the
+secrets index (`~/.config/cbox/secrets.json`) holds names only. BoxLite, however, keeps a copy
+of the values of the secrets a box was created with in that box's own database under the box
+home (not encrypted, protected by file permissions; cbox makes the box home owner-only) until
+the box is removed (`cbox down`, or `cbox up -f`). Secrets from a host env var (the flag form)
+are kept there the same way.
+
 `cbox up --secret NAME` (a bare name) resolves the secret from the store. There is no fallback to
 a host environment variable: a name not in the store fails `up`. `gh` and `gh_basic` are reserved
-for the built-in GitHub secrets. Design: `docs/design/secrets.md`.
+for the built-in GitHub secrets. A stored secret's in-box variable name is dropped from the
+passthrough list, so a stored `ANTHROPIC_API_KEY` secret works: the box gets the placeholder and
+the host variable of that name is not forwarded (`-e` of that name still fails). Design:
+`docs/design/secrets.md`.
 
 ### How the three environment mechanisms compose
 

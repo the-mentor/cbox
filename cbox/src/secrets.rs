@@ -82,7 +82,8 @@ pub fn parse_secret_flag(s: &str) -> Result<SecretSpec> {
     // instead of the host the user actually named -- rejecting the name
     // outright is simpler and safer than trying to distinguish "the
     // preset" from "a user secret that happens to be named gh" downstream.
-    if name == "gh" || name == "gh_basic" {
+    // "gh_basic" is reserved too: it is the GitHub preset's second SDK secret.
+    if crate::secretstore::RESERVED_NAMES.contains(&name) {
         bail!(
             "--secret name {name:?} is reserved for the built-in GitHub secret \
              (auto-detected from GH_TOKEN/GITHUB_TOKEN); choose a different name."

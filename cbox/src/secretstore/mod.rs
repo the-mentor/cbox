@@ -1,6 +1,6 @@
 //! Pure data rules for stored secrets: names, hosts, env vars, JSON form, size limit.
 
-// KeyringStore (and what only it uses) is built only on macOS until the Linux/WSL stores land.
+// KeyringStore is compiled everywhere, but only usable where a store is registered (macOS today).
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
 use anyhow::{Result, bail};
@@ -13,8 +13,8 @@ pub use service::{EditChanges, EditOutcome, HostChange, ListRow, RowState, check
 pub use store::{KeyringStore, SecretStore, open_default};
 use serde::{Deserialize, Serialize};
 
-/// Windows-credential-store-via-WSL entries are capped at this many bytes.
-#[allow(dead_code)] // used by the WSL store (Task 5, not yet implemented)
+/// Windows Credential Manager (the planned WSL store) caps an entry at this many bytes.
+#[allow(dead_code)] // the WSL store that will use it is not implemented yet
 pub const WSL_MAX_ENTRY_BYTES: usize = 2560;
 
 #[derive(Serialize, Deserialize)]
@@ -46,13 +46,16 @@ impl StoredSecret {
     }
 }
 
+/// Names of the built-in GitHub secrets; neither store nor flag form may use them.
+pub const RESERVED_NAMES: &[&str] = &["gh", "gh_basic"];
+
 pub fn validate_name(name: &str) -> Result<()> {
     let ok = name.starts_with(|c: char| c.is_ascii_lowercase())
         && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
     if !ok {
         bail!("invalid secret name {name:?}: use lowercase letters, digits, '-' or '_', starting with a letter");
     }
-    if name == "gh" || name == "gh_basic" {
+    if RESERVED_NAMES.contains(&name) {
         bail!("secret name {name:?} is reserved for the built-in GitHub secret");
     }
     Ok(())

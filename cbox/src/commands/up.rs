@@ -170,9 +170,9 @@ pub async fn run(args: UpArgs) -> Result<()> {
                 // the fix is what turns this from an invisible 401 later
                 // into an actionable line now.
                 eprintln!(
-                    "cbox: warning: {} in your environment no longer match(es) what this box \
-                     was created with -- it will keep substituting the OLD value(s) until you \
-                     run with -f/--force to recreate it.",
+                    "cbox: warning: {} changed since this box was created (a stored secret's \
+                     value, hosts or env name, or a --secret NAME=VAR@hosts variable's value) -- \
+                     the box keeps the OLD setting(s) until you run with -f/--force to recreate it.",
                     changed.join(", ")
                 );
             }

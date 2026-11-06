@@ -150,7 +150,7 @@ just up -i localhost:5551/library/cbox-custom:v2   # boot a specific tag
 than removing it. The disk and box record survive, and running `just up` again against the
 same name resumes it (cold-booting the VM again, not a suspend/resume). That resumed box keeps
 the credentials, mounts, disk size, memory and CPUs it had when first created, so `cbox` warns
-on resume and specifically calls out any secret whose value has changed since (e.g. a rotated
+on resume and specifically calls out any secret that has changed since (e.g. a rotated
 token). `-f` is how to pick up today's settings instead. `just exec` also works while
 `just up` is still attached (it opens a second session in the same box), and against a
 stopped box it starts it first.
