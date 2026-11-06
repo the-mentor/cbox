@@ -1,6 +1,6 @@
 # cbox secrets: design
 
-Status: approved by the user on 2026-11-06. Nothing here is built yet.
+Status: approved by the user on 2026-11-06. PRs 1, 2 and 4 (store, `up` integration, `edit`) are implemented on branch `feat/secrets-store`; the WSL store is not yet implemented.
 
 ## Intent
 
@@ -52,7 +52,7 @@ shaped so a profile can later refer to a secret by name without a migration.
 
 ```
 $ cbox secret create openai --host api.openai.com --env OPENAI_API_KEY
-Value (input hidden): ********
+Value for "openai": 
 Saved "openai" in macOS Keychain, allowed hosts: api.openai.com
 
 $ cbox secret list
@@ -81,7 +81,7 @@ Details decided by the user:
   `--add-host` and `--remove-host` (clap error); the latter two may be combined.
   Every edit is a read-modify-write of the one entry, size-checked before `put`.
 - The value is entered at a hidden prompt, or read from stdin when piped
-  (`pbpaste | cbox secret create openai --host api.openai.com`).
+  (`pbpaste | cbox secret create openai --host api.openai.com --env OPENAI_API_KEY`).
 - `cbox secret create --help` shows a few examples (prompt, several hosts, piped).
 - Names are one namespace shared with the existing flag form; `gh` stays reserved.
 
@@ -124,7 +124,9 @@ A separate plain file `~/.config/cbox/secrets.json` holds only the **list of
 names** (so `list` can enumerate; `keyring-core` search is not implemented by
 every store). If the index and the store disagree (entry removed in Keychain
 Access, say), `list` shows the name as "missing value" and `delete` removes the
-stale name.
+stale name. The index path honours `$XDG_CONFIG_HOME` (`$XDG_CONFIG_HOME/cbox/secrets.json`, else
+`~/.config/cbox/secrets.json`); unlike this, `registries.json` ignores XDG and uses `--config`,
+`$CBOX_REGISTRIES`, then `~/.config/cbox/registries.json`.
 
 **Use in `up`.** `--secret NAME` with no `=` and no `@` is a store lookup. The
 form `NAME=ENV_VAR@hosts` is unchanged. A lookup builds the same `SecretSpec`
@@ -150,7 +152,7 @@ store with an encrypted file; neither is in scope.
 Merge order matters only as noted: 1 before 2; 3 any time after 1.
 
 1. **Store interface, macOS backend, `secret create | list | delete`.** On
-   other platforms the commands print "not supported yet".
+   other platforms the commands fail with "no secret store available on this platform ...".
 2. **`up` integration.** `--secret NAME` resolves from the store.
 3. **WSL backend.** Detection, actionable errors, batched reads. **Not yet implemented.**
 4. **`secret edit`** and `docs/design/cbox.md` updates.
@@ -204,10 +206,10 @@ user's; each is small enough to change in review.
   at `edit`. It checks the store entry, not the index, so an orphan entry without
   an index line reports "exists, run `delete`". Order: write the store entry,
   then the index. `delete` removes the store entry, then the name, and succeeds
-  if either is already gone.
+  if either is already gone; if neither exists it fails with `secret "x" not found`.
 - **Value input.** Strip one trailing newline from piped input; reject an empty
   value. `edit` with only host or env flags does not prompt for a value; `edit`
-  with no flags, or with piped input, replaces the value.
+  with no flags replaces the value (hidden prompt or piped stdin); with any flag the value is never read.
 - **Other platforms.** The macOS store crate is behind `cfg(target_os = "macos")`
   and CI keeps building on Linux. Without a store, `secret` commands and a bare
   `--secret NAME` fail with the same "no secret store available" error.
