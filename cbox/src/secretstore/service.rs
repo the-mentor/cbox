@@ -12,7 +12,7 @@ pub struct ListRow {
 /// Fails if `name` is already stored; callers run it before asking for a value.
 pub fn check_absent(store: &dyn SecretStore, index_path: &Path, name: &str) -> Result<()> {
     validate_name(name)?;
-    if store.get(name)?.is_some() {
+    if store.exists(name)? {
         if Index::load(index_path)?.names.contains(name) {
             bail!("secret {name:?} already exists; run `cbox secret edit {name}` to change it");
         }
@@ -264,10 +264,25 @@ mod tests {
     #[test]
     fn create_over_a_corrupt_entry_refuses_without_leaking() {
         let _l = crate::test_env_lock::lock();
-        let (st, d) = setup(None);
-        keyring_core::Entry::new("cbox", "bad").unwrap().set_password(r#"{"value":"x","hosts":"sk-LEAKME","env":"E"}"#).unwrap();
-        let e = format!("{:#}", create(&st, &d.index(), "bad", sec()).unwrap_err());
-        assert!(!e.contains("LEAKME") && !e.contains("is valid"), "{e}");
+        for raw in ["CORRUPT-TEXT{", r#"{"value":"x","hosts":"sk-LEAKME","env":"E"}"#] {
+            for in_index in [true, false] {
+                let (st, d) = setup(None);
+                let entry = keyring_core::Entry::new("cbox", "bad").unwrap();
+                entry.set_password(raw).unwrap();
+                if in_index {
+                    let mut i = Index::load(&d.index()).unwrap();
+                    i.insert("bad");
+                    i.save(&d.index()).unwrap();
+                }
+                let before = std::fs::read(d.index()).ok();
+                let e = format!("{:#}", create(&st, &d.index(), "bad", sec()).unwrap_err());
+                let hint = if in_index { "cbox secret edit" } else { "cbox secret delete" };
+                assert!(e.contains("already exists") && e.contains(hint), "{e}");
+                assert!(!e.contains("LEAKME") && !e.contains("invalid stored secret JSON"), "{e}");
+                assert_eq!(entry.get_password().unwrap(), raw);
+                assert_eq!(std::fs::read(d.index()).ok(), before);
+            }
+        }
     }
 
     #[test]
