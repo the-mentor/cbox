@@ -155,13 +155,13 @@ Merge order matters only as noted: 1 before 2; 3 any time after 1.
 
 - Hosts are stored **with the secret**. Confirmed by the user: a profile only
   uses them and can never change them (no override, no narrowing, no widening).
-- The in-box env var name is stored with the secret (`--env`).
+- The in-box env var name is stored with the secret (`--env`); confirmed by the user.
 - Hosts, env name, and value live together in the OS-store entry; a plain file
   holds only names.
 - Headless Linux with no store is an error, not a file fallback.
 - No command prints a stored value.
-- `--env` is optional on `create`; if omitted the in-box variable is named after
-  the secret in upper snake case (e.g. `openai` becomes `OPENAI`).
+- `--env` is **required** on `create` (confirmed by the user): no default is
+  guessed, so the box never gets a variable nothing reads. `edit --env` changes it.
 - `delete` asks for confirmation; `-y` skips it.
 
 ## Details settled in review
