@@ -501,7 +501,7 @@ string, so any variable can be forwarded without editing code.
 ### Stored secrets
 
 `cbox secret create|list|edit|delete` manage named secrets in the OS secret store (macOS
-Keychain today; WSL via Windows Credential Manager and the Linux desktop Secret Service are
+Keychain; WSL via Windows Credential Manager; the Linux desktop Secret Service is
 planned, not yet implemented). Each entry holds the value, its allowed hosts and the in-box
 variable name. The value is read from a hidden prompt or stdin, never `argv`, and is never
 printed by any command; `list` shows names, hosts and variable names only. `edit` changes hosts

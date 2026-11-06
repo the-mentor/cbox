@@ -1,6 +1,6 @@
 # cbox secrets: design
 
-Status: approved by the user on 2026-11-06. PRs 1, 2 and 4 (store, `up` integration, `edit`) are implemented; the WSL and Linux desktop stores are not implemented yet (see the implementation plan and the tracking issues).
+Status: approved by the user on 2026-11-06. PRs 1 to 4 (store, `up` integration, WSL store, `edit`) are implemented; the Linux desktop store is not (see the tracking issues).
 
 ## Intent
 
@@ -30,8 +30,8 @@ shaped so a profile can later refer to a secret by name without a migration.
   So `cbox secret delete` removes a secret from the store but does not revoke it
   for boxes that already used it: they keep the placeholder and BoxLite's copy of
   the value until they are removed.
-- macOS: the Keychain (implemented). WSL: Windows Credential Manager (not
-  implemented yet).
+- macOS: the Keychain (implemented). WSL: Windows Credential Manager
+  (implemented; the Rust store is untested on real WSL until a manual round trip).
 - `cbox up --secret NAME` takes the value from the store and feeds the existing
   substitution path (`cbox/src/secrets.rs`), unchanged. The box still only sees a
   placeholder; the host-side proxy swaps in the real value, only for the secret's
@@ -119,19 +119,18 @@ platform, not the all-in-one `keyring` crate. Register one store at startup with
 | Platform | Store |
 |----------|-------|
 | macOS | `apple-native-keyring-store` (Keychain) |
-| WSL | a small store written in cbox over Windows Credential Manager (not implemented yet) |
+| WSL | a small store written in cbox over Windows Credential Manager (implemented) |
 | Linux desktop | `zbus-secret-service-keyring-store` (not implemented yet) |
 | anything else | `cbox secret ...` fails with a clear "no secret store available" error |
 
-**WSL store (not implemented yet).** Validated by a spike (see the implementation
-plan and the WSL store issue): a custom `keyring-core` store that runs `powershell.exe` through WSL interop and
-calls `CredWriteW/CredReadW/CredDeleteW` via a compiled C# type. The secret goes
-over stdin only, never argv. All six spike checks passed on a real WSL machine;
-each call took about 0.5 s (almost all PowerShell startup). Credential Manager
-caps a value at 2560 bytes (fine for tokens). The store must detect, before use:
-WSL interop enabled and `powershell.exe` resolvable, and fail with an actionable
-message otherwise. Reading several secrets should use one
-PowerShell run, not one per secret.
+**WSL store.** `WinCredStore` (`cbox/src/secretstore/wincred.rs`) implements `SecretStore`
+directly, not a `keyring-core` store. It runs `powershell.exe` through WSL interop with an
+embedded script (`wincred.ps1`) that calls `CredWriteW/CredReadW/CredDeleteW` via a compiled
+C# type, under the target name `cbox/<name>`. It is used when `/proc/sys/kernel/osrelease`
+contains "microsoft". The secret goes over stdin only, never argv. Each operation is one
+PowerShell call of about 0.5 s (almost all startup), so `list` costs one call per secret.
+Credential Manager caps a value at 2560 bytes (fine for tokens). It needs WSL interop and
+`powershell.exe` on PATH; if the program cannot be started, the error names both.
 
 **What is stored where.** One entry per secret in the OS store, under service
 `cbox` with the secret name as the account (the `cbox/<name>` form is the
@@ -185,7 +184,7 @@ Merge order matters only as noted: 1 before 2; 3 any time after 1.
 1. **Store interface, macOS backend, `secret create | list | delete`.** On
    other platforms the commands fail with "no secret store available on this platform ...".
 2. **`up` integration.** `--secret NAME` resolves from the store.
-3. **WSL backend.** Detection, actionable errors, batched reads. **Not yet implemented.**
+3. **WSL backend.** Detection, actionable errors. Implemented.
 4. **`secret edit`** and `docs/design/cbox.md` updates.
 
 ## Follow-ups (not in this work)
@@ -256,18 +255,17 @@ user's; each is small enough to change in review.
 - **Other platforms.** The macOS store crate is behind `cfg(target_os = "macos")`
   and CI keeps building on Linux. Without a store, `secret` commands and a bare
   `--secret NAME` fail with the same "no secret store available" error.
-- **WSL store (not implemented yet).** To be copied from the spike into a module in `cbox/`. **The PowerShell
+- **WSL store.** **The PowerShell
   script is never written to disk** (decided by the user, to stop anyone swapping
   it to capture values): it is embedded in the binary with `include_str!` and
   passed to `powershell.exe -NoProfile -NonInteractive -EncodedCommand <base64
   UTF-16LE>`. The operation and target name are prepended as variable
   assignments; the target is safe to inline because names are restricted to
-  lowercase letters, digits, `-` and `_`. The secret still travels over stdin
+  lowercase letters, digits, `-` and `_` (and `encode_command` re-checks it). The secret still travels over stdin
   only. This removes the temporary file, `wslpath`, the UNC script path and
-  `-ExecutionPolicy Bypass`. **Unverified:** that `-EncodedCommand` leaves stdin
-  free for the secret and that the encoded script fits the command-line limit
-  (about 2.5 KB of script, roughly 7 KB encoded). PR 3 starts with a spike on a
-  real WSL machine to confirm both before building on it. This protects against
+  `-ExecutionPolicy Bypass`. The same script and flags were verified on Windows
+  PowerShell 5.1 under WSL by a spike (stdin free, UTF-8, "Element not found", exit
+  code 1, long command line); the Rust store itself has not been run on real WSL yet. This protects against
   tampering with cbox's script, not against other software running as the same
   Windows user, which can call Credential Manager directly (it has no per-app
   access control).
