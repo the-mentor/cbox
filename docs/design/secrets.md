@@ -153,7 +153,8 @@ Merge order matters only as noted: 1 before 2; 3 any time after 1.
 
 ## Calls made by the author (not decided by the user)
 
-- Hosts are stored **with the secret**, not per profile.
+- Hosts are stored **with the secret**. Confirmed by the user: a profile only
+  uses them and can never change them (no override, no narrowing, no widening).
 - The in-box env var name is stored with the secret (`--env`).
 - Hosts, env name, and value live together in the OS-store entry; a plain file
   holds only names.
