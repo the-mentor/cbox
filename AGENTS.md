@@ -25,6 +25,7 @@ just version            # print the installed cbox binary's version (e.g. `cbox 
 just ci-local           # run the ci workflow's Linux build job locally via nektos/act (needs Docker)
 just exec               # open a session in the running box (alias: just shell)
 just list               # list running boxes across every box name (see below), forwarding args to cbox's own `list` command
+just secret             # manage stored secrets: `just secret create NAME --host HOSTS --env VAR`, `list`, `edit`, `delete` (see below)
 just down               # stop and remove the box
 just gateway-up/down/logs # manage the host-side agentgateway
 just gateway-generate-ui-password # change the admin UI's default credentials, see below
