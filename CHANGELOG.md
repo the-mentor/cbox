@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.21](https://github.com/the-mentor/cbox/compare/v0.1.20...v0.1.21) (2026-11-06)
+
+
+### Features
+
+* add cbox-base-rust image for developing cbox ([#123](https://github.com/the-mentor/cbox/issues/123)) ([bcd6942](https://github.com/the-mentor/cbox/commit/bcd6942570741dfd3e787a205978ca6703d23cff))
+
+
+### Bug Fixes
+
+* **ci:** build the macOS binary on macos-15, macos-14 is retired ([#127](https://github.com/the-mentor/cbox/issues/127)) ([ebb3412](https://github.com/the-mentor/cbox/commit/ebb34125df8e8b533cba5e707d25a90f05a05c95))
+
 ## [0.1.20](https://github.com/the-mentor/cbox/compare/v0.1.19...v0.1.20) (2026-11-05)
 
 
