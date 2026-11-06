@@ -9,6 +9,7 @@ mod hookfwd;
 mod naming;
 mod proto;
 mod secrets;
+mod secretstore;
 mod server;
 mod sidecar;
 mod stdin_reader;
