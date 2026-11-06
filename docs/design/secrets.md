@@ -71,7 +71,8 @@ $ cbox up --secret openai
 Details decided by the user:
 
 - `--host` is a single **comma-separated** list (no repeated flag). Trim spaces,
-  drop empty entries and duplicates, as `parse_secret_flag` does today.
+  drop empty entries and duplicates, as `parse_secret_flag` does today. An entry
+  containing `/` or whitespace (e.g. a URL) is rejected: hosts are bare names.
 - On `edit`, `--host` **replaces** the whole list; `--add-host` adds;
   `--remove-host` removes. `edit` prints the old and new list whenever hosts
   change. `edit` refuses to leave a secret with no hosts.

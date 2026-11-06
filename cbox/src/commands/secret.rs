@@ -312,6 +312,14 @@ mod tests {
     }
 
     #[test]
+    fn edit_rejects_url_hosts_in_every_host_flag() {
+        let u = Some("https://api.openai.com/v1");
+        assert!(edit_changes(u, None, None, None, &mut || Ok(String::new())).is_err());
+        assert!(edit_changes(None, u, None, None, &mut || Ok(String::new())).is_err());
+        assert!(edit_changes(None, None, u, None, &mut || Ok(String::new())).is_err());
+    }
+
+    #[test]
     fn edit_with_no_flags_replaces_the_value() {
         let c = edit_changes(None, None, None, None, &mut || Ok("newval".into())).unwrap();
         assert_eq!(c.value.as_deref(), Some("newval"));

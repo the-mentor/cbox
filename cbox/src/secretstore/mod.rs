@@ -61,6 +61,10 @@ pub fn validate_name(name: &str) -> Result<()> {
 pub fn parse_hosts(s: &str) -> Result<Vec<String>> {
     let mut hosts: Vec<String> = Vec::new();
     for h in s.split(',').map(str::trim).filter(|h| !h.is_empty()) {
+        // boxlite matches bare host names only; a URL would save fine and never substitute.
+        if h.contains('/') || h.contains(char::is_whitespace) {
+            bail!("invalid host {h:?}: use a host name such as api.openai.com, not a URL");
+        }
         if !hosts.iter().any(|x| x == h) {
             hosts.push(h.to_string());
         }
@@ -110,6 +114,16 @@ mod tests {
     #[test]
     fn hosts_are_trimmed_deduped_and_empties_dropped() {
         assert_eq!(parse_hosts(" a.com, b.com,,a.com ").unwrap(), ["a.com", "b.com"]);
+    }
+
+    #[test]
+    fn urls_and_inner_whitespace_are_rejected_as_hosts() {
+        for h in ["https://api.openai.com/v1", "api.openai.com/v1", "http://a.com", "a .com", "good.com,https://bad.com"] {
+            let e = parse_hosts(h).unwrap_err().to_string();
+            assert!(e.contains("not a URL"), "{h:?}: {e}");
+        }
+        assert!(parse_hosts("good.com,https://bad.com").unwrap_err().to_string().contains("https://bad.com"));
+        assert_eq!(parse_hosts("a.com:8443,*.b.com").unwrap(), ["a.com:8443", "*.b.com"]);
     }
 
     #[test]
