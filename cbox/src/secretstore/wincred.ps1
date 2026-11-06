@@ -35,6 +35,8 @@ try {
     'del' { [WinCred]::Del($Target) }
   }
 } catch {
-  if ($_.Exception -is [System.ComponentModel.Win32Exception] -and $_.Exception.NativeErrorCode -eq 1168) { [Console]::Error.Write('CBOX_NOT_FOUND'); exit 3 }
+  # PowerShell wraps .NET exceptions (MethodInvocationException), so walk to the Win32Exception.
+  $e = $_.Exception; while ($e -and $e -isnot [System.ComponentModel.Win32Exception]) { $e = $e.InnerException }
+  if ($e -and $e.NativeErrorCode -eq 1168) { [Console]::Error.Write('CBOX_NOT_FOUND'); exit 3 }
   throw
 }

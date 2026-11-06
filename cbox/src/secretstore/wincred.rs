@@ -210,15 +210,28 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let old = std::env::var_os("PATH");
-        let mut path = dir.clone().into_os_string();
-        path.push(":");
-        path.push(old.clone().unwrap_or_default());
-        unsafe { std::env::set_var("PATH", path) };
-        let r = f(&dir);
-        unsafe { std::env::set_var("PATH", old.unwrap_or_default()) };
-        let _ = std::fs::remove_dir_all(&dir);
-        r
+        let _rm = RemoveDir(dir.clone());
+        let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap_or_default());
+        let _path = crate::test_env_lock::EnvVarGuard::set("PATH", &path);
+        f(&dir)
+    }
+
+    struct RemoveDir(std::path::PathBuf);
+    impl Drop for RemoveDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn a_panicking_closure_still_restores_path_and_removes_the_dir() {
+        let before = std::env::var("PATH").ok();
+        let mut seen = None;
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| with_fake("nf", |d| { seen = Some(d.to_path_buf()); panic!("boom") })));
+        assert!(r.is_err());
+        let _lock = crate::test_env_lock::lock();
+        assert_eq!(std::env::var("PATH").ok(), before);
+        assert!(!seen.unwrap().exists());
     }
 
     const JSON: &str = r#"{"value":"sk-abc","hosts":["a.com"],"env":"K"}"#;
@@ -272,10 +285,8 @@ mod tests {
     #[test]
     fn run_reports_a_missing_powershell() {
         let _lock = crate::test_env_lock::lock();
-        let old = std::env::var_os("PATH");
-        unsafe { std::env::set_var("PATH", "/nonexistent-cbox-dir") };
+        let _path = crate::test_env_lock::EnvVarGuard::set("PATH", "/nonexistent-cbox-dir");
         let r = WinCredStore.get("x");
-        unsafe { std::env::set_var("PATH", old.unwrap_or_default()) };
         assert!(r.unwrap_err().to_string().contains("powershell.exe was not found"));
     }
 }
