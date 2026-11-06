@@ -68,7 +68,7 @@ just up                            # boot a box and start Claude Code
 |---|---|---|
 | macOS, Apple Silicon | ✅ | ✅ supported |
 | Linux x86_64 with KVM (`/dev/kvm`) | ✅ | ✅ supported |
-| WSL2 with nested virtualization | ✅ (the Linux x86_64 binary) | ☑️ untested |
+| WSL2 with nested virtualization | ✅ (the Linux x86_64 binary) | ✅ supported |
 | Windows (native) | ❌ | ❌ not supported (BoxLite needs KVM) |
 
 You also need [`docker`](https://docs.docker.com/get-docker/) with `docker compose` (for the
@@ -427,7 +427,7 @@ See `docs/design/agentgateway.md` for the full credential and port model.
 - ❌ **No custody of subscription tokens:** in subscription mode the OAuth token is in the box,
   because Claude Code has to send it.
 - ❌ **No in-box auto-update of Claude Code:** updates arrive with the weekly `cbox-base` image.
-- ❌ **No native Windows:** use WSL2 with nested virtualization (untested).
+- ❌ **No native Windows:** use WSL2 with nested virtualization instead.
 
 ## Troubleshooting 🩺
 
