@@ -1,7 +1,7 @@
 //! Pure data rules for stored secrets: names, hosts, env vars, JSON form, size limit.
 #![allow(dead_code)] // consumed by later tasks
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 
 mod index;
 mod service;
@@ -41,7 +41,8 @@ impl StoredSecret {
 
     pub fn from_json(s: &str) -> Result<Self> {
         // Deliberately no error context carrying `s`: it holds the secret.
-        serde_json::from_str(s).context("invalid stored secret JSON")
+        // Fixed message only: serde's Display can echo the offending string.
+        serde_json::from_str(s).map_err(|e| anyhow::anyhow!("invalid stored secret JSON ({:?} at line {} column {})", e.classify(), e.line(), e.column()))
     }
 }
 
@@ -131,6 +132,14 @@ mod tests {
         let d = format!("{s:?}");
         assert!(!d.contains("sk-supersecret"));
         assert!(d.contains("<redacted>"));
+    }
+
+    #[test]
+    fn from_json_error_never_echoes_value() {
+        let err = StoredSecret::from_json(r#"{"value":"x","hosts":"sk-LEAKME","env":"E"}"#).unwrap_err();
+        for out in [format!("{:?}", err), format!("{:#}", err)] {
+            assert!(!out.contains("sk-LEAKME"), "leaked: {out}");
+        }
     }
 
     #[test]
