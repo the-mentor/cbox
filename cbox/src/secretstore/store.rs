@@ -79,7 +79,11 @@ pub fn open_default() -> Result<Box<dyn SecretStore>> {
 
 #[cfg(not(target_os = "macos"))]
 pub fn open_default() -> Result<Box<dyn SecretStore>> {
+    #[cfg(target_os = "linux")]
+    if super::wincred::is_wsl() {
+        return Ok(Box::new(super::wincred::WinCredStore));
+    }
     anyhow::bail!(
-        "no secret store available on this platform (macOS Keychain is supported today; Windows/WSL and Linux desktop are planned)"
+        "no secret store available on this platform (macOS Keychain and Windows Credential Manager under WSL are supported; Linux desktop is planned)"
     )
 }

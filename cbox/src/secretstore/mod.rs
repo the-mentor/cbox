@@ -8,13 +8,15 @@ use anyhow::{Result, bail};
 mod index;
 mod service;
 mod store;
+#[cfg(target_os = "linux")]
+mod wincred;
 pub use index::Index;
 pub use service::{EditChanges, EditOutcome, HostChange, ListRow, RowState, check_absent, check_editable, create, delete, edit, exists, list};
 pub use store::{SecretStore, open_default};
 use serde::{Deserialize, Serialize};
 
-/// Windows Credential Manager (the planned WSL store) caps an entry at this many bytes.
-#[allow(dead_code)] // the WSL store that will use it is not implemented yet
+/// Windows Credential Manager (the WSL store) caps an entry at this many bytes.
+#[cfg_attr(target_os = "macos", allow(dead_code))] // only the Linux WSL store uses it
 pub const WSL_MAX_ENTRY_BYTES: usize = 2560;
 
 #[derive(Serialize, Deserialize)]
