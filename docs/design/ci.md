@@ -115,7 +115,11 @@ This follows the same flow as
    required `build` checks to run.
 2. `googleapis/release-please-action` reads Conventional Commits since the last release. It then
    opens or updates a release PR, and when that PR merges, the next run tags `vX.Y.Z` and
-   publishes the GitHub Release. **There is one release for the whole repo, not one per
+   creates the GitHub Release as a **draft** (`draft: true`); `assets` publishes it. GitHub
+   doesn't create a draft's tag until it's published, so `force-tag-creation: true` makes
+   release-please create the tag itself. release-please finds the previous release by its tag
+   commit, so it would skip an untagged draft and work out the next version and changelog from
+   the release before it. **There is one release for the whole repo, not one per
    component.** The config (`release-please-config.json`) uses the `simple` type on the `.`
    package, so the PR bumps the root `CHANGELOG.md` and `.release-please-manifest.json`. It also
    bumps cbox's version in `cbox/Cargo.toml` and `cbox/Cargo.lock` through `extra-files`, which
@@ -143,8 +147,22 @@ landed on, so the first changelog doesn't list the whole history.
 
 It doesn't build anything. It downloads the `cbox-*` artifacts from the ci run that triggered it
 (`actions/download-artifact` with `run-id`, which needs `actions: read`), then runs `gh release
-upload <tag> ... --clobber`. So the released binaries are the ones ci tested, from the same commit
-and the same compiler.
+upload <tag> ... --clobber` against the draft and `gh release edit <tag> --draft=false` to publish
+it. So the released binaries are the ones ci tested, from the same commit and the same compiler.
+
+Uploading before publishing is what makes this work with GitHub's immutable releases (repository
+Settings → General → Releases): once a release is published and immutable, its tag and assets
+can't change, so a publish-then-upload flow would ship a release with no binaries. If `assets`
+fails, the release stays a draft — not visible at `releases/latest`, so `just install-cbox` keeps
+getting the previous release — until it's fixed. Use **Re-run failed jobs**, not "Re-run all
+jobs": release-please has already marked the PR `autorelease: tagged`, so a fresh release-please
+run reports no new release and skips `assets`, leaving the draft unpublished. `--clobber` makes
+repeating the upload safe. `base-image` doesn't wait for `assets`, so the `:vX.Y.Z` and `:latest`
+images can be out while the release is still a draft.
+
+If a re-run can't help, publish by hand: download the `cbox-*` artifacts from the release PR's ci
+run (`gh run download <ci-run-id> -p 'cbox-*'`, one directory per artifact), then run `gh
+release upload <tag> cbox-*/cbox-* --clobber` and `gh release edit <tag> --draft=false`.
 
 Every release PR changes `CHANGELOG.md`, and `changes` treats that as a reason to build, so the
 artifacts exist. `cbox/` alone isn't enough: a `Release-As` equal to the current version (which
@@ -153,11 +171,12 @@ binaries until they were attached by hand.
 
 **Edge case:** if a second merge lands before ci finishes for the release PR's merge, the later run
 can be the one that creates the release. If that later ci run skipped the build, because it didn't
-touch Rust, the download fails. Re-running the release workflow for the release PR's run fixes
-it.
+touch Rust, the download fails. Re-running the release PR's release run doesn't fix it: its
+release-please finds the release already created and skips `assets`. Publish by hand as above.
 
 This is the only job with `contents: write`. It uses the plain `GITHUB_TOKEN`, because uploading
-assets doesn't need to trigger anything.
+assets and publishing the release don't need to trigger anything (no workflow listens for
+release or tag events).
 
 ## Toolchain pinning
 
