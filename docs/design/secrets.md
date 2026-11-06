@@ -88,6 +88,9 @@ Details decided by the user:
   given, `edit` never reads or prompts for a value and the value is unchanged.
   `edit NAME` with no flags replaces the value. `--host` conflicts with
   `--add-host` and `--remove-host` (clap error); the latter two may be combined.
+  `edit` fails before any prompt or stdin read if the name is invalid, the
+  entry is absent from the store (an index entry alone does not count) or
+  unreadable.
   Every edit is a read-modify-write of the one entry, size-checked before `put`.
   After a successful `put`, `edit` adds the name to the index if it is missing
   (repairing a lost index); an index write failure reports the secret as updated.

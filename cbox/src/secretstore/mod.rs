@@ -9,7 +9,7 @@ mod index;
 mod service;
 mod store;
 pub use index::Index;
-pub use service::{EditChanges, EditOutcome, HostChange, ListRow, RowState, check_absent, create, delete, edit, exists, list};
+pub use service::{EditChanges, EditOutcome, HostChange, ListRow, RowState, check_absent, check_editable, create, delete, edit, exists, list};
 pub use store::{SecretStore, open_default};
 use serde::{Deserialize, Serialize};
 

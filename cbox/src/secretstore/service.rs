@@ -93,10 +93,20 @@ fn add_hosts(hosts: &mut Vec<String>, add: Vec<String>) {
     }
 }
 
+fn not_found(name: &str) -> anyhow::Error {
+    anyhow!("secret {name:?} not found; run cbox secret create {name}")
+}
+
+/// What `edit` needs before it can start: a valid name and a readable store entry (the index alone is not enough).
+pub fn check_editable(store: &dyn SecretStore, name: &str) -> Result<()> {
+    validate_name(name)?;
+    store.get(name)?.map(|_| ()).ok_or_else(|| not_found(name))
+}
+
 /// Read-modify-write of one entry; nothing is written unless every check passes.
 pub fn edit(store: &dyn SecretStore, index_path: &Path, name: &str, c: EditChanges) -> Result<EditOutcome> {
     validate_name(name)?;
-    let mut s = store.get(name)?.ok_or_else(|| anyhow!("secret {name:?} not found; run cbox secret create {name}"))?;
+    let mut s = store.get(name)?.ok_or_else(|| not_found(name))?;
     let old_hosts = s.hosts.clone();
     if let Some(h) = c.hosts.replace {
         s.hosts = h;
@@ -184,6 +194,19 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "openai");
         assert_eq!(rows[0].state, RowState::Ok { hosts: vec!["api.openai.com".into()], env: "OPENAI_API_KEY".into() });
+    }
+
+    #[test]
+    fn check_editable_needs_a_readable_entry_and_leaks_nothing() {
+        let _l = crate::test_env_lock::lock();
+        let (st, _d) = setup(None);
+        assert!(check_editable(&st, "Bad_Name").is_err());
+        assert!(check_editable(&st, "openai").unwrap_err().to_string().contains("not found; run cbox secret create openai"));
+        keyring_core::Entry::new("cbox", "bad").unwrap().set_password(r#"{"value":"x","hosts":"sk-LEAKME","env":"E"}"#).unwrap();
+        let e = format!("{:#}", check_editable(&st, "bad").unwrap_err());
+        assert!(e.contains("\"bad\"") && !e.contains("LEAKME"), "{e}");
+        st.put("openai", &sec()).unwrap();
+        check_editable(&st, "openai").unwrap();
     }
 
     #[test]

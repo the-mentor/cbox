@@ -1,7 +1,8 @@
 use crate::config::secrets_index_path;
-use crate::secretstore::{self, EditChanges, EditOutcome, HostChange, ListRow, RowState, StoredSecret, open_default, parse_hosts, validate_env, validate_name};
+use crate::secretstore::{self, EditChanges, EditOutcome, HostChange, ListRow, RowState, SecretStore, StoredSecret, open_default, parse_hosts, validate_env, validate_name};
 use anyhow::{Context, Result, bail};
 use clap::Subcommand;
+use std::path::Path;
 use std::io::{self, IsTerminal, Read, Write};
 
 #[derive(Subcommand)]
@@ -139,6 +140,19 @@ fn prompt(label: &str, name: &str) -> String {
     format!("{label} \"{name}\" (input is hidden, press Enter when done): ")
 }
 
+/// Fails before `read` is ever called when the secret cannot be edited.
+fn run_edit(
+    store: &dyn SecretStore,
+    index: &Path,
+    name: &str,
+    [host, add, remove, env]: [Option<&str>; 4],
+    read: &mut dyn FnMut() -> Result<String>,
+) -> Result<EditOutcome> {
+    secretstore::check_editable(store, name)?;
+    let c = edit_changes(host, add, remove, env, read)?;
+    secretstore::edit(store, index, name, c)
+}
+
 pub fn run(cmd: SecretCmd) -> Result<()> {
     let store = open_default()?;
     let index = secrets_index_path().context("cannot locate config directory for the secrets index")?;
@@ -165,13 +179,11 @@ pub fn run(cmd: SecretCmd) -> Result<()> {
             print!("{}", format_list(&rows, store.label()));
         }
         SecretCmd::Edit { name, host, add_host, remove_host, env } => {
-            validate_name(&name)?;
-            let c = edit_changes(host.as_deref(), add_host.as_deref(), remove_host.as_deref(), env.as_deref(), &mut || {
+            let o = run_edit(&*store, &index, &name, [host.as_deref(), add_host.as_deref(), remove_host.as_deref(), env.as_deref()], &mut || {
                 read_value(io::stdin().is_terminal(), &mut io::stdin(), &mut || {
                     rpassword::prompt_password(prompt("New value for", &name))
                 })
             })?;
-            let o = secretstore::edit(&*store, &index, &name, c)?;
             if let Some(l) = hosts_line(&o) {
                 println!("{l}");
             }
@@ -203,6 +215,85 @@ pub fn run(cmd: SecretCmd) -> Result<()> {
 mod tests {
     use super::*;
     use clap::{CommandFactory, Parser};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    /// In-memory store; names in `corrupt` fail like an unreadable entry (names the secret, no content).
+    #[derive(Default)]
+    struct Fake {
+        m: RefCell<HashMap<String, StoredSecret>>,
+        corrupt: Vec<&'static str>,
+    }
+    impl SecretStore for Fake {
+        fn label(&self) -> &'static str {
+            "fake"
+        }
+        fn max_entry_bytes(&self) -> Option<usize> {
+            None
+        }
+        fn get(&self, name: &str) -> Result<Option<StoredSecret>> {
+            if self.corrupt.contains(&name) {
+                bail!("secret {name:?} in fake: invalid stored secret");
+            }
+            Ok(self.m.borrow().get(name).map(|s| StoredSecret { value: s.value.clone(), hosts: s.hosts.clone(), env: s.env.clone() }))
+        }
+        fn put(&self, name: &str, s: &StoredSecret) -> Result<()> {
+            self.m.borrow_mut().insert(name.into(), StoredSecret { value: s.value.clone(), hosts: s.hosts.clone(), env: s.env.clone() });
+            Ok(())
+        }
+        fn delete(&self, name: &str) -> Result<bool> {
+            Ok(self.m.borrow_mut().remove(name).is_some())
+        }
+    }
+
+    fn idx(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("cbox-edit-{}-{tag}.json", std::process::id()))
+    }
+    fn seeded() -> Fake {
+        let f = Fake { corrupt: vec!["bad"], ..Default::default() };
+        f.put("openai", &StoredSecret { value: "old".into(), hosts: vec!["a.com".into()], env: "K".into() }).unwrap();
+        f
+    }
+    fn must_not_read() -> Result<String> {
+        panic!("reader must not be called")
+    }
+
+    #[test]
+    fn edit_fails_before_reading_when_the_secret_cannot_be_edited() {
+        let st = seeded();
+        // "listed" is in the index but has no store entry.
+        let index = idx("listed");
+        std::fs::write(&index, r#"{"version":1,"names":["listed"]}"#).unwrap();
+        for (name, want) in [
+            ("missing", "secret \"missing\" not found; run cbox secret create missing"),
+            ("listed", "secret \"listed\" not found; run cbox secret create listed"),
+            ("bad", "secret \"bad\" in fake"),
+            ("Bad_Name", ""),
+            ("gh", ""),
+        ] {
+            let e = run_edit(&st, &index, name, [None; 4], &mut must_not_read).unwrap_err().to_string();
+            assert!(e.contains(want) && !e.contains("LEAKME"), "{name}: {e}");
+            run_edit(&st, &index, name, [None, None, None, Some("E")], &mut must_not_read).unwrap_err();
+        }
+        let _ = std::fs::remove_file(&index);
+    }
+
+    #[test]
+    fn edit_reads_once_without_flags_and_never_with_one() {
+        let st = seeded();
+        let index = idx("ok");
+        let mut calls = 0;
+        run_edit(&st, &index, "openai", [None; 4], &mut || {
+            calls += 1;
+            Ok("new".into())
+        })
+        .unwrap();
+        assert_eq!((calls, st.get("openai").unwrap().unwrap().value.as_str()), (1, "new"));
+        run_edit(&st, &index, "openai", [None, None, None, Some("E")], &mut must_not_read).unwrap();
+        let s = st.get("openai").unwrap().unwrap();
+        assert_eq!((s.value.as_str(), s.env.as_str()), ("new", "E"));
+        let _ = std::fs::remove_file(&index);
+    }
 
     #[test]
     fn prompts_say_input_is_hidden() {
