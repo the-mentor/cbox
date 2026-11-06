@@ -48,7 +48,7 @@ A matrix of two GitHub-hosted runners, no cross-compiling:
 | OS | Runner | Asset name |
 | --- | --- | --- |
 | Linux x86_64 | `ubuntu-latest` | `cbox-linux-x86_64` |
-| macOS arm64 | `macos-14` | `cbox-macos-arm64` |
+| macOS arm64 | `macos-15` | `cbox-macos-arm64` |
 
 It installs `protoc`, then installs and selects the pinned Rust version, `RUST_VERSION` (see
 Toolchain pinning). Both runners ship rustup; under act it installs rustup first. It then restores the cargo cache, runs `Unit Test` (`cargo test --release`) and
