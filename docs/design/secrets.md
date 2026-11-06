@@ -1,6 +1,6 @@
 # cbox secrets: design
 
-Status: draft for approval. Nothing here is built yet.
+Status: approved by the user on 2026-11-06. Nothing here is built yet.
 
 ## Intent
 
@@ -129,6 +129,16 @@ the in-box env name is still added to the exclusion list `env::compose` takes as
 `secret_vars`, so a host variable or `-e` flag of the same name makes `up` fail
 instead of leaking the real value into the box (see "Details settled in review").
 The resume warning needs a small change for store-backed secrets (same section).
+
+**Size limit and edits.** Windows Credential Manager accepts at most 2560 bytes per
+entry (measured by spike: 2560 saves and reads back, 2561 fails with the unclear
+"The stub received bad data"). The stored JSON counts toward it, in bytes, not
+characters. `create` and `edit` measure the serialized document and, on WSL, fail
+with a clear "too large" message before writing anything. Every `edit` is a
+read-modify-write of the single entry (value read internally, never printed), so
+hosts, env name and value cannot drift apart. If a bigger secret is ever needed,
+the escape hatches are splitting into two entries or keeping only a key in the
+store with an encrypted file; neither is in scope.
 
 ## PR plan
 
