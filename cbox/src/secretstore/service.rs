@@ -1,5 +1,5 @@
-use super::{Index, SecretStore, StoredSecret, check_size, validate_name};
-use anyhow::{Result, bail};
+use super::{Index, SecretStore, StoredSecret, check_size, validate_env, validate_name};
+use anyhow::{Result, anyhow, bail};
 use std::path::Path;
 
 pub struct ListRow {
@@ -38,6 +38,65 @@ pub fn list(store: &dyn SecretStore, index_path: &Path) -> Result<Vec<ListRow>> 
             })
         })
         .collect()
+}
+
+pub enum HostChange {
+    Keep,
+    Replace(Vec<String>),
+    Add(Vec<String>),
+    Remove(Vec<String>),
+    /// `--add-host` and `--remove-host` together: add first, then remove.
+    AddRemove(Vec<String>, Vec<String>),
+}
+
+pub struct EditChanges {
+    pub value: Option<String>,
+    pub hosts: HostChange,
+    pub env: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct EditOutcome {
+    pub old_hosts: Vec<String>,
+    pub new_hosts: Vec<String>,
+}
+
+fn add_hosts(hosts: &mut Vec<String>, add: Vec<String>) {
+    for h in add {
+        if !hosts.contains(&h) {
+            hosts.push(h);
+        }
+    }
+}
+
+/// Read-modify-write of one entry; nothing is written unless every check passes.
+pub fn edit(store: &dyn SecretStore, name: &str, c: EditChanges) -> Result<EditOutcome> {
+    validate_name(name)?;
+    let mut s = store.get(name)?.ok_or_else(|| anyhow!("secret {name:?} not found; run cbox secret create {name}"))?;
+    let old_hosts = s.hosts.clone();
+    match c.hosts {
+        HostChange::Keep => {}
+        HostChange::Replace(h) => s.hosts = h,
+        HostChange::Add(a) => add_hosts(&mut s.hosts, a),
+        HostChange::Remove(r) => s.hosts.retain(|x| !r.contains(x)),
+        HostChange::AddRemove(a, r) => {
+            add_hosts(&mut s.hosts, a);
+            s.hosts.retain(|x| !r.contains(x));
+        }
+    }
+    if s.hosts.is_empty() {
+        bail!("at least one host is required; secret {name:?} was not changed");
+    }
+    if let Some(e) = c.env {
+        validate_env(&e)?;
+        s.env = e;
+    }
+    if let Some(v) = c.value {
+        s.value = v;
+    }
+    check_size(&s.to_json(), store.max_entry_bytes())?;
+    store.put(name, &s)?;
+    Ok(EditOutcome { old_hosts, new_hosts: s.hosts })
 }
 
 pub fn delete(store: &dyn SecretStore, index_path: &Path, name: &str) -> Result<()> {
@@ -170,5 +229,84 @@ mod tests {
         let txt = std::fs::read_to_string(d.index()).unwrap();
         assert_eq!(txt, r#"{"names":["openai"]}"#);
         assert!(!txt.contains("TOPSECRET") && !txt.contains("api.openai.com"));
+    }
+
+    fn put_sec(st: &KeyringStore, hosts: &[&str]) {
+        st.put("k", &StoredSecret { value: "v1".into(), hosts: hosts.iter().map(|s| s.to_string()).collect(), env: "E".into() }).unwrap();
+    }
+    fn ch(hosts: HostChange) -> EditChanges {
+        EditChanges { value: None, hosts, env: None }
+    }
+    fn v(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn host_replaces_the_whole_list() {
+        let _l = crate::test_env_lock::lock();
+        let (st, _d) = setup(None);
+        put_sec(&st, &["a.com", "b.com"]);
+        let o = edit(&st, "k", ch(HostChange::Replace(v(&["c.com"])))).unwrap();
+        assert_eq!((o.old_hosts, o.new_hosts), (v(&["a.com", "b.com"]), v(&["c.com"])));
+        assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["c.com"]));
+    }
+
+    #[test]
+    fn add_host_dedupes() {
+        let _l = crate::test_env_lock::lock();
+        let (st, _d) = setup(None);
+        put_sec(&st, &["a.com"]);
+        edit(&st, "k", ch(HostChange::Add(v(&["a.com", "b.com"])))).unwrap();
+        assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["a.com", "b.com"]));
+    }
+
+    #[test]
+    fn remove_host_removes_only_that_host() {
+        let _l = crate::test_env_lock::lock();
+        let (st, _d) = setup(None);
+        put_sec(&st, &["a.com", "b.com"]);
+        edit(&st, "k", ch(HostChange::Remove(v(&["a.com", "zzz.com"])))).unwrap();
+        assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["b.com"]));
+    }
+
+    #[test]
+    fn edit_refuses_to_empty_the_host_list() {
+        let _l = crate::test_env_lock::lock();
+        let (st, _d) = setup(None);
+        put_sec(&st, &["a.com"]);
+        for c in [HostChange::Remove(v(&["a.com"])), HostChange::Replace(vec![])] {
+            let e = edit(&st, "k", ch(c)).unwrap_err().to_string();
+            assert!(e.contains("at least one host"), "{e}");
+        }
+        assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["a.com"]));
+    }
+
+    #[test]
+    fn edit_replaces_value_and_env() {
+        let _l = crate::test_env_lock::lock();
+        let (st, _d) = setup(None);
+        put_sec(&st, &["a.com"]);
+        edit(&st, "k", EditChanges { value: Some("v2".into()), hosts: HostChange::Keep, env: Some("NEW".into()) }).unwrap();
+        let s = st.get("k").unwrap().unwrap();
+        assert_eq!((s.value.as_str(), s.env.as_str()), ("v2", "NEW"));
+        assert!(edit(&st, "k", EditChanges { value: None, hosts: HostChange::Keep, env: Some("1x".into()) }).is_err());
+    }
+
+    #[test]
+    fn edit_checks_size_and_writes_nothing_when_over_limit() {
+        let _l = crate::test_env_lock::lock();
+        let (st, _d) = setup(Some(100));
+        put_sec(&st, &["a.com"]);
+        let e = edit(&st, "k", EditChanges { value: Some("x".repeat(200)), hosts: HostChange::Keep, env: None }).unwrap_err().to_string();
+        assert!(e.contains("limit") && !e.contains("xxxx"), "{e}");
+        assert_eq!(st.get("k").unwrap().unwrap().value, "v1");
+    }
+
+    #[test]
+    fn edit_missing_secret_says_create() {
+        let _l = crate::test_env_lock::lock();
+        let (st, _d) = setup(None);
+        let e = edit(&st, "x", ch(HostChange::Keep)).unwrap_err().to_string();
+        assert_eq!(e, "secret \"x\" not found; run cbox secret create x");
     }
 }

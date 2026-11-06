@@ -69,7 +69,6 @@ pub fn resolve_config_path(explicit: Option<&Path>) -> Option<PathBuf> {
 }
 
 /// `$XDG_CONFIG_HOME/cbox/secrets.json`, else `~/.config/cbox/secrets.json`.
-#[allow(dead_code)] // consumed by later tasks
 pub fn secrets_index_path() -> Option<PathBuf> {
     if let Ok(x) = std::env::var("XDG_CONFIG_HOME") {
         if !x.trim().is_empty() {

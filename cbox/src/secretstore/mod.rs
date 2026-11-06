@@ -1,20 +1,20 @@
 //! Pure data rules for stored secrets: names, hosts, env vars, JSON form, size limit.
-#![allow(dead_code)] // consumed by later tasks
+
+// KeyringStore (and what only it uses) is built only on macOS until the Linux/WSL stores land.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
 
 use anyhow::{Result, bail};
 
 mod index;
 mod service;
 mod store;
-#[allow(unused_imports)] // consumed by later tasks
 pub use index::Index;
-#[allow(unused_imports)]
-pub use service::{ListRow, create, delete, list};
-#[allow(unused_imports)]
+pub use service::{EditChanges, EditOutcome, HostChange, ListRow, create, delete, edit, list};
 pub use store::{KeyringStore, SecretStore, open_default};
 use serde::{Deserialize, Serialize};
 
 /// Windows-credential-store-via-WSL entries are capped at this many bytes.
+#[allow(dead_code)] // used by the WSL store (Task 5, not yet implemented)
 pub const WSL_MAX_ENTRY_BYTES: usize = 2560;
 
 #[derive(Serialize, Deserialize)]
@@ -52,8 +52,8 @@ pub fn validate_name(name: &str) -> Result<()> {
     if !ok {
         bail!("invalid secret name {name:?}: use lowercase letters, digits, '-' or '_', starting with a letter");
     }
-    if name == "gh" {
-        bail!("secret name \"gh\" is reserved");
+    if name == "gh" || name == "gh_basic" {
+        bail!("secret name {name:?} is reserved for the built-in GitHub secret");
     }
     Ok(())
 }
@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn names_reject_uppercase_leading_digit_empty_and_gh() {
-        for n in ["", "Abc", "1a", "-a", "_a", "a b", "gh", "a.b"] {
+        for n in ["", "Abc", "1a", "-a", "_a", "a b", "gh", "gh_basic", "a.b"] {
             assert!(validate_name(n).is_err(), "{n:?}");
         }
     }

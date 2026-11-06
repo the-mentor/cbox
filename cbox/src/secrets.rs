@@ -79,9 +79,9 @@ pub fn parse_secret_flag(s: &str) -> Result<SecretSpec> {
     // instead of the host the user actually named -- rejecting the name
     // outright is simpler and safer than trying to distinguish "the
     // preset" from "a user secret that happens to be named gh" downstream.
-    if name == "gh" {
+    if name == "gh" || name == "gh_basic" {
         bail!(
-            "--secret name \"gh\" is reserved for the built-in GitHub secret \
+            "--secret name {name:?} is reserved for the built-in GitHub secret \
              (auto-detected from GH_TOKEN/GITHUB_TOKEN); choose a different name."
         );
     }
@@ -118,12 +118,10 @@ pub fn spec_from_store(store: &dyn SecretStore, name: &str) -> Result<SecretSpec
 pub fn check_unique_env(specs: &[SecretSpec]) -> Result<()> {
     for (i, spec) in specs.iter().enumerate() {
         if let Some(other) = specs[..i].iter().find(|o| o.env_var == spec.env_var) {
-            bail!(
-                "--secret {} and --secret {} both set {} in the box; use one",
-                other.name,
-                spec.name,
-                spec.env_var
-            );
+            let who = |s: &SecretSpec| {
+                if s.name == "gh" { "the GitHub token (GH_TOKEN/GITHUB_TOKEN)".to_string() } else { format!("--secret {}", s.name) }
+            };
+            bail!("{} and {} both set {} in the box; use one", who(other), who(spec), spec.env_var);
         }
     }
     Ok(())
@@ -290,6 +288,22 @@ mod tests {
     /// user-supplied `--secret gh=ANYVAR@internal.example.com` would hit
     /// `build`'s "gh" special case and get silently retargeted at
     /// api.github.com/github.com instead of the host actually named.
+    #[test]
+    fn a_secret_named_gh_basic_is_rejected_as_reserved() {
+        let err = parse_secret_flag("gh_basic=X@a.com").unwrap_err().to_string();
+        assert!(err.contains("reserved for the built-in GitHub secret"), "{err}");
+    }
+
+    #[test]
+    fn duplicate_env_with_the_github_preset_names_the_token() {
+        let _lock = crate::test_env_lock::lock();
+        let _g = EnvGuard::set("GH_TOKEN", "t");
+        let specs = vec![github_spec(), parse_secret_flag("x=GH_TOKEN@a.com").unwrap()];
+        let err = check_unique_env(&specs).unwrap_err().to_string();
+        assert!(err.contains("the GitHub token (GH_TOKEN/GITHUB_TOKEN)"), "{err}");
+        assert!(!err.contains("--secret gh"), "{err}");
+    }
+
     #[test]
     fn a_secret_named_gh_is_rejected_as_reserved() {
         let err = parse_secret_flag("gh=ANYVAR@internal.example.com").unwrap_err().to_string();
