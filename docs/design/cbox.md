@@ -158,7 +158,7 @@ design below. The `cd` makes cbox's cwd genuinely the user's, which then require
 ```
 cbox up   [name] [-f] [-c] [-v host:box] [-e KEY[=VALUE]] [-i image]
                  [--disk-size GB] [--memory GB] [--cpus N] [--env-file path] [--config path]
-                 [--secret NAME=ENV_VAR@hosts]
+                 [--secret NAME | NAME=ENV_VAR@hosts]
                  [-u user] [-p [host:]box[/proto]]
                  [--allow-net HOST]... [--network disabled]
                  [-- cmd...]
@@ -170,6 +170,10 @@ cbox inspect [name]
 cbox stats [name] [-s]
 cbox cp   <src> <dst>
 cbox name
+cbox secret create <NAME> --host HOSTS --env VAR
+cbox secret list
+cbox secret edit <NAME> [--host HOSTS | --add-host HOSTS --remove-host HOSTS] [--env VAR]
+cbox secret delete <NAME> [-y]
 ```
 
 ## Box naming
@@ -493,6 +497,20 @@ Values continue to come from the environment, populated by a gitignored `.env` e
 today. The passthrough list becomes configuration rather than the hardcoded `passthrough_vars`
 string, so any variable can be forwarded without editing code.
 
+### Stored secrets
+
+`cbox secret create|list|edit|delete` manage named secrets in the OS secret store (macOS
+Keychain today; WSL via Windows Credential Manager and the Linux desktop Secret Service are
+planned, not yet implemented). Each entry holds the value, its allowed hosts and the in-box
+variable name. The value is read from a hidden prompt or stdin, never `argv`, and is never
+printed by any command; `list` shows names, hosts and variable names only. `edit` changes hosts
+(`--host` replaces, `--add-host`/`--remove-host` adjust) or `--env`, leaving the value untouched;
+`edit NAME` with no flags replaces the value.
+
+`cbox up --secret NAME` (a bare name) resolves the secret from the store. There is no fallback to
+a host environment variable: a name not in the store fails `up`. `gh` and `gh_basic` are reserved
+for the built-in GitHub secrets. Design: `docs/design/secrets.md`.
+
 ### How the three environment mechanisms compose
 
 cbox has three ways a variable reaches a box, and they must not be confused:
@@ -503,6 +521,7 @@ cbox has three ways a variable reaches a box, and they must not be confused:
 | `-e KEY=VALUE` | the flag itself | the real value |
 | `-e KEY` | host env, if set | the real value |
 | `--secret NAME=VAR@hosts` | host env var `VAR` | a **placeholder** |
+| `--secret NAME` | the OS secret store | a **placeholder** |
 
 `-e KEY=VALUE` is today's justfile flag, unchanged. `-e KEY` (no `=`) is added as the ad-hoc
 form of the passthrough list — it forwards `$KEY` from the host, mirroring `docker run -e`,

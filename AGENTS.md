@@ -58,6 +58,14 @@ override (e.g. `just exec -- bash`) to exec something other than `claude --conti
 default) in the running box; against a `Stopped` box it says so and starts it (a ~2s cold boot)
 before attaching, rather than either failing or doing that silently.
 
+Secrets live in the OS secret store and are managed with `cbox secret create|list|edit|delete`
+(macOS Keychain now; WSL and Linux desktop planned). `create NAME --host HOSTS --env VAR` reads
+the value from a hidden prompt or stdin; `edit NAME` with no flags replaces the value, while
+`--host` (replace), `--add-host`, `--remove-host` and `--env` change metadata and leave the value
+alone; `delete NAME [-y]` confirms first. Values are never printed. `cbox up --secret NAME` uses a
+stored secret (a missing name fails; there is no fallback to a host env var), and `gh`/`gh_basic`
+are reserved names. See `docs/design/secrets.md`.
+
 `build`, `build-image`, `build-base`, and `build-local` are variadic: everything after the recipe name is
 forwarded verbatim to `docker build` (`--pull`, `--progress=plain` and friends all work). `build`
 and `build-image` build only `custom/`, on top of `CBOX_BASE_IMAGE` (default

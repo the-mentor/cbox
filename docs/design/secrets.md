@@ -75,6 +75,11 @@ Details decided by the user:
 - On `edit`, `--host` **replaces** the whole list; `--add-host` adds;
   `--remove-host` removes. `edit` prints the old and new list whenever hosts
   change. `edit` refuses to leave a secret with no hosts.
+- `edit` ruling: if any of `--host`, `--add-host`, `--remove-host` or `--env` is
+  given, `edit` never reads or prompts for a value and the value is unchanged.
+  `edit NAME` with no flags replaces the value. `--host` conflicts with
+  `--add-host` and `--remove-host` (clap error); the latter two may be combined.
+  Every edit is a read-modify-write of the one entry, size-checked before `put`.
 - The value is entered at a hidden prompt, or read from stdin when piped
   (`pbpaste | cbox secret create openai --host api.openai.com`).
 - `cbox secret create --help` shows a few examples (prompt, several hosts, piped).
@@ -147,7 +152,7 @@ Merge order matters only as noted: 1 before 2; 3 any time after 1.
 1. **Store interface, macOS backend, `secret create | list | delete`.** On
    other platforms the commands print "not supported yet".
 2. **`up` integration.** `--secret NAME` resolves from the store.
-3. **WSL backend.** Detection, actionable errors, batched reads.
+3. **WSL backend.** Detection, actionable errors, batched reads. **Not yet implemented.**
 4. **`secret edit`** and `docs/design/cbox.md` updates.
 
 ## Follow-ups (not in this work)
@@ -190,10 +195,11 @@ user's; each is small enough to change in review.
   secrets the hash covers value, hosts and env name. Flag-form secrets keep the
   value-only hash, so existing boxes do not warn spuriously.
 - **Names.** Lowercase letters, digits, `-` and `_`, starting with a letter (the
-  name appears inside the `<BOXLITE_SECRET:name>` placeholder). `gh` stays
-  reserved. A bare `--secret NAME` that is not in the store fails `up`; it never
+  name appears inside the `<BOXLITE_SECRET:name>` placeholder). `gh` and `gh_basic` (the
+  two built-in GitHub secrets) stay reserved, in both the store and the flag form. A bare `--secret NAME` that is not in the store fails `up`; it never
   falls back to a host env var (confirmed by the user). Two secrets mapping to the same in-box env name
-  in one `up` is an error.
+  in one `up` is an error, including the flag form (the GitHub preset is
+  reported as "the GitHub token (GH_TOKEN/GITHUB_TOKEN)").
 - **Create and delete.** `create` on a name that already exists errors and points
   at `edit`. It checks the store entry, not the index, so an orphan entry without
   an index line reports "exists, run `delete`". Order: write the store entry,
