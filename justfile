@@ -68,14 +68,14 @@ gateway-logs:
     {{gateway}} logs -f
 
 # Change the password for the admin UI (on by default at 127.0.0.1:15000, see
-# README.md "Admin UI"), overwriting agentgateway/htpasswd — the live,
+# README.md "The host-side gateway"), overwriting agentgateway/htpasswd — the live,
 # gitignored file `just gateway-up` bootstraps from the tracked
 # agentgateway/htpasswd.default template — without touching that template, so
 # changing the password never leaves a tracked file modified. Prompts for the
 # password interactively via `htpasswd`/`openssl` themselves (hidden input,
 # not echoed, never passed as an argument — that would land in both shell
 # history and `ps` output). Prefers `htpasswd -B` (bcrypt, apache2-utils);
-# falls back to `openssl passwd -apr1` if htpasswd isn't installed. See README.md "Admin UI".
+# falls back to `openssl passwd -apr1` if htpasswd isn't installed. See README.md "The host-side gateway".
 # Change the password for the admin UI basic auth.
 gateway-generate-ui-password username="admin":
     #!/usr/bin/env sh

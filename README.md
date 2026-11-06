@@ -2,7 +2,8 @@
 
 **Claude Code in a real microVM. Not a container. Not a permission prompt. A separate kernel.**
 
-> One VM per project, booted in seconds. Your API key and GitHub token never enter the box.
+> One VM per project, booted in seconds. Your GitHub token never enters the box, and with the
+> gateway neither does your API key.
 
 [![CI](https://github.com/the-mentor/cbox/actions/workflows/ci.yml/badge.svg)](https://github.com/the-mentor/cbox/actions/workflows/ci.yml)
 [![base-image](https://github.com/the-mentor/cbox/actions/workflows/base-image.yml/badge.svg)](https://github.com/the-mentor/cbox/actions/workflows/base-image.yml)
@@ -19,7 +20,7 @@ credentials on the host: GitHub tokens are substituted by a host-side proxy, and
 API key can be held by a host-side [agentgateway](https://agentgateway.dev) that also serves
 MCP tools to the box.
 
-|  | Claude Code on host | Docker container | **cbox** |
+| Out of the box | Claude Code on host | Docker container | **cbox** |
 |---|---|---|---|
 | Own kernel / hardware isolation | ❌ | ❌ | ✅ |
 | GitHub token kept out of the sandbox | ❌ | ❌ | ✅ |
@@ -49,8 +50,13 @@ MCP tools to the box.
 git clone https://github.com/the-mentor/cbox && cd cbox
 just install-cbox                  # download the prebuilt cbox binary
 cp .env.example .env               # set CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`)
-just up-dev -c                     # build the image and boot a box with this dir at /workspace
+just build                         # build the image on the published base
+just up                            # boot a box and start Claude Code
 ```
+
+> [!WARNING]
+> Don't use `-c` from inside this repo: it would mount the repo, including your `.env` with its
+> real secrets, into the box. Run boxes from your project directories instead (tip below).
 
 > [!TIP]
 > Run `just install` to put the `cb` wrapper on your `PATH`, then `cd ~/src/my-project && cb up -c`
@@ -62,13 +68,14 @@ just up-dev -c                     # build the image and boot a box with this di
 |---|---|---|
 | macOS, Apple Silicon | ✅ | ✅ supported |
 | Linux x86_64 with KVM (`/dev/kvm`) | ✅ | ✅ supported |
-| WSL2 with nested virtualization | ❌ build from source | ☑️ untested |
+| WSL2 with nested virtualization | ✅ (the Linux x86_64 binary) | ☑️ untested |
 | Windows (native) | ❌ | ❌ not supported (BoxLite needs KVM) |
 
 You also need [`docker`](https://docs.docker.com/get-docker/) with `docker compose` (for the
 image, the local registry and the gateway) and [`just`](https://github.com/casey/just). To
 build `cbox` from source instead of downloading it: a Rust toolchain and `protoc >= 3.12`
-(`brew install protobuf` / `apt install protobuf-compiler`).
+(`brew install protobuf` / `apt install protobuf-compiler`). `just up-dev` always compiles
+`cbox`, so it needs these too.
 
 ## Auth modes 🔑
 
@@ -78,9 +85,10 @@ Pick **one** set in `.env` (the template in `.env.example` explains each line):
 |---|---|---|---|
 | Subscription | `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) | optional: `http://host.boxlite.internal:15002/claude` | yes (Claude Code must send it) |
 | API key, direct | `ANTHROPIC_API_KEY` | unset | yes |
-| API key, gateway-keyed | `ANTHROPIC_API_KEY` + `ANTHROPIC_AUTH_TOKEN=unused` | `http://host.boxlite.internal:15002/api` | **no**, the gateway attaches it |
+| API key, gateway-keyed | `ANTHROPIC_API_KEY` (cbox gives the box a placeholder `ANTHROPIC_AUTH_TOKEN`) | `http://host.boxlite.internal:15002/api` | **no**, the gateway attaches it |
 
-Optional on top: `GH_TOKEN` (a PAT, never enters the box, see [Credentials](#credentials-)),
+Optional on top: `GH_TOKEN` (a PAT that never enters the box, see [Credentials](#credentials-);
+the gateway's github MCP target also uses it directly),
 `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL`, `ANTHROPIC_MODEL`. Both gateway modes need
 `just gateway-up` running.
 
@@ -91,15 +99,16 @@ unrelated to `ANTHROPIC_BASE_URL`, which is where the box sends traffic (always 
 in this mode).
 
 > [!NOTE]
-> **Upgrading:** if your `.env` already sets `ANTHROPIC_BASE_URL` for some other proxy, add
-> `ANTHROPIC_AUTH_TOKEN=...` to it. Setting `ANTHROPIC_BASE_URL` now means "the credential
-> lives outside the box", so `ANTHROPIC_API_KEY` is no longer forwarded. Without an auth
-> token the box would reach your proxy with no credential at all.
+> **Upgrading:** setting `ANTHROPIC_BASE_URL` (without an OAuth token) means "the credential
+> lives outside the box", so `ANTHROPIC_API_KEY` is no longer forwarded and the box gets a
+> placeholder `ANTHROPIC_AUTH_TOKEN` instead. If `.env` points it at some other proxy that needs
+> a real token, pass it with `-e ANTHROPIC_AUTH_TOKEN=...`: an `ANTHROPIC_AUTH_TOKEN` in `.env`
+> or your shell is replaced by the placeholder.
 
 ## Usage 🛠️
 
 ```bash
-just up-dev            # build custom on the published base, build cbox, then boot the box
+just up-dev            # build custom on the published base, compile cbox (needs Rust), then boot
 just up                # boot the box without rebuilding (image and cbox must already exist)
 just exec              # open a session in the running box (alias: just shell)
 just list              # list running boxes (-a includes stopped ones)
@@ -124,6 +133,9 @@ enclosing git repo's root directory, falling back to the cwd's name; pin one wit
 | `-i`, `--image` | boot a different image instead of the locally built `cbox-custom` |
 | `--disk-size <GB>` | container rootfs size (default 10) |
 | `--memory <GB>` / `--cpus <N>` | guest RAM and vCPUs (default 4 GiB / 2) |
+
+Disk size, memory and CPUs are set when a box is created, so use `-f` to change them on an
+existing one.
 | `-d`, `--detach` | keep the box running after the terminal closes |
 | `-f`, `--force` | replace an existing box of the same name with a fresh one |
 
@@ -312,7 +324,7 @@ proxy swaps the box's `GH_TOKEN` placeholder for the real value only on GitHub-b
   directory there clobbers no config. See `docs/design/images.md`.
 - **Rust variant.** `base-rust/` builds `cbox-base-rust`: `cbox-base` plus Rust (pinned to
   ci.yml's version, with `rustfmt`/`clippy`), `protoc` and a C toolchain, which is everything
-  needed to develop cbox itself in a box. Use it with
+  needed to develop cbox itself in a box. Published alongside `cbox-base` with the same tags; use it with
   `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base-rust:latest just build`.
 - **The `justfile` is the front door.** Docker-side recipes (images, the local registry, the
   gateway) run directly, and `up`/`exec`/`down`/`list` forward to `cbox`, a small Rust binary
@@ -348,7 +360,7 @@ first thing to check).
 | `:15002/claude` | Anthropic passthrough: your subscription OAuth token goes upstream untouched |
 | `:15002/api` | Anthropic keyed: the gateway attaches `ANTHROPIC_API_KEY`, which stays on the host |
 | `:15000/ui` | admin UI (config viewer + MCP tool playground), behind HTTP basic auth |
-| `:16686` | Jaeger trace viewer, read-only, holds no credentials |
+| `:16686` | Jaeger trace viewer for `frontendPolicies.tracing` (agentgateway's own UI has no traces page); read-only, no auth, holds no credentials |
 | `:15001/ui` | raw admin API, **not published by default** (see below) |
 
 The `/mcp` half works in every auth mode. Only the keyed mode keeps a credential off the VM:
@@ -390,8 +402,9 @@ override. Anything it publishes is reachable from every box too.
 `agentgateway/htpasswd.default` to `agentgateway/htpasswd` (gitignored) only if the latter
 doesn't already exist, so the UI comes up immediately at `http://127.0.0.1:15000`. The default
 credential is accepted because this repo's boxes typically do not mount the repo itself, so a
-box has no other way to read the password or hash off disk; it is not a substitute for
-changing it, or for keeping the port on `127.0.0.1`.
+box has no other way to read the password or hash off disk. It is not a substitute for
+changing the password before relying on this port for anything sensitive, or before publishing
+it more broadly than `127.0.0.1`.
 
 ```bash
 just gateway-generate-ui-password            # prompts for a new password for user "admin"
@@ -422,7 +435,7 @@ See `docs/design/agentgateway.md` for the full credential and port model.
 |---|---|
 | `/mcp` connects but lists no tools | `GH_TOKEN` unset or expired. The `github-mcp` container's GitHub API calls 401, visible in `just gateway-logs` |
 | 401 from Anthropic | your `ANTHROPIC_BASE_URL` path and your credential disagree: `/claude` needs the OAuth token, `/api` needs the gateway to have `ANTHROPIC_API_KEY` |
-| 401 in subscription mode with the right path | `ANTHROPIC_AUTH_TOKEN` is set and shadowing the OAuth token. Unset it |
+| 401 in subscription mode with the right path | an `ANTHROPIC_AUTH_TOKEN` passed with `-e` is shadowing the OAuth token. Drop it |
 | 400 `Extra inputs are not permitted` | beta headers the backend rejects; set `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` and pass it with `-e`, or add it to `UNCONDITIONAL_PASSTHROUGH` in `cbox/src/env.rs` |
 | Box can't reach Anthropic at all | the gateway isn't running: `just gateway-up` |
 | `Failed to acquire runtime lock` | another process holds that box's BoxLite runtime; see "Running multiple boxes at once" in `AGENTS.md` |
@@ -432,8 +445,9 @@ See `docs/design/agentgateway.md` for the full credential and port model.
 - `cargo test` from `cbox/` runs the Rust test suite; `just ci-local` runs CI's Linux build
   job locally (needs Docker). Image-side changes are verified by building and booting:
   `just up-dev`.
-- Develop cbox inside a box with the Rust base:
-  `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base-rust:latest just up-dev -c`.
+- Develop cbox inside a box with the Rust base (`-f` so an existing box picks up the new image):
+  `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base-rust:latest just up-dev -f`. Mount the source
+  with `-v` from a checkout that has no `.env`, since `-c` here would put your secrets in the box.
 - Prefix commit messages and PR titles with a [Conventional Commits](https://www.conventionalcommits.org/)
   type (`feat:`, `fix:`, `docs:`, ...). Releases are cut by release-please.
 - Coding agents: start with [`AGENTS.md`](AGENTS.md).
@@ -446,7 +460,7 @@ See `docs/design/agentgateway.md` for the full credential and port model.
 | [`docs/design/images.md`](docs/design/images.md) | how `cbox-base` / `cbox-base-rust` are built, tagged and published |
 | [`docs/design/cbox.md`](docs/design/cbox.md) | the `cbox` binary: env passthrough, secrets, egress |
 | [`docs/design/agentgateway.md`](docs/design/agentgateway.md) | the gateway's credential and port model |
-| [`docs/design/boxlite-sdk.md`](docs/design/boxlite-sdk.md) | proposal (unimplemented): driving BoxLite via its SDK |
+| [`docs/design/boxlite-sdk.md`](docs/design/boxlite-sdk.md) | historical design note: the SDK evaluation that led to cbox (partly superseded) |
 | [`docs/design/ci.md`](docs/design/ci.md) | CI and release workflows |
 
 ## Built on 🙏
