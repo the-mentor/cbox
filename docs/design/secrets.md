@@ -107,8 +107,8 @@ calls `CredWriteW/CredReadW/CredDeleteW` via a compiled C# type. The secret goes
 over stdin only, never argv. All six spike checks passed on a real WSL machine;
 each call took about 0.5 s (almost all PowerShell startup). Credential Manager
 caps a value at 2560 bytes (fine for tokens). The store must detect, before use:
-WSL interop enabled, `powershell.exe` resolvable, `wslpath` present, and fail with
-an actionable message otherwise. Reading several secrets should use one
+WSL interop enabled and `powershell.exe` resolvable, and fail with an actionable
+message otherwise. Reading several secrets should use one
 PowerShell run, not one per secret.
 
 **What is stored where.** One entry per secret in the OS store, keyed
@@ -205,9 +205,21 @@ user's; each is small enough to change in review.
 - **Other platforms.** The macOS store crate is behind `cfg(target_os = "macos")`
   and CI keeps building on Linux. Without a store, `secret` commands and a bare
   `--secret NAME` fail with the same "no secret store available" error.
-- **WSL store.** Copied from the spike into a module in `cbox/`, with the
-  PowerShell script embedded using `include_str!` and written to a private
-  temporary directory per run.
+- **WSL store.** Copied from the spike into a module in `cbox/`. **The PowerShell
+  script is never written to disk** (decided by the user, to stop anyone swapping
+  it to capture values): it is embedded in the binary with `include_str!` and
+  passed to `powershell.exe -NoProfile -NonInteractive -EncodedCommand <base64
+  UTF-16LE>`. The operation and target name are prepended as variable
+  assignments; the target is safe to inline because names are restricted to
+  lowercase letters, digits, `-` and `_`. The secret still travels over stdin
+  only. This removes the temporary file, `wslpath`, the UNC script path and
+  `-ExecutionPolicy Bypass`. **Unverified:** that `-EncodedCommand` leaves stdin
+  free for the secret and that the encoded script fits the command-line limit
+  (about 2.5 KB of script, roughly 7 KB encoded). PR 3 starts with a spike on a
+  real WSL machine to confirm both before building on it. This protects against
+  tampering with cbox's script, not against other software running as the same
+  Windows user, which can call Credential Manager directly (it has no per-app
+  access control).
 
 ## Left to the builder
 
