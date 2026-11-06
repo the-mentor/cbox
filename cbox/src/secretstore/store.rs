@@ -1,5 +1,5 @@
 use super::StoredSecret;
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use keyring_core::{Entry, Error};
 
 pub trait SecretStore {
@@ -35,7 +35,9 @@ impl SecretStore for KeyringStore {
     }
     fn get(&self, name: &str) -> Result<Option<StoredSecret>> {
         match entry(name)?.get_password() {
-            Ok(json) => Ok(Some(StoredSecret::from_json(&json)?)),
+            Ok(json) => Ok(Some(
+                StoredSecret::from_json(&json).with_context(|| format!("secret {name:?} in {}", self.label))?,
+            )),
             Err(Error::NoEntry | Error::NoDefaultStore) => Ok(None),
             Err(e) => Err(anyhow!("reading secret {name:?} from {}: {e}", self.label)),
         }
@@ -56,7 +58,7 @@ impl SecretStore for KeyringStore {
 
 #[cfg(target_os = "macos")]
 pub fn open_default() -> Result<Box<dyn SecretStore>> {
-    let store = apple_native_keyring_store::keychain::Store::new()
+    let store = apple_native_keyring_store::keychain::Store::new() // Result<Arc<Store>, keyring_core::Error>
         .map_err(|e| anyhow!("cannot open macOS Keychain: {e}"))?;
     keyring_core::set_default_store(store);
     Ok(Box::new(KeyringStore::new("macOS Keychain", None)))

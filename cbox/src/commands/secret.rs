@@ -12,7 +12,7 @@ The value is read from a hidden prompt or from stdin and is never a command-line
 
 Examples:
   cbox secret create openai --host api.openai.com --env OPENAI_API_KEY
-  cbox secret create github --host github.com,api.github.com --env GITHUB_TOKEN
+  cbox secret create openai --host api.openai.com,api.example.com --env OPENAI_API_KEY
   pbpaste | cbox secret create openai --host api.openai.com --env OPENAI_API_KEY")]
     Create {
         name: String,
@@ -147,6 +147,7 @@ pub fn run(cmd: SecretCmd) -> Result<()> {
             check_name(&name)?;
             let hosts = parse_hosts(&host)?;
             validate_env(&env)?;
+            secretstore::check_absent(&*store, &index, &name)?;
             let value = read_value(
                 io::stdin().is_terminal(),
                 &mut io::stdin(),
@@ -177,6 +178,9 @@ pub fn run(cmd: SecretCmd) -> Result<()> {
             println!("Updated \"{name}\" in {}", store.label());
         }
         SecretCmd::Delete { name, yes } => {
+            if !secretstore::exists(&*store, &index, &name)? {
+                bail!("secret {name:?} not found");
+            }
             let ok = confirm_delete(&name, yes, &mut |q| {
                 print!("{q}");
                 io::stdout().flush()?;

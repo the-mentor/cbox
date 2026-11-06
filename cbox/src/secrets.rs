@@ -113,10 +113,14 @@ pub fn spec_from_store(store: &dyn SecretStore, name: &str) -> Result<SecretSpec
     Ok(SecretSpec { name: name.to_string(), env_var: env, hosts, value: Some(value), stored: true })
 }
 
-/// Two secrets writing the same in-box variable would leave one placeholder
-/// silently shadowing the other.
+/// Two secrets writing the same in-box variable (or sharing a name, hence a
+/// placeholder) would leave one silently shadowing the other.
 pub fn check_unique_env(specs: &[SecretSpec]) -> Result<()> {
     for (i, spec) in specs.iter().enumerate() {
+        // One name means one placeholder, whatever the env vars are.
+        if specs[..i].iter().any(|o| o.name == spec.name) {
+            bail!("secret {:?} is given more than once; use each --secret name once", spec.name);
+        }
         if let Some(other) = specs[..i].iter().find(|o| o.env_var == spec.env_var) {
             let who = |s: &SecretSpec| {
                 if s.name == "gh" { "the GitHub token (GH_TOKEN/GITHUB_TOKEN)".to_string() } else { format!("--secret {}", s.name) }
@@ -284,10 +288,6 @@ mod tests {
         assert!(parse_secret_flag("openai@api.openai.com").is_err());
     }
 
-    /// "gh" is reserved for the built-in GitHub preset. Without this, a
-    /// user-supplied `--secret gh=ANYVAR@internal.example.com` would hit
-    /// `build`'s "gh" special case and get silently retargeted at
-    /// api.github.com/github.com instead of the host actually named.
     #[test]
     fn a_secret_named_gh_basic_is_rejected_as_reserved() {
         let err = parse_secret_flag("gh_basic=X@a.com").unwrap_err().to_string();
@@ -304,6 +304,10 @@ mod tests {
         assert!(!err.contains("--secret gh"), "{err}");
     }
 
+    /// "gh" is reserved for the built-in GitHub preset. Without this, a
+    /// user-supplied `--secret gh=ANYVAR@internal.example.com` would hit
+    /// `build`'s "gh" special case and get silently retargeted at
+    /// api.github.com/github.com instead of the host actually named.
     #[test]
     fn a_secret_named_gh_is_rejected_as_reserved() {
         let err = parse_secret_flag("gh=ANYVAR@internal.example.com").unwrap_err().to_string();
@@ -470,6 +474,14 @@ mod tests {
         let store = FakeStore::with("other", "v", &["a.com"], "OTHER");
         let err = spec_from_store(&store, "x").unwrap_err().to_string();
         assert_eq!(err, "secret \"x\" not found; run cbox secret create x");
+    }
+
+    #[test]
+    fn duplicate_secret_names_are_rejected_even_with_different_env() {
+        let store = FakeStore::with("openai", "v", &["a.com"], "OPENAI_API_KEY");
+        let specs = vec![spec_from_store(&store, "openai").unwrap(), parse_secret_flag("openai=OTHER@b.com").unwrap()];
+        let err = check_unique_env(&specs).unwrap_err().to_string();
+        assert!(err.contains("openai") && err.contains("more than once"), "{err}");
     }
 
     #[test]

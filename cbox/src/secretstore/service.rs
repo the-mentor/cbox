@@ -9,15 +9,27 @@ pub struct ListRow {
     pub env: Option<String>,
 }
 
-pub fn create(store: &dyn SecretStore, index_path: &Path, name: &str, s: StoredSecret) -> Result<()> {
+/// Fails if `name` is already stored; callers run it before asking for a value.
+pub fn check_absent(store: &dyn SecretStore, index_path: &Path, name: &str) -> Result<()> {
     validate_name(name)?;
-    let mut index = Index::load(index_path)?;
     if store.get(name)?.is_some() {
-        if index.names.contains(name) {
+        if Index::load(index_path)?.names.contains(name) {
             bail!("secret {name:?} already exists; run `cbox secret edit {name}` to change it");
         }
         bail!("secret {name:?} already exists in {} but is not in the index; run `cbox secret delete {name}` first", store.label());
     }
+    Ok(())
+}
+
+/// True if the store entry or the index line exists.
+pub fn exists(store: &dyn SecretStore, index_path: &Path, name: &str) -> Result<bool> {
+    validate_name(name)?;
+    Ok(store.get(name)?.is_some() || Index::load(index_path)?.names.contains(name))
+}
+
+pub fn create(store: &dyn SecretStore, index_path: &Path, name: &str, s: StoredSecret) -> Result<()> {
+    check_absent(store, index_path, name)?;
+    let mut index = Index::load(index_path)?;
     let json = s.to_json();
     check_size(&json, store.max_entry_bytes())?;
     store.put(name, &s)?;
@@ -100,8 +112,12 @@ pub fn edit(store: &dyn SecretStore, name: &str, c: EditChanges) -> Result<EditO
 }
 
 pub fn delete(store: &dyn SecretStore, index_path: &Path, name: &str) -> Result<()> {
-    store.delete(name)?;
+    validate_name(name)?;
+    let had_entry = store.delete(name)?;
     let mut index = Index::load(index_path)?;
+    if !had_entry && !index.names.contains(name) {
+        bail!("secret {name:?} not found");
+    }
     index.remove(name);
     index.save(index_path)
 }
@@ -202,13 +218,56 @@ mod tests {
         st.delete("openai").unwrap(); // entry gone
         delete(&st, &d.index(), "openai").unwrap();
         assert!(list(&st, &d.index()).unwrap().is_empty());
-        delete(&st, &d.index(), "openai").unwrap(); // both gone
         create(&st, &d.index(), "a", sec()).unwrap();
         let mut i = Index::load(&d.index()).unwrap();
         i.remove("a");
         i.save(&d.index()).unwrap(); // index line gone
         delete(&st, &d.index(), "a").unwrap();
         assert!(st.get("a").unwrap().is_none());
+    }
+
+    #[test]
+    fn delete_of_a_name_in_neither_place_fails_as_not_found() {
+        let _l = crate::test_env_lock::lock();
+        let (st, d) = setup(None);
+        create(&st, &d.index(), "keep", sec()).unwrap();
+        let e = delete(&st, &d.index(), "nope").unwrap_err().to_string();
+        assert_eq!(e, "secret \"nope\" not found");
+        assert!(!exists(&st, &d.index(), "nope").unwrap());
+        assert!(exists(&st, &d.index(), "keep").unwrap());
+    }
+
+    #[test]
+    fn check_absent_fails_for_existing_names_before_any_write() {
+        let _l = crate::test_env_lock::lock();
+        let (st, d) = setup(None);
+        check_absent(&st, &d.index(), "openai").unwrap();
+        create(&st, &d.index(), "openai", sec()).unwrap();
+        let e = check_absent(&st, &d.index(), "openai").unwrap_err().to_string();
+        assert!(e.contains("already exists") && e.contains("cbox secret edit"), "{e}");
+    }
+
+    #[test]
+    fn corrupt_entry_error_names_the_secret_and_no_content() {
+        let _l = crate::test_env_lock::lock();
+        let (st, _d) = setup(None);
+        keyring_core::Entry::new("cbox", "bad").unwrap().set_password("CORRUPT-TEXT{").unwrap();
+        let e = format!("{:#}", st.get("bad").unwrap_err());
+        assert!(e.contains("\"bad\"") && e.contains("mock"), "{e}");
+        assert!(!e.contains("CORRUPT"), "{e}");
+    }
+
+    #[test]
+    fn add_remove_adds_then_removes() {
+        let _l = crate::test_env_lock::lock();
+        let (st, _d) = setup(None);
+        put_sec(&st, &["a.com"]);
+        edit(&st, "k", ch(HostChange::AddRemove(v(&["b.com"]), v(&["a.com"])))).unwrap();
+        assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["b.com"]));
+        // Adding and removing the same host empties the list: error, nothing written.
+        let e = edit(&st, "k", ch(HostChange::AddRemove(v(&["b.com"]), v(&["b.com"])))).unwrap_err().to_string();
+        assert!(e.contains("at least one host"), "{e}");
+        assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["b.com"]));
     }
 
     #[test]
