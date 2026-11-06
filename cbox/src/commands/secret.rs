@@ -133,6 +133,11 @@ fn format_list(rows: &[ListRow], label: &str) -> String {
     })
 }
 
+/// Echo is fully off (no `*`), so the prompt must say so or a paste looks like a hang.
+fn prompt(label: &str, name: &str) -> String {
+    format!("{label} \"{name}\" (input is hidden, press Enter when done): ")
+}
+
 pub fn run(cmd: SecretCmd) -> Result<()> {
     let store = open_default()?;
     let index = secrets_index_path().context("cannot locate config directory for the secrets index")?;
@@ -145,7 +150,7 @@ pub fn run(cmd: SecretCmd) -> Result<()> {
             let value = read_value(
                 io::stdin().is_terminal(),
                 &mut io::stdin(),
-                &mut || rpassword::prompt_password(format!("Value for \"{name}\": ")),
+                &mut || rpassword::prompt_password(prompt("Value for", &name)),
             )?;
             secretstore::create(&*store, &index, &name, StoredSecret { value, hosts: hosts.clone(), env })?;
             println!("Saved \"{name}\" in {}, allowed hosts: {}", store.label(), hosts.join(", "));
@@ -162,7 +167,7 @@ pub fn run(cmd: SecretCmd) -> Result<()> {
             validate_name(&name)?;
             let c = edit_changes(host.as_deref(), add_host.as_deref(), remove_host.as_deref(), env.as_deref(), &mut || {
                 read_value(io::stdin().is_terminal(), &mut io::stdin(), &mut || {
-                    rpassword::prompt_password(format!("New value for \"{name}\": "))
+                    rpassword::prompt_password(prompt("New value for", &name))
                 })
             })?;
             let o = secretstore::edit(&*store, &index, &name, c)?;
@@ -197,6 +202,12 @@ pub fn run(cmd: SecretCmd) -> Result<()> {
 mod tests {
     use super::*;
     use clap::{CommandFactory, Parser};
+
+    #[test]
+    fn prompts_say_input_is_hidden() {
+        assert_eq!(prompt("Value for", "n"), "Value for \"n\" (input is hidden, press Enter when done): ");
+        assert_eq!(prompt("New value for", "n"), "New value for \"n\" (input is hidden, press Enter when done): ");
+    }
 
     #[derive(Parser)]
     struct W {

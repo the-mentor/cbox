@@ -52,7 +52,7 @@ shaped so a profile can later refer to a secret by name without a migration.
 
 ```
 $ cbox secret create openai --host api.openai.com --env OPENAI_API_KEY
-Value for "openai": 
+Value for "openai" (input is hidden, press Enter when done): 
 Saved "openai" in macOS Keychain, allowed hosts: api.openai.com
 
 $ cbox secret list
