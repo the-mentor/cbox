@@ -69,7 +69,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
     // why a hash is enough and adequate here.
     let secret_hashes = secrets::resume_hashes(&specs, &built);
 
-    let passthrough = env::passthrough_vars();
+    let passthrough = secrets::passthrough_without_stored(env::passthrough_vars(), &specs);
     let mut plain = env::compose(&args.env_flags, &passthrough, &built.source_vars)?;
     env::add_gateway_placeholder(&mut plain);
     plain.extend(built.env.clone());

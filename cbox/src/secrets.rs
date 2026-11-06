@@ -186,7 +186,8 @@ pub fn build(specs: &[SecretSpec]) -> Result<Built> {
         }
 
         // For a stored secret `env_var` is the in-box name only; it is still
-        // pushed to `source_vars` so compose refuses a host value of that name.
+        // pushed to `source_vars` so compose refuses `-e` of that name (the
+        // passthrough copy is dropped by `passthrough_without_stored`).
         let value = match &spec.value {
             Some(v) => v.clone(),
             None => set_and_non_empty(&spec.env_var)
@@ -223,6 +224,15 @@ pub fn build(specs: &[SecretSpec]) -> Result<Built> {
     }
 
     Ok(Built { secrets, env, source_vars })
+}
+
+/// The passthrough list minus the in-box names of stored secrets. A stored
+/// value comes from the store, so the host variable of that name is not
+/// forwarded and the guest gets the placeholder instead. Flag-form sources
+/// stay, so `compose` still refuses them.
+pub fn passthrough_without_stored(mut passthrough: Vec<String>, specs: &[SecretSpec]) -> Vec<String> {
+    passthrough.retain(|k| !specs.iter().any(|s| s.stored && s.env_var == *k));
+    passthrough
 }
 
 /// Per-secret hashes recorded at creation and compared on resume. Flag-form
@@ -529,12 +539,31 @@ mod tests {
     #[test]
     fn store_secret_env_name_is_excluded_from_passthrough() {
         let _lock = crate::test_env_lock::lock();
-        let _guard = EnvGuard::set("ANTHROPIC_API_KEY", "host-value");
+        let _guard = EnvGuard::set("ANTHROPIC_API_KEY", "host-MARKER-value");
         let store = FakeStore::with("anthropic", "sk-stored", &["api.anthropic.com"], "ANTHROPIC_API_KEY");
-        let built = build(&[spec_from_store(&store, "anthropic").unwrap()]).unwrap();
-        let err = crate::env::compose(&[], &["ANTHROPIC_API_KEY".to_string()], &built.source_vars)
+        let specs = [spec_from_store(&store, "anthropic").unwrap()];
+        let built = build(&specs).unwrap();
+        let passthrough = vec!["ANTHROPIC_API_KEY".to_string(), "ANTHROPIC_MODEL".to_string()];
+        let passthrough = passthrough_without_stored(passthrough, &specs);
+        assert_eq!(passthrough, ["ANTHROPIC_MODEL"]);
+        let plain = crate::env::compose(&[], &passthrough, &built.source_vars).unwrap();
+        assert!(!plain.iter().any(|(_, v)| v.contains("MARKER")), "host value leaked: {plain:?}");
+
+        // An explicit -e for the same name still fails closed.
+        let err = crate::env::compose(&["ANTHROPIC_API_KEY=x".to_string()], &passthrough, &built.source_vars)
             .unwrap_err()
             .to_string();
+        assert!(err.contains("cannot also be set with -e"), "{err}");
+    }
+
+    #[test]
+    fn flag_secret_source_on_the_passthrough_list_still_errors() {
+        let _lock = crate::test_env_lock::lock();
+        let _guard = EnvGuard::set("ANTHROPIC_API_KEY", "host-value");
+        let specs = [parse_secret_flag("anthropic=ANTHROPIC_API_KEY@api.anthropic.com").unwrap()];
+        let built = build(&specs).unwrap();
+        let passthrough = passthrough_without_stored(vec!["ANTHROPIC_API_KEY".to_string()], &specs);
+        let err = crate::env::compose(&[], &passthrough, &built.source_vars).unwrap_err().to_string();
         assert!(err.contains("named as a secret source"), "{err}");
     }
 
