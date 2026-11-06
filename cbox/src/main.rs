@@ -9,6 +9,7 @@ mod hookfwd;
 mod naming;
 mod proto;
 mod secrets;
+mod secretstore;
 mod server;
 mod sidecar;
 mod stdin_reader;
@@ -51,7 +52,7 @@ enum Commands {
         image: String,
         #[arg(long)]
         config: Option<PathBuf>,
-        /// NAME=ENV_VAR@host[,host...]
+        /// NAME (stored with `cbox secret create`) or NAME=ENV_VAR@host[,host...]
         #[arg(long = "secret")]
         secret_flags: Vec<String>,
         /// KEY=VALUE file to load before resolving credentials. Defaults to
@@ -99,6 +100,11 @@ enum Commands {
         #[arg(short, long)]
         all: bool,
     },
+    /// Manage secrets in the OS secret store.
+    Secret {
+        #[command(subcommand)]
+        cmd: commands::secret::SecretCmd,
+    },
 }
 
 #[tokio::main]
@@ -123,6 +129,7 @@ async fn main() -> Result<()> {
         Commands::Exec { name, config, cmd } => commands::exec::run(name, cmd, config).await?,
         Commands::Down { name } => commands::down::run(name).await?,
         Commands::List { all } => commands::list::run(all).await?,
+        Commands::Secret { cmd } => commands::secret::run(cmd)?,
     }
     Ok(())
 }

@@ -54,6 +54,15 @@ pub fn hash_secret_value(value: &str) -> u64 {
     hasher.finish()
 }
 
+/// For store-backed secrets: editing hosts or the env name must also flag the
+/// box as stale. Tuple hashing is unambiguous: `str` hashes with a terminator
+/// and `[String]` with a length prefix.
+pub fn hash_stored_secret(value: &str, hosts: &[String], env: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (value, hosts, env).hash(&mut hasher);
+    hasher.finish()
+}
+
 /// Names of secrets present in both `old` and `current` whose hash differs
 /// -- i.e. the box's baked-in credential no longer matches what's in the
 /// environment now (a rotated token being the case that matters). A secret
@@ -144,6 +153,34 @@ mod tests {
         let sidecar = read(&home).expect("sidecar should parse without the newer field");
         assert!(sidecar.secret_hashes.is_empty());
         std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn flag_form_hash_is_unchanged() {
+        // Pinned to the value-only hash, so boxes created before stored
+        // secrets existed do not warn on resume.
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        "sk-example".hash(&mut h);
+        assert_eq!(hash_secret_value("sk-example"), h.finish());
+    }
+
+    #[test]
+    fn hash_changes_when_hosts_or_env_change_but_value_does_not() {
+        let hosts = vec!["a.com".to_string()];
+        let base = hash_stored_secret("v", &hosts, "K");
+        assert_eq!(base, hash_stored_secret("v", &hosts, "K"));
+        assert_ne!(base, hash_stored_secret("v", &["b.com".to_string()], "K"));
+        assert_ne!(base, hash_stored_secret("v", &hosts, "K2"));
+        assert_ne!(base, hash_stored_secret("v2", &hosts, "K"));
+        // Field boundaries are unambiguous.
+        assert_ne!(
+            hash_stored_secret("v", &["ab".to_string()], "c"),
+            hash_stored_secret("v", &["a".to_string()], "bc")
+        );
+        assert_ne!(
+            hash_stored_secret("v", &["a".to_string(), "b".to_string()], "K"),
+            hash_stored_secret("v", &["a,b".to_string()], "K")
+        );
     }
 
     #[test]

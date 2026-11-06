@@ -68,6 +68,17 @@ pub fn resolve_config_path(explicit: Option<&Path>) -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".config/cbox/registries.json"))
 }
 
+/// `$XDG_CONFIG_HOME/cbox/secrets.json`, else `~/.config/cbox/secrets.json`.
+pub fn secrets_index_path() -> Option<PathBuf> {
+    if let Ok(x) = std::env::var("XDG_CONFIG_HOME") {
+        if !x.trim().is_empty() {
+            return Some(PathBuf::from(x).join("cbox/secrets.json"));
+        }
+    }
+    let home = std::env::var("HOME").ok()?;
+    Some(PathBuf::from(home).join(".config/cbox/secrets.json"))
+}
+
 /// Each box name gets its own BOXLITE_HOME, which is what lets two boxes run
 /// at once — BoxLite locks the whole home directory, not the individual box.
 pub fn box_home(name: &str) -> PathBuf {

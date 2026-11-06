@@ -10,10 +10,15 @@
 //! placeholder where the encoded blob belongs, via http.extraHeader, which git
 //! passes through verbatim.
 
+use std::collections::BTreeMap;
+
 use anyhow::{Result, anyhow, bail};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use boxlite::Secret;
+
+use crate::secretstore::{SecretStore, StoredSecret};
+use crate::sidecar;
 
 /// The Basic-auth username GitHub expects when the password is a PAT.
 pub const GH_BASIC_USER: &str = "x-access-token";
@@ -24,11 +29,28 @@ pub fn placeholder(name: &str) -> String {
     format!("<BOXLITE_SECRET:{name}>")
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// `value` is `Some` only for a store-backed secret (`stored`); flag-form
+/// secrets read `env_var` from the host in `build`.
+#[derive(Clone, PartialEq)]
 pub struct SecretSpec {
     pub name: String,
     pub env_var: String,
     pub hosts: Vec<String>,
+    pub value: Option<String>,
+    pub stored: bool,
+}
+
+// Hand-written so a stored value never reaches Debug output.
+impl std::fmt::Debug for SecretSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecretSpec")
+            .field("name", &self.name)
+            .field("env_var", &self.env_var)
+            .field("hosts", &self.hosts)
+            .field("value", &self.value.as_ref().map(|_| "<redacted>"))
+            .field("stored", &self.stored)
+            .finish()
+    }
 }
 
 #[derive(Debug)]
@@ -60,9 +82,10 @@ pub fn parse_secret_flag(s: &str) -> Result<SecretSpec> {
     // instead of the host the user actually named -- rejecting the name
     // outright is simpler and safer than trying to distinguish "the
     // preset" from "a user secret that happens to be named gh" downstream.
-    if name == "gh" {
+    // "gh_basic" is reserved too: it is the GitHub preset's second SDK secret.
+    if crate::secretstore::RESERVED_NAMES.contains(&name) {
         bail!(
-            "--secret name \"gh\" is reserved for the built-in GitHub secret \
+            "--secret name {name:?} is reserved for the built-in GitHub secret \
              (auto-detected from GH_TOKEN/GITHUB_TOKEN); choose a different name."
         );
     }
@@ -77,7 +100,39 @@ pub fn parse_secret_flag(s: &str) -> Result<SecretSpec> {
         bail!("--secret {name} has no hosts. An unscoped secret is substituted on requests to any host.");
     }
 
-    Ok(SecretSpec { name: name.to_string(), env_var: env_var.to_string(), hosts })
+    Ok(SecretSpec { name: name.to_string(), env_var: env_var.to_string(), hosts, value: None, stored: false })
+}
+
+/// A bare `--secret NAME` (no `=`, no `@`) names a secret in the store.
+pub fn is_store_reference(flag: &str) -> bool {
+    !flag.contains('=') && !flag.contains('@')
+}
+
+/// Look `name` up in the store. A missing name is an error, never a fallback
+/// to a host variable: the user asked for the stored secret.
+pub fn spec_from_store(store: &dyn SecretStore, name: &str) -> Result<SecretSpec> {
+    crate::secretstore::validate_name(name)?;
+    let StoredSecret { value, hosts, env } =
+        store.get(name)?.ok_or_else(|| anyhow!("secret {name:?} not found; run cbox secret create {name}"))?;
+    Ok(SecretSpec { name: name.to_string(), env_var: env, hosts, value: Some(value), stored: true })
+}
+
+/// Two secrets writing the same in-box variable (or sharing a name, hence a
+/// placeholder) would leave one silently shadowing the other.
+pub fn check_unique_env(specs: &[SecretSpec]) -> Result<()> {
+    for (i, spec) in specs.iter().enumerate() {
+        // One name means one placeholder, whatever the env vars are.
+        if specs[..i].iter().any(|o| o.name == spec.name) {
+            bail!("secret {:?} is given more than once; use each --secret name once", spec.name);
+        }
+        if let Some(other) = specs[..i].iter().find(|o| o.env_var == spec.env_var) {
+            let who = |s: &SecretSpec| {
+                if s.name == "gh" { "the GitHub token (GH_TOKEN/GITHUB_TOKEN)".to_string() } else { format!("--secret {}", s.name) }
+            };
+            bail!("{} and {} both set {} in the box; use one", who(other), who(spec), spec.env_var);
+        }
+    }
+    Ok(())
 }
 
 /// A variable counts as a usable source only if it is both set and non-empty.
@@ -109,7 +164,7 @@ pub fn has_github_token() -> bool {
 /// constructor that ever produces one.
 pub fn github_spec() -> SecretSpec {
     let env_var = if set_and_non_empty("GH_TOKEN").is_some() { "GH_TOKEN" } else { "GITHUB_TOKEN" };
-    SecretSpec { name: "gh".into(), env_var: env_var.into(), hosts: vec![] }
+    SecretSpec { name: "gh".into(), env_var: env_var.into(), hosts: vec![], value: None, stored: false }
 }
 
 /// Read each spec's source variable and build the SDK secrets plus the
@@ -131,8 +186,14 @@ pub fn build(specs: &[SecretSpec]) -> Result<Built> {
             );
         }
 
-        let value = set_and_non_empty(&spec.env_var)
-            .ok_or_else(|| anyhow!("--secret {} names {}, which is unset or empty", spec.name, spec.env_var))?;
+        // For a stored secret `env_var` is the in-box name only; it is still
+        // pushed to `source_vars` so compose refuses `-e` of that name (the
+        // passthrough copy is dropped by `passthrough_without_stored`).
+        let value = match &spec.value {
+            Some(v) => v.clone(),
+            None => set_and_non_empty(&spec.env_var)
+                .ok_or_else(|| anyhow!("--secret {} names {}, which is unset or empty", spec.name, spec.env_var))?,
+        };
 
         source_vars.push(spec.env_var.clone());
 
@@ -164,6 +225,29 @@ pub fn build(specs: &[SecretSpec]) -> Result<Built> {
     }
 
     Ok(Built { secrets, env, source_vars })
+}
+
+/// The passthrough list minus the in-box names of stored secrets. A stored
+/// value comes from the store, so the host variable of that name is not
+/// forwarded and the guest gets the placeholder instead. Flag-form sources
+/// stay, so `compose` still refuses them.
+pub fn passthrough_without_stored(mut passthrough: Vec<String>, specs: &[SecretSpec]) -> Vec<String> {
+    passthrough.retain(|k| !specs.iter().any(|s| s.stored && s.env_var == *k));
+    passthrough
+}
+
+/// Per-secret hashes recorded at creation and compared on resume. Flag-form
+/// (and gh/gh_basic) secrets keep the value-only hash so existing boxes show
+/// no spurious "changed" warning; stored ones also cover hosts and env name.
+pub fn resume_hashes(specs: &[SecretSpec], built: &Built) -> BTreeMap<String, u64> {
+    let mut hashes: BTreeMap<String, u64> =
+        built.secrets.iter().map(|s| (s.name.clone(), sidecar::hash_secret_value(&s.value))).collect();
+    for spec in specs.iter().filter(|s| s.stored) {
+        if let Some(value) = &spec.value {
+            hashes.insert(spec.name.clone(), sidecar::hash_stored_secret(value, &spec.hosts, &spec.env_var));
+        }
+    }
+    hashes
 }
 
 /// Run inside the box after creation when GitHub secrets are present.
@@ -211,6 +295,8 @@ mod tests {
             name: "openai".into(),
             env_var: "OPENAI_API_KEY".into(),
             hosts: vec!["api.openai.com".into()],
+            value: None,
+            stored: false,
         });
 
         let s = parse_secret_flag("x=X@a.com,b.com").unwrap();
@@ -228,6 +314,22 @@ mod tests {
     #[test]
     fn a_secret_without_an_env_var_is_rejected() {
         assert!(parse_secret_flag("openai@api.openai.com").is_err());
+    }
+
+    #[test]
+    fn a_secret_named_gh_basic_is_rejected_as_reserved() {
+        let err = parse_secret_flag("gh_basic=X@a.com").unwrap_err().to_string();
+        assert!(err.contains("reserved for the built-in GitHub secret"), "{err}");
+    }
+
+    #[test]
+    fn duplicate_env_with_the_github_preset_names_the_token() {
+        let _lock = crate::test_env_lock::lock();
+        let _g = EnvGuard::set("GH_TOKEN", "t");
+        let specs = vec![github_spec(), parse_secret_flag("x=GH_TOKEN@a.com").unwrap()];
+        let err = check_unique_env(&specs).unwrap_err().to_string();
+        assert!(err.contains("the GitHub token (GH_TOKEN/GITHUB_TOKEN)"), "{err}");
+        assert!(!err.contains("--secret gh"), "{err}");
     }
 
     /// "gh" is reserved for the built-in GitHub preset. Without this, a
@@ -249,6 +351,8 @@ mod tests {
             name: "x".into(),
             env_var: "CBOX_T_MISSING".into(),
             hosts: vec!["a.com".into()],
+            value: None,
+            stored: false,
         };
         let err = build(&[spec]).unwrap_err().to_string();
         assert!(err.contains("CBOX_T_MISSING"), "names the variable: {err}");
@@ -262,6 +366,8 @@ mod tests {
             name: "mysecret".into(),
             env_var: "CBOX_T_TOKEN".into(),
             hosts: vec!["a.com".into()],
+            value: None,
+            stored: false,
         };
         let built = build(&[spec]).unwrap();
         assert_eq!(
@@ -351,9 +457,144 @@ mod tests {
             name: "x".into(),
             env_var: "CBOX_T_NOHOSTS".into(),
             hosts: vec![],
+            value: None,
+            stored: false,
         };
         let err = build(&[spec]).unwrap_err().to_string();
         assert!(err.contains("no hosts"), "names the problem: {err}");
+    }
+
+    /// In-memory stand-in for the OS store.
+    struct FakeStore(std::collections::HashMap<String, (String, Vec<String>, String)>);
+
+    impl FakeStore {
+        fn with(name: &str, value: &str, hosts: &[&str], env: &str) -> Self {
+            let mut m = std::collections::HashMap::new();
+            m.insert(name.into(), (value.into(), hosts.iter().map(|h| h.to_string()).collect(), env.into()));
+            FakeStore(m)
+        }
+    }
+
+    impl SecretStore for FakeStore {
+        fn label(&self) -> &'static str { "fake" }
+        fn max_entry_bytes(&self) -> Option<usize> { None }
+        fn get(&self, name: &str) -> Result<Option<StoredSecret>> {
+            Ok(self.0.get(name).map(|(value, hosts, env)| StoredSecret {
+                value: value.clone(),
+                hosts: hosts.clone(),
+                env: env.clone(),
+            }))
+        }
+        fn put(&self, _: &str, _: &StoredSecret) -> Result<()> { unimplemented!() }
+        fn delete(&self, _: &str) -> Result<bool> { unimplemented!() }
+    }
+
+    #[test]
+    fn bare_name_is_a_store_reference_and_full_form_is_not() {
+        assert!(is_store_reference("openai"));
+        assert!(!is_store_reference("openai=OPENAI_API_KEY@api.openai.com"));
+        assert!(!is_store_reference("openai=OPENAI_API_KEY"));
+        assert!(!is_store_reference("openai@api.openai.com"));
+    }
+
+    #[test]
+    fn missing_store_secret_fails_naming_create() {
+        let store = FakeStore::with("other", "v", &["a.com"], "OTHER");
+        let err = spec_from_store(&store, "x").unwrap_err().to_string();
+        assert_eq!(err, "secret \"x\" not found; run cbox secret create x");
+    }
+
+    #[test]
+    fn duplicate_secret_names_are_rejected_even_with_different_env() {
+        let store = FakeStore::with("openai", "v", &["a.com"], "OPENAI_API_KEY");
+        let specs = vec![spec_from_store(&store, "openai").unwrap(), parse_secret_flag("openai=OTHER@b.com").unwrap()];
+        let err = check_unique_env(&specs).unwrap_err().to_string();
+        assert!(err.contains("openai") && err.contains("more than once"), "{err}");
+    }
+
+    #[test]
+    fn gh_bare_name_is_reserved() {
+        let store = FakeStore::with("gh", "v", &["a.com"], "GH_TOKEN");
+        let err = spec_from_store(&store, "gh").unwrap_err().to_string();
+        assert!(err.contains("reserved"), "{err}");
+    }
+
+    #[test]
+    fn build_uses_the_stored_value_and_returns_a_placeholder_in_env() {
+        let _lock = crate::test_env_lock::lock();
+        // A host variable of the same name must not be read instead.
+        let _guard = EnvGuard::remove("CBOX_T_STORED");
+        let store = FakeStore::with("mine", "sk-stored-value", &["a.com", "b.com"], "CBOX_T_STORED");
+        let spec = spec_from_store(&store, "mine").unwrap();
+        assert!(spec.stored);
+        assert!(!format!("{spec:?}").contains("sk-stored-value"), "Debug leaks the value");
+
+        let built = build(&[spec]).unwrap();
+        assert_eq!(built.secrets.len(), 1);
+        assert_eq!(built.secrets[0].value, "sk-stored-value");
+        assert_eq!(built.secrets[0].hosts, vec!["a.com".to_string(), "b.com".to_string()]);
+        assert_eq!(built.env, vec![("CBOX_T_STORED".to_string(), "<BOXLITE_SECRET:mine>".to_string())]);
+        assert_eq!(built.source_vars, vec!["CBOX_T_STORED".to_string()]);
+    }
+
+    #[test]
+    fn store_secret_env_name_is_excluded_from_passthrough() {
+        let _lock = crate::test_env_lock::lock();
+        let _guard = EnvGuard::set("ANTHROPIC_API_KEY", "host-MARKER-value");
+        let store = FakeStore::with("anthropic", "sk-stored", &["api.anthropic.com"], "ANTHROPIC_API_KEY");
+        let specs = [spec_from_store(&store, "anthropic").unwrap()];
+        let built = build(&specs).unwrap();
+        let passthrough = vec!["ANTHROPIC_API_KEY".to_string(), "ANTHROPIC_MODEL".to_string()];
+        let passthrough = passthrough_without_stored(passthrough, &specs);
+        assert_eq!(passthrough, ["ANTHROPIC_MODEL"]);
+        let plain = crate::env::compose(&[], &passthrough, &built.source_vars).unwrap();
+        assert!(!plain.iter().any(|(_, v)| v.contains("MARKER")), "host value leaked: {plain:?}");
+
+        // An explicit -e for the same name still fails closed.
+        let err = crate::env::compose(&["ANTHROPIC_API_KEY=x".to_string()], &passthrough, &built.source_vars)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("cannot also be set with -e"), "{err}");
+    }
+
+    #[test]
+    fn flag_secret_source_on_the_passthrough_list_still_errors() {
+        let _lock = crate::test_env_lock::lock();
+        let _guard = EnvGuard::set("ANTHROPIC_API_KEY", "host-value");
+        let specs = [parse_secret_flag("anthropic=ANTHROPIC_API_KEY@api.anthropic.com").unwrap()];
+        let built = build(&specs).unwrap();
+        let passthrough = passthrough_without_stored(vec!["ANTHROPIC_API_KEY".to_string()], &specs);
+        let err = crate::env::compose(&[], &passthrough, &built.source_vars).unwrap_err().to_string();
+        assert!(err.contains("named as a secret source"), "{err}");
+    }
+
+    #[test]
+    fn store_secret_env_name_collides_with_dash_e() {
+        let store = FakeStore::with("mine", "sk-stored", &["a.com"], "CBOX_T_DASH_E");
+        let built = build(&[spec_from_store(&store, "mine").unwrap()]).unwrap();
+        let err = crate::env::compose(&["CBOX_T_DASH_E=x".to_string()], &[], &built.source_vars)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("named as a secret source"), "{err}");
+    }
+
+    #[test]
+    fn two_store_secrets_with_one_env_name_error() {
+        let mut store = FakeStore::with("one", "v1", &["a.com"], "SAME_VAR");
+        store.0.insert("two".into(), ("v2".into(), vec!["b.com".into()], "SAME_VAR".into()));
+        let specs = vec![spec_from_store(&store, "one").unwrap(), spec_from_store(&store, "two").unwrap()];
+        let err = check_unique_env(&specs).unwrap_err().to_string();
+        assert!(err.contains("SAME_VAR"), "{err}");
+
+        // Mixed with the flag form too.
+        let specs = vec![
+            spec_from_store(&store, "one").unwrap(),
+            parse_secret_flag("flag=SAME_VAR@c.com").unwrap(),
+        ];
+        assert!(check_unique_env(&specs).is_err());
+
+        let specs = vec![spec_from_store(&store, "one").unwrap(), parse_secret_flag("flag=OTHER@c.com").unwrap()];
+        check_unique_env(&specs).unwrap();
     }
 
     #[test]
@@ -372,5 +613,49 @@ mod tests {
             script.contains("credential.https://github.com.helper"),
             "the blank must be scoped to the same URL, not the generic key: {script}"
         );
+    }
+
+    fn spec(name: &str, env: &str, hosts: &[&str], value: Option<&str>) -> SecretSpec {
+        SecretSpec {
+            name: name.into(),
+            env_var: env.into(),
+            hosts: hosts.iter().map(|h| h.to_string()).collect(),
+            value: value.map(String::from),
+            stored: value.is_some(),
+        }
+    }
+
+    #[test]
+    fn resume_hash_of_a_flag_secret_is_value_only() {
+        let _lock = crate::test_env_lock::lock();
+        let _g = EnvGuard::set("CBOX_T_RESUME", "v1");
+        let specs = [spec("k", "CBOX_T_RESUME", &["a.com"], None)];
+        let h = resume_hashes(&specs, &build(&specs).unwrap());
+        assert_eq!(h["k"], sidecar::hash_secret_value("v1"));
+    }
+
+    #[test]
+    fn resume_hash_of_a_stored_secret_covers_hosts_and_env() {
+        let hash = |hosts: &[&str], env: &str| {
+            let specs = [spec("k", env, hosts, Some("v"))];
+            resume_hashes(&specs, &build(&specs).unwrap())["k"]
+        };
+        let base = hash(&["a.com"], "E");
+        assert_eq!(base, sidecar::hash_stored_secret("v", &["a.com".to_string()], "E"));
+        assert_ne!(base, hash(&["b.com"], "E"));
+        assert_ne!(base, hash(&["a.com"], "F"));
+    }
+
+    #[test]
+    fn resume_hashes_for_gh_keep_both_entries_value_only() {
+        let _lock = crate::test_env_lock::lock();
+        let _g = EnvGuard::set("GH_TOKEN", "ghp_x");
+        let specs = [github_spec()];
+        let built = build(&specs).unwrap();
+        let h = resume_hashes(&specs, &built);
+        assert_eq!(h.len(), 2);
+        for s in &built.secrets {
+            assert_eq!(h[&s.name], sidecar::hash_secret_value(&s.value));
+        }
     }
 }

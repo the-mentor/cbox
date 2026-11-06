@@ -257,6 +257,18 @@ list *args:
     cd "{{invocation_directory()}}"
     exec "{{cbox_bin}}" list {{args}}
 
+# Manage secrets kept in the OS credential store. Values come from a hidden
+# prompt or stdin, never from arguments.
+# Usage: just secret create NAME --host HOSTS --env VAR | list | edit NAME [flags] | delete NAME [-y]
+# Positional arguments keep `--host "a.com, b.com"` as one argument.
+[positional-arguments]
+secret *args:
+    #!/usr/bin/env sh
+    set -eu
+    [ -x "{{cbox_bin}}" ] || { echo "cbox binary not found at {{cbox_bin}} - run 'just build-cbox' or 'just install-cbox' first" >&2; exit 1; }
+    cd "{{invocation_directory()}}"
+    exec "{{cbox_bin}}" secret "$@"
+
 # Print the installed cbox binary's version (from cbox/Cargo.toml at build
 # time), to check what build-cbox or install-cbox left in place.
 # Usage: just version

@@ -25,6 +25,7 @@ just version            # print the installed cbox binary's version (e.g. `cbox 
 just ci-local           # run the ci workflow's Linux build job locally via nektos/act (needs Docker)
 just exec               # open a session in the running box (alias: just shell)
 just list               # list running boxes across every box name (see below), forwarding args to cbox's own `list` command
+just secret             # manage stored secrets: `just secret create NAME --host HOSTS --env VAR`, `list`, `edit`, `delete` (see below)
 just down               # stop and remove the box
 just gateway-up/down/logs # manage the host-side agentgateway
 just gateway-generate-ui-password # change the admin UI's default credentials, see below
@@ -52,11 +53,23 @@ restart rather than a suspend), and `-- <cmd>` (override the executable launched
 defaults to `claude`, e.g. `just up -- bash`). Without `-f`, running `up` again against a name
 that already exists **resumes** that box (starting it if it's `Stopped`) rather than erroring
 — but its configuration dates from when it was first created, credentials included, so `cbox up`
-says so and names any secret whose value has since changed; `-f` is how to pick up today's
+says so and names any secret that has since changed (a stored secret's value, hosts or env name;
+the flag form's value); `-f` is how to pick up today's
 settings. `exec` takes the same optional box name and `-- <cmd>`
 override (e.g. `just exec -- bash`) to exec something other than `claude --continue` (its
 default) in the running box; against a `Stopped` box it says so and starts it (a ~2s cold boot)
 before attaching, rather than either failing or doing that silently.
+
+Secrets live in the OS secret store and are managed with `cbox secret create|list|edit|delete`
+(macOS Keychain now; WSL and Linux desktop planned). `create NAME --host HOSTS --env VAR` reads
+the value from a hidden prompt or stdin; `edit NAME` with no flags replaces the value, while
+`--host` (replace), `--add-host`, `--remove-host` and `--env` change metadata and leave the value
+alone; `delete NAME [-y]` confirms first. Values are never printed. cbox never writes a value to
+disk (the OS store holds it encrypted; the index `~/.config/cbox/secrets.json` holds names only),
+but BoxLite keeps a copy of a box's secret values in that box's own database under the box home
+(not encrypted, owner-only file permissions) until the box is removed (`cbox down`/`-f`). `cbox up --secret NAME` uses a
+stored secret (a missing name fails; there is no fallback to a host env var), and `gh`/`gh_basic`
+are reserved names. See `docs/design/secrets.md`.
 
 `build`, `build-image`, `build-base`, and `build-local` are variadic: everything after the recipe name is
 forwarded verbatim to `docker build` (`--pull`, `--progress=plain` and friends all work). `build`
