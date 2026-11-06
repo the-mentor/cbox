@@ -2,6 +2,16 @@
 #![allow(dead_code)] // consumed by later tasks
 
 use anyhow::{Context, Result, bail};
+
+mod index;
+mod service;
+mod store;
+#[allow(unused_imports)] // consumed by later tasks
+pub use index::Index;
+#[allow(unused_imports)]
+pub use service::{ListRow, create, delete, list};
+#[allow(unused_imports)]
+pub use store::{KeyringStore, SecretStore, open_default};
 use serde::{Deserialize, Serialize};
 
 /// Windows-credential-store-via-WSL entries are capped at this many bytes.
