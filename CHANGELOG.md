@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.23](https://github.com/the-mentor/cbox/compare/v0.1.22...v0.1.23) (2026-11-06)
+
+
+### Features
+
+* add cbox secret management (create, list, edit, delete, up --secret NAME) ([#135](https://github.com/the-mentor/cbox/issues/135)) ([ff6e446](https://github.com/the-mentor/cbox/commit/ff6e4464c2d08d0364892ee63a5782eb5969c3c3))
+
 ## [0.1.22](https://github.com/the-mentor/cbox/compare/v0.1.21...v0.1.22) (2026-11-06)
 
 
