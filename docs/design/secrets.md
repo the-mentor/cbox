@@ -27,6 +27,9 @@ shaped so a profile can later refer to a secret by name without a migration.
   the box home (not encrypted, protected by file permissions; cbox makes the box
   home owner-only) until the box is removed (`cbox down`, or `cbox up -f`). Secrets
   from a host env var (the flag form) are kept there the same way.
+  So `cbox secret delete` removes a secret from the store but does not revoke it
+  for boxes that already used it: they keep the placeholder and BoxLite's copy of
+  the value until they are removed.
 - macOS: the Keychain (implemented). WSL: Windows Credential Manager (not
   implemented yet).
 - `cbox up --secret NAME` takes the value from the store and feeds the existing
