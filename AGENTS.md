@@ -104,7 +104,7 @@ still attached and, for whatever reason, its control socket didn't come up).
 - **Box side.** The two-layer image, the local-registry image handoff (and why a rebuild needs
   no cache invalidation since BoxLite 0.10.7), and authenticated-registry (ECR) support are all documented in
   `docs/design/general.md` — read it before touching the Dockerfiles or the `justfile`'s
-  image/registry recipes. How `cbox-base` gets built and published by CI, its tags, and
+  image/registry recipes. How `cbox-base` (and its Rust variant `cbox-base-rust`) gets built and published by CI, its tags, and
   `build-local` are in `docs/design/images.md`. Environment-variable passthrough and GitHub secret substitution are
   `cbox`'s own model, not the justfile's: `env::passthrough_vars()` (a Rust function in
   `cbox/src/env.rs`, not a justfile variable) and `cbox/src/secrets.rs`, documented in

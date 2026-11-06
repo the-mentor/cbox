@@ -1,7 +1,7 @@
 name: base-image
 
-# Builds base/ as a multi-arch image (amd64 + arm64, each on a native runner,
-# no QEMU). ci.yml calls it for PRs, release.yml after a release; the weekly
+# Builds base/ and base-rust/ (layered on it) as multi-arch images via
+# image.yml. ci.yml calls it for PRs, release.yml after a release; the weekly
 # schedule refreshes :latest between releases, because base/ installs the
 # newest Claude Code/gh/apt packages at build time and nothing else would
 # pick those up. See docs/design/images.md.
@@ -24,8 +24,8 @@ on:
         default: ''
     outputs:
       image:
-        description: Full reference of the first pushed tag; empty when not pushed
-        value: ${{ jobs.merge.outputs.image }}
+        description: Full reference of cbox-base's first pushed tag; empty when not pushed
+        value: ${{ jobs.base.outputs.image }}
   schedule:
     - cron: '17 6 * * 1'
   workflow_dispatch:
@@ -39,9 +39,6 @@ permissions:
   contents: read
   packages: write
 
-env:
-  IMAGE: ghcr.io/the-mentor/cbox-base
-
 jobs:
   # Normalizes the three triggers into one set of values. Scheduled and manual
   # runs are the weekly refresh: dated tag + latest (or the tags typed into the
@@ -51,7 +48,7 @@ jobs:
   # and that ref must never move :latest.
   # Tags are split on commas or whitespace (the UI form is single-line) and
   # checked against Docker's tag grammar here, so a typo fails in seconds
-  # instead of after both architecture builds.
+  # instead of after the image builds.
   prep:
     runs-on: ubuntu-26.04
     outputs:
@@ -103,105 +100,28 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "tags=$(echo "$tags" | tr '\n' ' ') push=$push no-cache=$no_cache ref=${ref:-<trigger>}"
 
-  build:
+  base:
     needs: prep
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - platform: linux/amd64
-            arch: amd64
-            runner: ubuntu-26.04
-          - platform: linux/arm64
-            arch: arm64
-            runner: ubuntu-26.04-arm
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.prep.outputs.ref }}
-          persist-credentials: false
+    uses: ./.github/workflows/image.yml
+    with:
+      context: base
+      image: ghcr.io/the-mentor/cbox-base
+      tags: ${{ needs.prep.outputs.tags }}
+      push: ${{ needs.prep.outputs.push == 'true' }}
+      no-cache: ${{ needs.prep.outputs.no-cache == 'true' }}
+      ref: ${{ needs.prep.outputs.ref }}
 
-      - id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        with:
-          images: ${{ env.IMAGE }}
-
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      # Fork and Dependabot PR tokens can't write packages; callers pass
-      # push=false for them, so never log in then.
-      - if: needs.prep.outputs.push == 'true'
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Pushes by digest only; the merge job attaches tags once both
-      # architectures exist, so a half-built run never moves a tag.
-      - id: build
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: base
-          platforms: ${{ matrix.platform }}
-          labels: ${{ steps.meta.outputs.labels }}
-          no-cache: ${{ needs.prep.outputs.no-cache == 'true' }}
-          cache-from: type=gha,scope=base-${{ matrix.arch }}
-          cache-to: type=gha,scope=base-${{ matrix.arch }},mode=max
-          outputs: ${{ needs.prep.outputs.push == 'true' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || 'type=cacheonly' }}
-
-      - if: needs.prep.outputs.push == 'true'
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          mkdir -p /tmp/digests
-          touch "/tmp/digests/${DIGEST#sha256:}"
-
-      - if: needs.prep.outputs.push == 'true'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: digests-${{ matrix.arch }}
-          path: /tmp/digests/*
-          if-no-files-found: error
-          retention-days: 1
-
-  merge:
-    needs: [prep, build]
-    if: needs.prep.outputs.push == 'true'
-    runs-on: ubuntu-26.04
-    outputs:
-      image: ${{ steps.first.outputs.image }}
-    steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          path: /tmp/digests
-          pattern: digests-*
-          merge-multiple: true
-
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - id: first
-        env:
-          TAGS: ${{ needs.prep.outputs.tags }}
-        run: |
-          set -eu
-          args=""
-          for t in $TAGS; do args="$args -t $IMAGE:$t"; done
-          srcs=""
-          for d in /tmp/digests/*; do srcs="$srcs $IMAGE@sha256:$(basename "$d")"; done
-          # shellcheck disable=SC2086 # word-splitting the -t/source lists is intended
-          docker buildx imagetools create $args $srcs
-          first="$IMAGE:$(echo $TAGS | awk '{print $1}')"
-          # A tag missing either architecture would boot on one host type only.
-          plats="$(docker buildx imagetools inspect "$first" --format '{{range .Manifest.Manifests}}{{.Platform.Architecture}} {{end}}')"
-          echo "$first platforms: $plats"
-          case "$plats" in *amd64*) ;; *) echo "::error::$first has no amd64 image"; exit 1 ;; esac
-          case "$plats" in *arm64*) ;; *) echo "::error::$first has no arm64 image"; exit 1 ;; esac
-          echo "image=$first" >> "$GITHUB_OUTPUT"
+  # Layered on the base this run just pushed, so both get the same tags
+  # (cbox-base's move first); when nothing was pushed (fork/Dependabot PRs)
+  # it checks against :latest.
+  rust:
+    needs: [prep, base]
+    uses: ./.github/workflows/image.yml
+    with:
+      context: base-rust
+      image: ghcr.io/the-mentor/cbox-base-rust
+      base-image: ${{ needs.base.outputs.image || 'ghcr.io/the-mentor/cbox-base:latest' }}
+      tags: ${{ needs.prep.outputs.tags }}
+      push: ${{ needs.prep.outputs.push == 'true' }}
+      no-cache: ${{ needs.prep.outputs.no-cache == 'true' }}
+      ref: ${{ needs.prep.outputs.ref }}

@@ -1,0 +1,151 @@
+name: image
+
+# Builds one image directory as a multi-arch image (amd64 + arm64, each on a
+# native runner, no QEMU) and, when pushing, tags both digests at once.
+# Called only by base-image.yml, which validates the tags first. See
+# docs/design/images.md.
+on:
+  workflow_call:
+    inputs:
+      context:
+        description: Directory to build, e.g. base
+        type: string
+        required: true
+      image:
+        description: Repository to push to, e.g. ghcr.io/the-mentor/cbox-base
+        type: string
+        required: true
+      base-image:
+        description: BASE_IMAGE build arg; empty leaves the Dockerfile's default
+        type: string
+        default: ''
+      tags:
+        description: Validated tags, newline-separated
+        type: string
+        required: true
+      push:
+        type: boolean
+        required: true
+      no-cache:
+        type: boolean
+        default: false
+      ref:
+        type: string
+        default: ''
+    outputs:
+      image:
+        description: Full reference of the first pushed tag; empty when not pushed
+        value: ${{ jobs.merge.outputs.image }}
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ${{ inputs.image }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-26.04
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-26.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Fork and Dependabot PR tokens can't write packages; callers pass
+      # push=false for them, so never log in then. Logging in also lets a
+      # layered image pull its just-pushed (possibly private) :pr-<n> base.
+      - if: inputs.push
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pushes by digest only; the merge job attaches tags once both
+      # architectures exist, so a half-built run never moves a tag.
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ inputs.context }}
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: ${{ inputs.base-image && format('BASE_IMAGE={0}', inputs.base-image) || '' }}
+          pull: ${{ inputs.base-image != '' }}
+          no-cache: ${{ inputs.no-cache }}
+          cache-from: type=gha,scope=${{ inputs.context }}-${{ matrix.arch }}
+          cache-to: type=gha,scope=${{ inputs.context }}-${{ matrix.arch }},mode=max
+          outputs: ${{ inputs.push && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || 'type=cacheonly' }}
+
+      - if: inputs.push
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - if: inputs.push
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.context }}-digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: build
+    if: inputs.push
+    runs-on: ubuntu-26.04
+    outputs:
+      image: ${{ steps.first.outputs.image }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: /tmp/digests
+          pattern: ${{ inputs.context }}-digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: first
+        env:
+          TAGS: ${{ inputs.tags }}
+        run: |
+          set -eu
+          args=""
+          for t in $TAGS; do args="$args -t $IMAGE:$t"; done
+          srcs=""
+          for d in /tmp/digests/*; do srcs="$srcs $IMAGE@sha256:$(basename "$d")"; done
+          # shellcheck disable=SC2086 # word-splitting the -t/source lists is intended
+          docker buildx imagetools create $args $srcs
+          first="$IMAGE:$(echo $TAGS | awk '{print $1}')"
+          # A tag missing either architecture would boot on one host type only.
+          plats="$(docker buildx imagetools inspect "$first" --format '{{range .Manifest.Manifests}}{{.Platform.Architecture}} {{end}}')"
+          echo "$first platforms: $plats"
+          case "$plats" in *amd64*) ;; *) echo "::error::$first has no amd64 image"; exit 1 ;; esac
+          case "$plats" in *arm64*) ;; *) echo "::error::$first has no arm64 image"; exit 1 ;; esac
+          echo "image=$first" >> "$GITHUB_OUTPUT"

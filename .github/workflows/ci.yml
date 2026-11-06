@@ -12,7 +12,9 @@ env:
   # Incremental artifacts are useless on a fresh runner and bloat the cache.
   CARGO_INCREMENTAL: 0
   # Pinned so every build (and so every release binary) uses one compiler and
-  # the cache key tracks it. Bump by hand.
+  # the cache key tracks it. Renovate bumps it together with
+  # base-rust/Dockerfile's copy (same depName, so one PR).
+  # renovate: datasource=github-releases depName=rust-lang/rust
   RUST_VERSION: 1.98.1
 
 jobs:
@@ -51,7 +53,7 @@ jobs:
             rust=true base=true custom=true
           else
             match '^(cbox/|\.github/workflows/ci\.yml$|CHANGELOG\.md$)' && rust=true || rust=false
-            match '^(base/|\.github/workflows/(base-image|ci)\.yml$)' && base=true || base=false
+            match '^(base/|base-rust/|\.github/workflows/(base-image|image|ci)\.yml$)' && base=true || base=false
             match '^(custom/|\.github/workflows/ci\.yml$)' && custom=true || custom=false
             # A new base can break custom/, so check them together.
             [ "$base" = true ] && custom=true
@@ -126,8 +128,9 @@ jobs:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
 
-  # Same-repo PRs publish :pr-<number> so a base/ change can be tried before
-  # merge (CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:pr-<n> just build).
+  # Same-repo PRs publish cbox-base and cbox-base-rust as :pr-<number> so a
+  # base/ or base-rust/ change can be tried before merge
+  # (CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:pr-<n> just build).
   # Fork and Dependabot tokens can't write packages, so those only build.
   # Publishing from main happens in release.yml and the weekly schedule.
   base-image:

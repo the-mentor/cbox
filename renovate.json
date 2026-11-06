@@ -1,5 +1,5 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["customManagers:dockerfileVersions"],
+  "extends": ["customManagers:dockerfileVersions", "customManagers:githubActionsVersions"],
   "enabledManagers": ["custom.regex"]
 }
