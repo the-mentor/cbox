@@ -6,6 +6,10 @@ pub trait SecretStore {
     fn label(&self) -> &'static str;
     fn max_entry_bytes(&self) -> Option<usize>;
     fn get(&self, name: &str) -> Result<Option<StoredSecret>>;
+    /// Whether an entry exists, without parsing it (a corrupt entry still counts).
+    fn exists(&self, name: &str) -> Result<bool> {
+        Ok(self.get(name)?.is_some())
+    }
     fn put(&self, name: &str, s: &StoredSecret) -> Result<()>;
     /// Returns whether an entry existed.
     fn delete(&self, name: &str) -> Result<bool>;
@@ -39,6 +43,15 @@ impl SecretStore for KeyringStore {
                 StoredSecret::from_json(&json).with_context(|| format!("secret {name:?} in {}", self.label))?,
             )),
             Err(Error::NoEntry | Error::NoDefaultStore) => Ok(None),
+            Err(e) => Err(anyhow!("reading secret {name:?} from {}: {e}", self.label)),
+        }
+    }
+    fn exists(&self, name: &str) -> Result<bool> {
+        match entry(name)?.get_password() {
+            Ok(_) => Ok(true),
+            // An entry whose bytes are not UTF-8 still exists.
+            Err(Error::BadEncoding(_)) => Ok(true),
+            Err(Error::NoEntry | Error::NoDefaultStore) => Ok(false),
             Err(e) => Err(anyhow!("reading secret {name:?} from {}: {e}", self.label)),
         }
     }

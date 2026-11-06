@@ -24,7 +24,7 @@ pub fn check_absent(store: &dyn SecretStore, index_path: &Path, name: &str) -> R
 /// True if the store entry or the index line exists.
 pub fn exists(store: &dyn SecretStore, index_path: &Path, name: &str) -> Result<bool> {
     validate_name(name)?;
-    Ok(store.get(name)?.is_some() || Index::load(index_path)?.names.contains(name))
+    Ok(store.exists(name)? || Index::load(index_path)?.names.contains(name))
 }
 
 pub fn create(store: &dyn SecretStore, index_path: &Path, name: &str, s: StoredSecret) -> Result<()> {
@@ -235,6 +235,39 @@ mod tests {
         assert_eq!(e, "secret \"nope\" not found");
         assert!(!exists(&st, &d.index(), "nope").unwrap());
         assert!(exists(&st, &d.index(), "keep").unwrap());
+    }
+
+    fn corrupt_delete_case(raw: &str, indexed: bool) {
+        let _l = crate::test_env_lock::lock();
+        let (st, d) = setup(None);
+        keyring_core::Entry::new("cbox", "bad").unwrap().set_password(raw).unwrap();
+        if indexed {
+            let mut i = Index::load(&d.index()).unwrap();
+            i.insert("bad");
+            i.save(&d.index()).unwrap();
+        }
+        assert!(exists(&st, &d.index(), "bad").unwrap());
+        delete(&st, &d.index(), "bad").unwrap();
+        assert!(matches!(keyring_core::Entry::new("cbox", "bad").unwrap().get_password(), Err(keyring_core::Error::NoEntry)));
+        assert!(!Index::load(&d.index()).unwrap().names.contains("bad"));
+        assert!(!exists(&st, &d.index(), "bad").unwrap());
+    }
+
+    #[test]
+    fn corrupt_entries_are_present_and_deletable() {
+        for raw in ["CORRUPT-TEXT{", r#"{"value":"x","hosts":"sk-LEAKME","env":"E"}"#] {
+            corrupt_delete_case(raw, true);
+            corrupt_delete_case(raw, false); // not in the index
+        }
+    }
+
+    #[test]
+    fn create_over_a_corrupt_entry_refuses_without_leaking() {
+        let _l = crate::test_env_lock::lock();
+        let (st, d) = setup(None);
+        keyring_core::Entry::new("cbox", "bad").unwrap().set_password(r#"{"value":"x","hosts":"sk-LEAKME","env":"E"}"#).unwrap();
+        let e = format!("{:#}", create(&st, &d.index(), "bad", sec()).unwrap_err());
+        assert!(!e.contains("LEAKME") && !e.contains("is valid"), "{e}");
     }
 
     #[test]

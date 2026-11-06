@@ -206,7 +206,8 @@ user's; each is small enough to change in review.
   at `edit`. It checks the store entry, not the index, so an orphan entry without
   an index line reports "exists, run `delete`". Order: write the store entry,
   then the index. `delete` removes the store entry, then the name, and succeeds
-  if either is already gone; if neither exists it fails with `secret "x" not found`.
+  if either is already gone; if neither exists it fails with `secret "x" not found`. Existence is probed without
+  parsing the entry, so a corrupt entry can still be deleted.
 - **Value input.** Strip one trailing newline from piped input; reject an empty
   value. `edit` with only host or env flags does not prompt for a value; `edit`
   with no flags replaces the value (hidden prompt or piped stdin); with any flag the value is never read.
