@@ -58,9 +58,9 @@ head -c 2561 /dev/zero | tr '\0' 'a' | ps set "$T" >/dev/null; rc=$?
 # 5. a much larger encoded command still runs (headroom over the real ~7 KB)
 LEN=$(encode get "$T" | wc -c)
 printf '%s' "$S1" | ps set "$T" >/dev/null
-GOT=$(ps get "$T" 20000 </dev/null; echo x); GOT=${GOT%x}
-BIG=$(encode get "$T" 20000 | wc -c)
-[ "$GOT" = "$S1" ] && ok "5 encoded command works at $BIG chars (real size $LEN)" || bad "5 large command" "size $BIG: $(head -c 200 "$ERRF")"
+GOT=$(ps get "$T" 8000 </dev/null; echo x); GOT=${GOT%x}
+BIG=$(encode get "$T" 8000 | wc -c)
+[ "$GOT" = "$S1" ] && ok "5 encoded command works at $BIG chars (real size $LEN; Windows caps a command line at 32767)" || bad "5 large command" "size $BIG: $(head -c 200 "$ERRF")"
 
 # 6. the secret never appears in any process command line while set runs
 M="MARKER-$ID"
