@@ -16,7 +16,7 @@ pub fn check_absent(store: &dyn SecretStore, index_path: &Path, name: &str) -> R
         if Index::load(index_path)?.names.contains(name) {
             bail!("secret {name:?} already exists; run `cbox secret edit {name}` to change it");
         }
-        bail!("secret {name:?} already exists in {} but is not in the index; run `cbox secret delete {name}` first", store.label());
+        bail!("secret {name:?} already exists in {} but is not in the index; run `cbox secret edit {name}` to keep it (this re-adds it to the index), or `cbox secret delete {name}` to remove it", store.label());
     }
     Ok(())
 }
@@ -81,7 +81,7 @@ fn add_hosts(hosts: &mut Vec<String>, add: Vec<String>) {
 }
 
 /// Read-modify-write of one entry; nothing is written unless every check passes.
-pub fn edit(store: &dyn SecretStore, name: &str, c: EditChanges) -> Result<EditOutcome> {
+pub fn edit(store: &dyn SecretStore, index_path: &Path, name: &str, c: EditChanges) -> Result<EditOutcome> {
     validate_name(name)?;
     let mut s = store.get(name)?.ok_or_else(|| anyhow!("secret {name:?} not found; run cbox secret create {name}"))?;
     let old_hosts = s.hosts.clone();
@@ -102,6 +102,16 @@ pub fn edit(store: &dyn SecretStore, name: &str, c: EditChanges) -> Result<EditO
     }
     check_size(&s.to_json(), store.max_entry_bytes())?;
     store.put(name, &s)?;
+    // Repairs a lost index; the file is only rewritten when the name is missing.
+    let repair = || -> Result<()> {
+        let mut index = Index::load(index_path)?;
+        if !index.names.contains(name) {
+            index.insert(name);
+            index.save(index_path)?;
+        }
+        Ok(())
+    };
+    repair().map_err(|e| anyhow!("secret {name:?} was updated, but the index could not be written: {e:#}"))?;
     Ok(EditOutcome { old_hosts, new_hosts: s.hosts })
 }
 
@@ -174,12 +184,12 @@ mod tests {
     }
 
     #[test]
-    fn create_over_an_orphan_store_entry_says_delete() {
+    fn create_over_an_orphan_store_entry_offers_edit_or_delete() {
         let _l = crate::test_env_lock::lock();
         let (st, d) = setup(None);
         st.put("openai", &sec()).unwrap();
         let e = create(&st, &d.index(), "openai", sec()).unwrap_err().to_string();
-        assert!(e.contains("cbox secret delete"), "{e}");
+        assert!(e.contains("cbox secret delete") && e.contains("cbox secret edit"), "{e}");
     }
 
     #[test]
@@ -270,8 +280,8 @@ mod tests {
                 }
                 let before = std::fs::read(d.index()).ok();
                 let e = format!("{:#}", create(&st, &d.index(), "bad", sec()).unwrap_err());
-                let hint = if in_index { "cbox secret edit" } else { "cbox secret delete" };
-                assert!(e.contains("already exists") && e.contains(hint), "{e}");
+                assert!(e.contains("already exists") && e.contains("cbox secret edit"), "{e}");
+                assert_eq!(e.contains("cbox secret delete"), !in_index, "{e}");
                 assert!(!e.contains("LEAKME") && !e.contains("invalid stored secret JSON"), "{e}");
                 assert_eq!(entry.get_password().unwrap(), raw);
                 assert_eq!(std::fs::read(d.index()).ok(), before);
@@ -302,12 +312,12 @@ mod tests {
     #[test]
     fn add_remove_adds_then_removes() {
         let _l = crate::test_env_lock::lock();
-        let (st, _d) = setup(None);
+        let (st, d) = setup(None);
         put_sec(&st, &["a.com"]);
-        edit(&st, "k", ch(HostChange { add: v(&["b.com"]), remove: v(&["a.com"]), ..Default::default() })).unwrap();
+        edit(&st, &d.index(), "k", ch(HostChange { add: v(&["b.com"]), remove: v(&["a.com"]), ..Default::default() })).unwrap();
         assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["b.com"]));
         // Adding and removing the same host empties the list: error, nothing written.
-        let e = edit(&st, "k", ch(HostChange { add: v(&["b.com"]), remove: v(&["b.com"]), ..Default::default() })).unwrap_err().to_string();
+        let e = edit(&st, &d.index(), "k", ch(HostChange { add: v(&["b.com"]), remove: v(&["b.com"]), ..Default::default() })).unwrap_err().to_string();
         assert!(e.contains("at least one host"), "{e}");
         assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["b.com"]));
     }
@@ -345,9 +355,9 @@ mod tests {
     #[test]
     fn host_replaces_the_whole_list() {
         let _l = crate::test_env_lock::lock();
-        let (st, _d) = setup(None);
+        let (st, d) = setup(None);
         put_sec(&st, &["a.com", "b.com"]);
-        let o = edit(&st, "k", ch(HostChange { replace: Some(v(&["c.com"])), ..Default::default() })).unwrap();
+        let o = edit(&st, &d.index(), "k", ch(HostChange { replace: Some(v(&["c.com"])), ..Default::default() })).unwrap();
         assert_eq!((o.old_hosts, o.new_hosts), (v(&["a.com", "b.com"]), v(&["c.com"])));
         assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["c.com"]));
     }
@@ -355,28 +365,28 @@ mod tests {
     #[test]
     fn add_host_dedupes() {
         let _l = crate::test_env_lock::lock();
-        let (st, _d) = setup(None);
+        let (st, d) = setup(None);
         put_sec(&st, &["a.com"]);
-        edit(&st, "k", ch(HostChange { add: v(&["a.com", "b.com"]), ..Default::default() })).unwrap();
+        edit(&st, &d.index(), "k", ch(HostChange { add: v(&["a.com", "b.com"]), ..Default::default() })).unwrap();
         assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["a.com", "b.com"]));
     }
 
     #[test]
     fn remove_host_removes_only_that_host() {
         let _l = crate::test_env_lock::lock();
-        let (st, _d) = setup(None);
+        let (st, d) = setup(None);
         put_sec(&st, &["a.com", "b.com"]);
-        edit(&st, "k", ch(HostChange { remove: v(&["a.com", "zzz.com"]), ..Default::default() })).unwrap();
+        edit(&st, &d.index(), "k", ch(HostChange { remove: v(&["a.com", "zzz.com"]), ..Default::default() })).unwrap();
         assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["b.com"]));
     }
 
     #[test]
     fn edit_refuses_to_empty_the_host_list() {
         let _l = crate::test_env_lock::lock();
-        let (st, _d) = setup(None);
+        let (st, d) = setup(None);
         put_sec(&st, &["a.com"]);
         for c in [HostChange { remove: v(&["a.com"]), ..Default::default() }, HostChange { replace: Some(vec![]), ..Default::default() }] {
-            let e = edit(&st, "k", ch(c)).unwrap_err().to_string();
+            let e = edit(&st, &d.index(), "k", ch(c)).unwrap_err().to_string();
             assert!(e.contains("at least one host"), "{e}");
         }
         assert_eq!(st.get("k").unwrap().unwrap().hosts, v(&["a.com"]));
@@ -385,20 +395,20 @@ mod tests {
     #[test]
     fn edit_replaces_value_and_env() {
         let _l = crate::test_env_lock::lock();
-        let (st, _d) = setup(None);
+        let (st, d) = setup(None);
         put_sec(&st, &["a.com"]);
-        edit(&st, "k", EditChanges { value: Some("v2".into()), hosts: HostChange::default(), env: Some("NEW".into()) }).unwrap();
+        edit(&st, &d.index(), "k", EditChanges { value: Some("v2".into()), hosts: HostChange::default(), env: Some("NEW".into()) }).unwrap();
         let s = st.get("k").unwrap().unwrap();
         assert_eq!((s.value.as_str(), s.env.as_str()), ("v2", "NEW"));
-        assert!(edit(&st, "k", EditChanges { value: None, hosts: HostChange::default(), env: Some("1x".into()) }).is_err());
+        assert!(edit(&st, &d.index(), "k", EditChanges { value: None, hosts: HostChange::default(), env: Some("1x".into()) }).is_err());
     }
 
     #[test]
     fn edit_checks_size_and_writes_nothing_when_over_limit() {
         let _l = crate::test_env_lock::lock();
-        let (st, _d) = setup(Some(100));
+        let (st, d) = setup(Some(100));
         put_sec(&st, &["a.com"]);
-        let e = edit(&st, "k", EditChanges { value: Some("x".repeat(200)), hosts: HostChange::default(), env: None }).unwrap_err().to_string();
+        let e = edit(&st, &d.index(), "k", EditChanges { value: Some("x".repeat(200)), hosts: HostChange::default(), env: None }).unwrap_err().to_string();
         assert!(e.contains("limit") && !e.contains("xxxx"), "{e}");
         assert_eq!(st.get("k").unwrap().unwrap().value, "v1");
     }
@@ -406,8 +416,43 @@ mod tests {
     #[test]
     fn edit_missing_secret_says_create() {
         let _l = crate::test_env_lock::lock();
-        let (st, _d) = setup(None);
-        let e = edit(&st, "x", ch(HostChange::default())).unwrap_err().to_string();
+        let (st, d) = setup(None);
+        let e = edit(&st, &d.index(), "x", ch(HostChange::default())).unwrap_err().to_string();
         assert_eq!(e, "secret \"x\" not found; run cbox secret create x");
+    }
+
+    #[test]
+    fn edit_re_adds_an_unindexed_secret_to_the_index() {
+        let _l = crate::test_env_lock::lock();
+        let (st, d) = setup(None);
+        put_sec(&st, &["a.com"]);
+        assert!(list(&st, &d.index()).unwrap().is_empty());
+        edit(&st, &d.index(), "k", ch(HostChange::default())).unwrap();
+        let rows = list(&st, &d.index()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].name, "k");
+    }
+
+    #[test]
+    fn edit_leaves_the_index_file_untouched_when_the_name_is_indexed() {
+        let _l = crate::test_env_lock::lock();
+        let (st, d) = setup(None);
+        create(&st, &d.index(), "k", sec()).unwrap();
+        let before = std::fs::read(d.index()).unwrap();
+        edit(&st, &d.index(), "k", ch(HostChange { add: v(&["b.com"]), ..Default::default() })).unwrap();
+        assert_eq!(std::fs::read(d.index()).unwrap(), before);
+    }
+
+    #[test]
+    fn edit_reports_an_index_save_failure_as_updated_without_the_value() {
+        let _l = crate::test_env_lock::lock();
+        let (st, d) = setup(None);
+        put_sec(&st, &["a.com"]);
+        std::fs::create_dir_all(&d.0).unwrap();
+        std::fs::write(d.0.join("cbox"), "x").unwrap(); // parent of the index is a file
+        let c = EditChanges { value: Some("sk-NEWVALUE".into()), hosts: HostChange::default(), env: None };
+        let e = format!("{:#}", edit(&st, &d.index(), "k", c).unwrap_err());
+        assert!(e.contains("updated") && !e.contains("NEWVALUE"), "{e}");
+        assert_eq!(st.get("k").unwrap().unwrap().value, "sk-NEWVALUE");
     }
 }

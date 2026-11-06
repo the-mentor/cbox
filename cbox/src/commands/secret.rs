@@ -165,7 +165,7 @@ pub fn run(cmd: SecretCmd) -> Result<()> {
                     rpassword::prompt_password(format!("New value for \"{name}\": "))
                 })
             })?;
-            let o = secretstore::edit(&*store, &name, c)?;
+            let o = secretstore::edit(&*store, &index, &name, c)?;
             if let Some(l) = hosts_line(&o) {
                 println!("{l}");
             }

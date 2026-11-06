@@ -81,6 +81,8 @@ Details decided by the user:
   `edit NAME` with no flags replaces the value. `--host` conflicts with
   `--add-host` and `--remove-host` (clap error); the latter two may be combined.
   Every edit is a read-modify-write of the one entry, size-checked before `put`.
+  After a successful `put`, `edit` adds the name to the index if it is missing
+  (repairing a lost index); an index write failure reports the secret as updated.
 - The value is entered at a hidden prompt, or read from stdin when piped
   (`pbpaste | cbox secret create openai --host api.openai.com --env OPENAI_API_KEY`).
 - `cbox secret create --help` shows a few examples (prompt, several hosts, piped).
@@ -205,7 +207,8 @@ user's; each is small enough to change in review.
   reported as "the GitHub token (GH_TOKEN/GITHUB_TOKEN)").
 - **Create and delete.** `create` on a name that already exists errors and points
   at `edit`. It checks the store entry, not the index, so an orphan entry without
-  an index line reports "exists, run `delete`". Order: write the store entry,
+  an index line reports "exists but not in the index" and offers `edit` (keeps it)
+  or `delete`. Order: write the store entry,
   then the index. `delete` removes the store entry, then the name, and succeeds
   if either is already gone; if neither exists it fails with
   `secret "x" not found`. Existence is probed without parsing the entry, so a
