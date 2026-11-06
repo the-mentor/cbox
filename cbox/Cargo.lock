@@ -296,9 +296,9 @@ dependencies = [
 
 [[package]]
 name = "boxlite"
-version = "0.10.8"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b73fa00ef0248c2d2caf8d674d7b7dd266783b27b0c13cc6bb44a7af71cea658"
+checksum = "0ce36a3ba65cc81bd83c31c2f1397d5e42735248754b3347c722f5d5c54a1f8a"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -372,9 +372,9 @@ dependencies = [
 
 [[package]]
 name = "boxlite-shared"
-version = "0.10.8"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6be94631f58e0b39b7444e66109917fef9480277dcc399ded78b41b8bb760083"
+checksum = "0c5ce9532367f4d917c83b6e609557d6b95ade29b1e80ff2091b243793236564"
 dependencies = [
  "futures",
  "prost",
@@ -390,9 +390,9 @@ dependencies = [
 
 [[package]]
 name = "bubblewrap-sys"
-version = "0.10.8"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d998b7dae7b9838d79cfa1f6413b4127b928631c6a7065812eff29eebc5a9a4"
+checksum = "5839581d996951646e745a0a6ccadd74ea98b23db0ed1d48e2941e41c27983a0"
 dependencies = [
  "num_cpus",
 ]
@@ -891,9 +891,9 @@ dependencies = [
 
 [[package]]
 name = "e2fsprogs-sys"
-version = "0.10.8"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30a12b3b11f33c6714b5d3a89c879ec1d9f5ff54bac6efeaa282d1cac8802352"
+checksum = "078b4870bb3a137fbf309b589e6263ad3c190f705111c5e758dc07c368323346"
 dependencies = [
  "num_cpus",
 ]
@@ -1730,9 +1730,9 @@ checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "libkrun-sys"
-version = "0.10.8"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c1164037e9a5dfb2a1058d830dddf11cb22880a95d25cec0b4904496f0ef82c"
+checksum = "afc9a79868f4a3ba112f340671230b13e33d39e65db557e978671f6419982e8d"
 dependencies = [
  "libc",
  "num_cpus",
@@ -3140,7 +3140,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -3842,7 +3842,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

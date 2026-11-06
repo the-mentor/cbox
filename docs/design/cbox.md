@@ -15,7 +15,7 @@ Claims are tagged **verified** (measured against `boxlite 0.9.7`, the CLI, or a 
 **read from source** (asserted by the crate's own code but not exercised), or **open**. The
 split is load-bearing: two of the open items can still change the design.
 
-**The crate is now pinned at `boxlite 0.10.8`** (see below for what 0.10.5, 0.10.7 and 0.10.8 changed). The
+**The crate is now pinned at `boxlite 0.11.0`** (see below for what 0.10.5, 0.10.7, 0.10.8 and 0.11.0 changed). The
 measurements above were taken at 0.9.7. The 0.10.4 upgrade was checked against its source rather than re-measured. Three things
 matter to cbox. First, `auto_remove` is deprecated in favor of `auto_delete`, and cbox sets
 `auto_delete: Some(0)` explicitly, because `None` falls back to `auto_remove`, which
@@ -58,6 +58,16 @@ new `image_registry_proxy` field, a proxy for registry pulls only, and cbox sets
 which leaves pulls following the host's `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` as before.
 Registry pulls now also trust the system certificate store on top of the bundled roots. The
 image cache and tag refresh from 0.10.7 are unchanged, and so is the SQLite schema (v10).
+
+**0.11.0**, checked against its source, also changes little that reaches cbox; most of the
+release is SSH control, cloud and agent APIs that cbox does not use. Creating a new box now
+rejects `cpus` above 16, the most the bundled guest kernel brings online (`CONFIG_NR_CPUS=16`,
+boxlite#1778). So `cbox up --cpus 17` fails with BoxLite's own `InvalidArgument` naming `cpus`,
+where 0.10.8 booted it and the guest quietly used 16. A box already created with more still
+starts, with a warning. `NetworkHandle::tunnel` now takes a `TunnelOptions` and accepts only
+localhost or the guest IP as its target; cbox does not call it. A guest exec error with reason
+`invalid_argument` (an unknown exec user or group) now surfaces as
+`BoxliteError::InvalidArgument` rather than `Internal`. The SQLite schema is unchanged (v10).
 
 **Where the evidence lives.** Every **verified** claim below states its measurement inline, so
 this document stands on its own. The measurements were originally taken by two throwaway
