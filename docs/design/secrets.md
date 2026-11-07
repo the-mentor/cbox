@@ -134,8 +134,8 @@ re-validates each), so they cost one call per command; `create`, `edit` and `del
 to three calls. If one entry fails with a Windows error other than not-found, `list` shows that
 row as an error and the other rows normally, and `up` fails with an error naming that entry
 (after one extra single read to get the cause). The script operations, including `getmany`
-and the `!` marker, passed the spike on real Windows PowerShell 5.1 (spikes/encodedcommand on
-the scratch/secrets-plan branch, 19/19). The Rust store was round-tripped by hand on WSL,
+and the `!` marker, were checked on real Windows PowerShell 5.1 with a standalone script (19 checks,
+not part of this repository). The Rust store was round-tripped by hand on WSL,
 including batched `list` and `up` with one and with three secrets.
 Credential Manager caps a value at 2560 bytes (fine for tokens). It needs WSL interop and
 `powershell.exe` on PATH; if the program cannot be started, the error points at both.
@@ -271,7 +271,7 @@ user's; each is small enough to change in review.
   lowercase letters, digits, `-` and `_` (and `encode_command` re-checks it). The secret still travels over stdin
   only. This removes the temporary file, `wslpath`, the UNC script path and
   `-ExecutionPolicy Bypass`. The same script and flags were verified on Windows
-  PowerShell 5.1 under WSL by a spike (stdin free, UTF-8, not-found as exit code 3, other failures as exit code 1, long command line); the Rust store was then round-tripped by hand on WSL (create hidden and piped, duplicate, list,
+  PowerShell 5.1 under WSL by a standalone script (stdin free, UTF-8, not-found as exit code 3, other failures as exit code 1, long command line); the Rust store was then round-tripped by hand on WSL (create hidden and piped, duplicate, list,
   edit with every flag and value-only, not-found for get, edit, delete and `up`, the size limit,
   `up --secret` placeholder). Not verified: a non-English locale, WSL interop off, PowerShell blocked by
   policy or Constrained Language Mode, a hung PowerShell (there is no timeout). This protects against

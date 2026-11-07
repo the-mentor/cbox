@@ -3,8 +3,8 @@
 //! The script (`wincred.ps1`) is compiled into the binary and handed to PowerShell
 //! as base64 on the command line, so no script file ever exists for anyone to edit.
 //! The secret travels over stdin only: never argv (visible in `ps`), never an error.
-//! The script and flags passed a spike on Windows PowerShell 5.1 (19/19 including `getmany`
-//! and the `!` marker; spikes/encodedcommand on the scratch/secrets-plan branch), and this
+//! The script and flags were checked on real Windows PowerShell 5.1 with a standalone script
+//! (19 checks, including `getmany` and the `!` marker), and this
 //! module was round-tripped by hand on WSL (create, duplicate, list, edit, not-found, size
 //! limit, `up --secret`, and batched `list` and `up` with one and with three secrets).
 //! Not verified: a non-English locale, interop off, PowerShell blocked by policy or
