@@ -3,11 +3,12 @@
 //! The script (`wincred.ps1`) is compiled into the binary and handed to PowerShell
 //! as base64 on the command line, so no script file ever exists for anyone to edit.
 //! The secret travels over stdin only: never argv (visible in `ps`), never an error.
-//! The script and flags were verified on Windows PowerShell 5.1 by a spike (11/11,
-//! spikes/encodedcommand on the scratch branch), and this module was round-tripped by hand on
-//! WSL (create, duplicate, list, edit, not-found, size limit, `up --secret`). Not verified:
-//! a non-English locale, interop off, PowerShell blocked by policy or Constrained Language
-//! Mode, and a hung PowerShell (there is no timeout).
+//! The script and flags passed a spike on Windows PowerShell 5.1 (19/19 including `getmany`
+//! and the `!` marker; spikes/encodedcommand on the scratch/secrets-plan branch), and this
+//! module was round-tripped by hand on WSL (create, duplicate, list, edit, not-found, size
+//! limit, `up --secret`, and batched `list` and `up` with one and with three secrets).
+//! Not verified: a non-English locale, interop off, PowerShell blocked by policy or
+//! Constrained Language Mode, a hung PowerShell (there is no timeout), a macOS build.
 //! Exit code 3 means "no such entry" (locale-proof); any other non-zero exit is an error.
 
 use super::store::SecretStore;
@@ -162,7 +163,10 @@ impl SecretStore for WinCredStore {
                 };
                 match entry.as_str() {
                     "-" => return Ok(None),
-                    "!" => bail!("reading secret {name:?} from {LABEL} failed"),
+                    "!" => {
+                        // Error path only: one single get to learn the cause; its value is never used.
+                        return Err(self.get(name).err().unwrap_or_else(|| anyhow!("reading secret {name:?} from {LABEL} failed")));
+                    }
                     _ => {}
                 }
                 let b64 = entry;
@@ -261,7 +265,7 @@ mod tests {
         std::fs::write(
             &sh,
             "#!/bin/sh\nd=$(dirname \"$0\")\necho x >> \"$d/count\"\ncat > \"$d/stdin\"\nprintf '%s\\n' \"$@\" > \"$d/args\"\n\
-             s=$(cat \"$d/scenario\")\ncase \"$s\" in\n ok:*) printf '%s' \"${s#ok:}\"; exit 0;;\n nf) exit 3;; bad:*) printf '%s' \"${s#bad:}\"; echo oops >&2; exit 1;;\n fail:*) printf '%s\\r\\n' \"${s#fail:}\" >&2; exit 1;;\nesac\n",
+             n=$(wc -l < \"$d/count\")\ns=$(cat \"$d/scenario.$n\" 2>/dev/null || cat \"$d/scenario\")\ncase \"$s\" in\n ok:*) printf '%s' \"${s#ok:}\"; exit 0;;\n nf) exit 3;; bad:*) printf '%s' \"${s#bad:}\"; echo oops >&2; exit 1;;\n fail:*) printf '%s\\r\\n' \"${s#fail:}\" >&2; exit 1;;\nesac\n",
         )
         .unwrap();
         std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -418,12 +422,35 @@ mod tests {
     fn get_many_isolates_a_failed_entry_and_keeps_order() {
         let corrupt = r#"{"value":1}"#;
         let scenario = format!("ok:{}b\t!\nc\t-\n{}", entry_line("a", JSON), entry_line("d", corrupt));
-        let res = with_fake(&scenario, |_| WinCredStore.get_many(&["a", "b", "c", "d"]));
+        let res = with_fake(&scenario, |d| {
+            std::fs::write(d.join("scenario.2"), "fail:denied").unwrap();
+            WinCredStore.get_many(&["a", "b", "c", "d"])
+        });
         assert_eq!(res[0].as_ref().unwrap().as_ref().unwrap().value, "sk-abc");
         let e = res[1].as_ref().unwrap_err().to_string();
-        assert_eq!(e, "reading secret \"b\" from Windows Credential Manager failed");
+        assert_eq!(e, "reading secret \"b\" from Windows Credential Manager: denied");
         assert!(res[2].as_ref().unwrap().is_none());
         assert!(res[3].is_err());
+    }
+
+    #[test]
+    fn a_failed_entry_gets_one_follow_up_get_and_its_stderr() {
+        let scenario = format!("ok:{}b\t!\n", entry_line("a", JSON));
+        let (res, n) = with_fake(&scenario, |d| {
+            std::fs::write(d.join("scenario.2"), "fail:access denied").unwrap();
+            (WinCredStore.get_many(&["a", "b"]), calls(d))
+        });
+        assert_eq!(n, 2);
+        assert!(res[0].as_ref().unwrap().is_some());
+        let e = res[1].as_ref().unwrap_err().to_string();
+        assert!(e.contains("access denied") && !e.contains("sk-abc"), "{e}");
+        // A follow-up that unexpectedly succeeds keeps the plain error and never returns its value.
+        let scenario = "ok:b\t!\n".to_string();
+        let res = with_fake(&scenario, |d| {
+            std::fs::write(d.join("scenario.2"), format!("ok:{JSON}")).unwrap();
+            WinCredStore.get_many(&["b"])
+        });
+        assert_eq!(res[0].as_ref().unwrap_err().to_string(), "reading secret \"b\" from Windows Credential Manager failed");
     }
 
     #[test]

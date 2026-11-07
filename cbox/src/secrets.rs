@@ -115,6 +115,18 @@ pub fn spec_from_store(store: &dyn SecretStore, name: &str) -> Result<SecretSpec
     Ok(specs_from_store(store, &[name])?.remove(0))
 }
 
+/// Specs for `--secret` flags, in flag order. Full-form flags are parsed first, so their errors
+/// come before the store is opened; `open` runs only when a bare name exists.
+pub fn specs_from_flags(flags: &[String], open: impl FnOnce() -> Result<Box<dyn SecretStore>>) -> Result<Vec<SecretSpec>> {
+    let mut slots = Vec::new();
+    for f in flags {
+        slots.push(if is_store_reference(f) { None } else { Some(parse_secret_flag(f)?) });
+    }
+    let bare: Vec<&str> = flags.iter().map(String::as_str).filter(|f| is_store_reference(f)).collect();
+    let mut stored = if bare.is_empty() { Vec::new() } else { specs_from_store(open()?.as_ref(), &bare)? }.into_iter();
+    slots.into_iter().map(|s| s.or_else(|| stored.next()).ok_or_else(|| anyhow!("fewer stored secrets than --secret names"))).collect()
+}
+
 /// `spec_from_store` for several names with one batched store read; errors are reported in name order.
 pub fn specs_from_store(store: &dyn SecretStore, names: &[&str]) -> Result<Vec<SecretSpec>> {
     for name in names {
@@ -529,6 +541,24 @@ mod tests {
         assert_eq!((err.as_str(), st.1.get()), ("secret \"x\" not found; run cbox secret create x", 2));
         assert!(specs_from_store(&st, &["one", "gh"]).is_err());
         assert_eq!(st.1.get(), 2, "validation happens before any read");
+    }
+
+    #[test]
+    fn flag_form_errors_come_before_the_store_is_opened() {
+        let flags = ["openai".to_string(), "foo=BAR".to_string()];
+        let e = specs_from_flags(&flags, || bail!("no secret store available")).unwrap_err().to_string();
+        assert!(e.contains("needs @hosts"), "{e}");
+        // No bare names: the store is never opened.
+        let flags = ["a=K@h.com".to_string()];
+        assert_eq!(specs_from_flags(&flags, || bail!("opened")).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn specs_from_flags_keeps_flag_order_with_bare_and_full_forms() {
+        let st = FakeStore::with("mine", "v", &["a.com"], "K1");
+        let flags = ["x=K2@b.com".to_string(), "mine".to_string(), "y=K3@c.com".to_string()];
+        let specs = specs_from_flags(&flags, || Ok(Box::new(FakeStore(st.0.clone())))).unwrap();
+        assert_eq!(specs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["x", "mine", "y"]);
     }
 
     #[test]

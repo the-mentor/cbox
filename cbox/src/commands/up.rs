@@ -48,22 +48,8 @@ pub async fn run(args: UpArgs) -> Result<()> {
     if secrets::has_github_token() {
         specs.push(secrets::github_spec());
     }
-    // Opened only when a bare name exists, so users without stored secrets never touch it.
-    // All bare names are read with one store call (one PowerShell run on WSL).
-    let bare: Vec<&str> = args.secret_flags.iter().map(String::as_str).filter(|f| secrets::is_store_reference(f)).collect();
-    let mut stored = if bare.is_empty() {
-        Vec::new()
-    } else {
-        secrets::specs_from_store(secretstore::open_default()?.as_ref(), &bare)?
-    }
-    .into_iter();
-    for flag in &args.secret_flags {
-        if secrets::is_store_reference(flag) {
-            specs.push(stored.next().context("fewer stored secrets than --secret names")?);
-        } else {
-            specs.push(secrets::parse_secret_flag(flag)?);
-        }
-    }
+    // The store opens only when a bare name exists; all bare names are read in one call.
+    specs.extend(secrets::specs_from_flags(&args.secret_flags, secretstore::open_default)?);
     secrets::check_unique_env(&specs)?;
     let built = secrets::build(&specs)?;
     let has_github = specs.iter().any(|s| s.name == "gh");
