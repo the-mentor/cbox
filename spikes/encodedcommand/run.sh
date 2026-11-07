@@ -54,6 +54,9 @@ head -c 2560 /dev/zero | tr '\0' 'a' | ps set "$T" >/dev/null; rc=$?
 [ $rc -eq 0 ] && ok "4a 2560-byte secret saves" || bad "4a 2560 bytes" "rc=$rc $(head -c 200 "$ERRF")"
 head -c 2561 /dev/zero | tr '\0' 'a' | ps set "$T" >/dev/null; rc=$?
 [ $rc -eq 1 ] && ok "4b 2561-byte secret rejected, exit 1" || bad "4b 2561 bytes" "rc=$rc"
+if grep -q "too large" "$ERRF" && ! grep -q "CLIXML" "$ERRF"; then ok "4c error text is readable plain text, not CLIXML"
+else bad "4c error text" "$(head -c 400 "$ERRF")"; fi
+echo "      stderr was: $(head -c 200 "$ERRF")"
 
 # 5. a much larger encoded command still runs (headroom over the real ~7 KB)
 LEN=$(encode get "$T" | wc -c)
