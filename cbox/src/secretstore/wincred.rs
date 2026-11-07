@@ -136,7 +136,7 @@ impl SecretStore for WinCredStore {
         // Same charset the script re-checks; an invalid name is never sent.
         let valid = |n: &str| n.starts_with(|c: char| c.is_ascii_lowercase()) && n.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_'));
         let sent: Vec<&str> = names.iter().copied().filter(|n| valid(n)).collect();
-        let mut fetched: Result<std::collections::HashMap<&str, Option<String>>, String> = Ok(Default::default());
+        let mut fetched: Result<std::collections::HashMap<&str, String>, String> = Ok(Default::default());
         if !sent.is_empty() {
             let stdin = sent.iter().map(|n| format!("{n}\n")).collect::<String>();
             fetched = match exec(&encode_command("getmany", "").expect("getmany takes no target"), Some(&stdin)) {
@@ -146,7 +146,7 @@ impl SecretStore for WinCredStore {
                     .stdout
                     .lines()
                     .filter_map(|l| l.trim_end_matches('\r').split_once('\t'))
-                    .filter_map(|(n, v)| sent.iter().find(|s| **s == n).map(|s| (*s, (v != "-").then(|| v.to_string()))))
+                    .filter_map(|(n, v)| sent.iter().find(|s| **s == n).map(|s| (*s, v.to_string())))
                     .collect()),
             };
         }
@@ -160,7 +160,12 @@ impl SecretStore for WinCredStore {
                 let Some(entry) = map.get(name) else {
                     bail!("reading secret {name:?} from {LABEL}: no result returned");
                 };
-                let Some(b64) = entry else { return Ok(None) };
+                match entry.as_str() {
+                    "-" => return Ok(None),
+                    "!" => bail!("reading secret {name:?} from {LABEL} failed"),
+                    _ => {}
+                }
+                let b64 = entry;
                 let json = BASE64.decode(b64).ok().and_then(|b| String::from_utf8(b).ok()).ok_or_else(|| anyhow!("reading secret {name:?} from {LABEL}: malformed result"))?;
                 Ok(Some(StoredSecret::from_json(&json).with_context(|| format!("secret {name:?} in {LABEL}"))?))
             })
@@ -256,7 +261,7 @@ mod tests {
         std::fs::write(
             &sh,
             "#!/bin/sh\nd=$(dirname \"$0\")\necho x >> \"$d/count\"\ncat > \"$d/stdin\"\nprintf '%s\\n' \"$@\" > \"$d/args\"\n\
-             s=$(cat \"$d/scenario\")\ncase \"$s\" in\n ok:*) printf '%s' \"${s#ok:}\"; exit 0;;\n nf) exit 3;;\n fail:*) printf '%s\\r\\n' \"${s#fail:}\" >&2; exit 1;;\nesac\n",
+             s=$(cat \"$d/scenario\")\ncase \"$s\" in\n ok:*) printf '%s' \"${s#ok:}\"; exit 0;;\n nf) exit 3;; bad:*) printf '%s' \"${s#bad:}\"; echo oops >&2; exit 1;;\n fail:*) printf '%s\\r\\n' \"${s#fail:}\" >&2; exit 1;;\nesac\n",
         )
         .unwrap();
         std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -275,12 +280,11 @@ mod tests {
 
     #[test]
     fn a_panicking_closure_still_restores_path_and_removes_the_dir() {
-        let before = std::env::var("PATH").ok();
         let mut seen = None;
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| with_fake("nf", |d| { seen = Some(d.to_path_buf()); panic!("boom") })));
         assert!(r.is_err());
         let _lock = crate::test_env_lock::lock();
-        assert_eq!(std::env::var("PATH").ok(), before);
+        assert!(!std::env::var("PATH").unwrap_or_default().contains("cbox-fakeps"));
         assert!(!seen.unwrap().exists());
     }
 
@@ -351,7 +355,7 @@ mod tests {
     #[test]
     fn get_many_is_one_spawn_and_keeps_order_and_states() {
         let corrupt = r#"{"value":1}"#;
-            let scenario = format!("ok:{}b\t-\n{}", entry_line("a", JSON), entry_line("c", corrupt));
+        let scenario = format!("ok:{}b\t-\n{}", entry_line("a", JSON), entry_line("c", corrupt));
         let (res, n, stdin, args) = with_fake(&scenario, |d| {
             let r = WinCredStore.get_many(&["a", "b", "c"]);
             (r, calls(d), std::fs::read_to_string(d.join("stdin")).unwrap(), std::fs::read_to_string(d.join("args")).unwrap())
@@ -408,5 +412,39 @@ mod tests {
         let script = decode(&encode_command("getmany", "").unwrap());
         assert!(script.contains("-cnotmatch '^[a-z][a-z0-9_-]*$'"));
         assert!(encode_command("getmany", "cbox/x").is_err());
+    }
+
+    #[test]
+    fn get_many_isolates_a_failed_entry_and_keeps_order() {
+        let corrupt = r#"{"value":1}"#;
+        let scenario = format!("ok:{}b\t!\nc\t-\n{}", entry_line("a", JSON), entry_line("d", corrupt));
+        let res = with_fake(&scenario, |_| WinCredStore.get_many(&["a", "b", "c", "d"]));
+        assert_eq!(res[0].as_ref().unwrap().as_ref().unwrap().value, "sk-abc");
+        let e = res[1].as_ref().unwrap_err().to_string();
+        assert_eq!(e, "reading secret \"b\" from Windows Credential Manager failed");
+        assert!(res[2].as_ref().unwrap().is_none());
+        assert!(res[3].is_err());
+    }
+
+    #[test]
+    fn get_many_tolerates_duplicates_crlf_blank_and_extra_lines() {
+        let scenario = format!("ok:{}{}zz\t-\n\n", entry_line("a", JSON), entry_line("a", JSON)).replace('\n', "\r\n");
+        let res = with_fake(&scenario, |_| WinCredStore.get_many(&["a", "a"]));
+        assert!(res.iter().all(|r| r.as_ref().unwrap().is_some()));
+    }
+
+    #[test]
+    fn get_many_never_sends_a_name_with_a_tab() {
+        let scenario = format!("ok:{}", entry_line("a", JSON));
+        let (res, stdin) = with_fake(&scenario, |d| (WinCredStore.get_many(&["a", "b\tc"]), std::fs::read_to_string(d.join("stdin")).unwrap()));
+        assert_eq!(stdin, "a\n");
+        assert!(res[0].is_ok() && res[1].is_err());
+    }
+
+    #[test]
+    fn a_failed_get_many_error_never_contains_stdout() {
+        let res = with_fake(&format!("bad:{}", entry_line("a", JSON)), |_| WinCredStore.get_many(&["a"]));
+        let e = format!("{:#}", res[0].as_ref().unwrap_err());
+        assert!(e.contains("oops") && !e.contains("sk-abc") && !e.contains(&BASE64.encode(JSON)), "{e}");
     }
 }

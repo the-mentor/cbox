@@ -120,9 +120,13 @@ pub fn specs_from_store(store: &dyn SecretStore, names: &[&str]) -> Result<Vec<S
     for name in names {
         crate::secretstore::validate_name(name)?;
     }
+    let results = store.get_many(names);
+    if results.len() != names.len() {
+        bail!("secret store returned {} results for {} names", results.len(), names.len());
+    }
     names
         .iter()
-        .zip(store.get_many(names))
+        .zip(results)
         .map(|(name, found)| {
             let StoredSecret { value, hosts, env } =
                 found?.ok_or_else(|| anyhow!("secret {name:?} not found; run cbox secret create {name}"))?;
@@ -525,6 +529,21 @@ mod tests {
         assert_eq!((err.as_str(), st.1.get()), ("secret \"x\" not found; run cbox secret create x", 2));
         assert!(specs_from_store(&st, &["one", "gh"]).is_err());
         assert_eq!(st.1.get(), 2, "validation happens before any read");
+    }
+
+    #[test]
+    fn specs_from_store_errors_on_a_result_count_mismatch() {
+        struct Short;
+        impl SecretStore for Short {
+            fn label(&self) -> &'static str { "s" }
+            fn max_entry_bytes(&self) -> Option<usize> { None }
+            fn get(&self, _: &str) -> Result<Option<StoredSecret>> { Ok(None) }
+            fn get_many(&self, _: &[&str]) -> Vec<Result<Option<StoredSecret>>> { vec![] }
+            fn put(&self, _: &str, _: &StoredSecret) -> Result<()> { unimplemented!() }
+            fn delete(&self, _: &str) -> Result<bool> { unimplemented!() }
+        }
+        let e = specs_from_store(&Short, &["one"]).unwrap_err().to_string();
+        assert_eq!(e, "secret store returned 0 results for 1 names");
     }
 
     #[test]

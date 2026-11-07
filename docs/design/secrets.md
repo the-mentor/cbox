@@ -131,8 +131,11 @@ contains "microsoft". The secret goes over stdin only, never argv. Each operatio
 PowerShell call of about 0.5 s (almost all startup). `list` and `up --secret NAME` read all
 their names with one batched call (`get_many`; the names go over stdin and the script
 re-validates each), so they cost one call per command; `create`, `edit` and `delete` take one
-to three calls. The batched `getmany` operation has only been tested against a fake
-`powershell.exe`; it has not been run on real WSL.
+to three calls. If one entry fails with a Windows error other than not-found, `list` shows that
+row as unreadable and `up` fails for that name only; the other entries in the batch are
+unaffected. The script operations, including `getmany`, passed the spike on real Windows
+PowerShell 5.1 (spikes/encodedcommand, 18/18 before the per-entry failure marker `!`, which is
+not yet verified there). The Rust store was round-tripped by hand on WSL except the batched path.
 Credential Manager caps a value at 2560 bytes (fine for tokens). It needs WSL interop and
 `powershell.exe` on PATH; if the program cannot be started, the error points at both.
 

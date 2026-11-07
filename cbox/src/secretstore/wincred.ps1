@@ -40,7 +40,7 @@ try {
         try { $v = [WinCred]::Get("cbox/$n"); [Console]::Out.Write($n + "`t" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($v)) + "`n") }
         catch {
           $x = $_.Exception; while ($x -and $x -isnot [System.ComponentModel.Win32Exception] -and $x.InnerException) { $x = $x.InnerException }
-          if ($x -is [System.ComponentModel.Win32Exception] -and $x.NativeErrorCode -eq 1168) { [Console]::Out.Write($n + "`t-`n") } else { throw }
+          if ($x -is [System.ComponentModel.Win32Exception] -and $x.NativeErrorCode -eq 1168) { [Console]::Out.Write($n + "`t-`n") } else { [Console]::Out.Write($n + "`t!`n") } # marker only, never the message
         }
       }
     }

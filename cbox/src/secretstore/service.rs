@@ -53,6 +53,9 @@ pub fn create(store: &dyn SecretStore, index_path: &Path, name: &str, s: StoredS
 pub fn list(store: &dyn SecretStore, index_path: &Path) -> Result<Vec<ListRow>> {
     let names = Index::load(index_path)?.names;
     let results = store.get_many(&names.iter().map(String::as_str).collect::<Vec<_>>());
+    if results.len() != names.len() {
+        bail!("secret store returned {} results for {} names", results.len(), names.len());
+    }
     Ok(names
         .into_iter()
         .zip(results)
@@ -540,6 +543,25 @@ mod tests {
         assert!(e.ends_with("(run `cbox secret edit openai` to add it to the index)"), "{e}");
         assert!(!e.contains("TOPSECRET"), "{e}");
         assert_eq!(st.get("openai").unwrap().unwrap().value, "sk-TOPSECRET");
+    }
+
+    #[test]
+    fn list_errors_when_the_store_returns_the_wrong_number_of_results() {
+        struct Short;
+        impl SecretStore for Short {
+            fn label(&self) -> &'static str { "s" }
+            fn max_entry_bytes(&self) -> Option<usize> { None }
+            fn get(&self, _: &str) -> Result<Option<StoredSecret>> { Ok(None) }
+            fn get_many(&self, _: &[&str]) -> Vec<Result<Option<StoredSecret>>> { vec![] }
+            fn put(&self, _: &str, _: &StoredSecret) -> Result<()> { unimplemented!() }
+            fn delete(&self, _: &str) -> Result<bool> { unimplemented!() }
+        }
+        let d = tempdir::D::new();
+        let mut idx = Index::load(&d.index()).unwrap();
+        idx.insert("a");
+        idx.save(&d.index()).unwrap();
+        let e = list(&Short, &d.index()).err().expect("must fail").to_string();
+        assert_eq!(e, "secret store returned 0 results for 1 names");
     }
 
     #[test]

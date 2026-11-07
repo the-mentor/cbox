@@ -59,7 +59,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
     .into_iter();
     for flag in &args.secret_flags {
         if secrets::is_store_reference(flag) {
-            specs.push(stored.next().expect("one spec per bare name"));
+            specs.push(stored.next().context("fewer stored secrets than --secret names")?);
         } else {
             specs.push(secrets::parse_secret_flag(flag)?);
         }
