@@ -98,6 +98,19 @@ OUT=$(printf '%s\n%s\n' "Bad;Name" "$NA" | ps getmany ""); rc=$?
 OUT=$(ps getmany "" </dev/null); rc=$?
 [ $rc -eq 0 ] && [ -z "$OUT" ] && ok "10 empty name list: exit 0, no output" || bad "10 empty list" "rc=$rc"
 
+# 6f. one entry failing with a Windows error other than "not found" must not abort the batch.
+# A 33000-char name makes the target longer than Windows allows (32767) -> an error that is not 1168.
+LONG=$(head -c 33000 /dev/zero | tr '\0' 'x')
+OUT=$(printf '%s\n%s\n%s\n' "$NA" "$LONG" "$NC" | ps getmany ""); rc=$?
+mapfile -t L <<<"$OUT"
+if [ $rc -eq 0 ] && [ ${#L[@]} -eq 3 ] && [ "${L[1]}" = "$LONG"$'\t!' ] && [ "$(dec "${L[0]#*$'\t'}"; echo x)" = "${VA}x" ] && [ "$(dec "${L[2]#*$'\t'}"; echo x)" = "${VC}x" ]; then
+  ok "11 an entry with a non-1168 error prints 'name<TAB>!' and both neighbours still return"
+elif [ "${L[1]}" = "$LONG"$'\t-' ]; then
+  echo "INCONC 11 Windows reported the over-long name as not found (1168), so the '!' path was not exercised"
+else
+  bad "11 per-entry error marker" "rc=$rc lines=${#L[@]} line2_tail=$(printf '%s' "${L[1]}" | tail -c 40) err=$(head -c 200 "$ERRF")"
+fi
+
 # 6e. timing: 10 names in one call versus 10 single calls
 TEN=$(for i in 1 2 3 4 5 6 7 8 9 10; do echo "$NA"; done)
 s=$(date +%s%N); printf '%s\n' "$TEN" | ps getmany "" >/dev/null; e=$(date +%s%N)
