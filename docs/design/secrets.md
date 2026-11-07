@@ -131,9 +131,12 @@ contains "microsoft". The secret goes over stdin only, never argv. Each operatio
 PowerShell call of about 0.5 s (almost all startup). `list` and `up --secret NAME` read all
 their names with one batched call (`get_many`; the names go over stdin and the script
 re-validates each), so they cost one call per command; `create`, `edit` and `delete` take one
-to three calls. If one entry fails with a Windows error other than not-found, `list` shows that
-row as an error and the other rows normally, and `up` fails with an error naming that entry
-(after one extra single read to get the cause). The script operations, including `getmany`
+to three calls. If one entry fails with a Windows error other than not-found, the other rows
+still read normally; `list` shows that row as `(unreadable: run cbox secret delete NAME)` and
+`up` fails with an error naming that entry (after one extra single read to get the cause).
+Known limit (#139): `list` uses the same `unreadable` text for every read error, so if
+PowerShell fails as a whole every row says so, and the delete hint is wrong for a healthy
+secret. The script operations, including `getmany`
 and the `!` marker, were checked on real Windows PowerShell 5.1 with a standalone script (19 checks,
 not part of this repository). The Rust store was round-tripped by hand on WSL,
 including batched `list` and `up` with one and with three secrets.
@@ -191,7 +194,7 @@ Merge order matters only as noted: 1 before 2; 3 any time after 1.
 1. **Store interface, macOS backend, `secret create | list | delete`.** On
    other platforms the commands fail with "no secret store available on this platform ...".
 2. **`up` integration.** `--secret NAME` resolves from the store.
-3. **WSL backend.** Detection, actionable errors. Implemented.
+3. **WSL backend.** Detection, actionable errors, and batched reads for `list` and `up`. Implemented.
 4. **`secret edit`** and `docs/design/cbox.md` updates.
 
 ## Follow-ups (not in this work)
