@@ -51,11 +51,16 @@ pub fn create(store: &dyn SecretStore, index_path: &Path, name: &str, s: StoredS
 }
 
 pub fn list(store: &dyn SecretStore, index_path: &Path) -> Result<Vec<ListRow>> {
-    Ok(Index::load(index_path)?
-        .names
+    let names = Index::load(index_path)?.names;
+    let results = store.get_many(&names.iter().map(String::as_str).collect::<Vec<_>>());
+    if results.len() != names.len() {
+        bail!("secret store returned {} results for {} names", results.len(), names.len());
+    }
+    Ok(names
         .into_iter()
-        .map(|name| {
-            let state = match store.get(&name) {
+        .zip(results)
+        .map(|(name, result)| {
+            let state = match result {
                 Ok(Some(s)) => RowState::Ok { hosts: s.hosts, env: s.env },
                 Ok(None) => RowState::Missing,
                 Err(_) => RowState::Unreadable,
@@ -538,6 +543,29 @@ mod tests {
         assert!(e.ends_with("(run `cbox secret edit openai` to add it to the index)"), "{e}");
         assert!(!e.contains("TOPSECRET"), "{e}");
         assert_eq!(st.get("openai").unwrap().unwrap().value, "sk-TOPSECRET");
+    }
+
+    #[test]
+    fn list_errors_when_the_store_returns_the_wrong_number_of_results() {
+        let d = tempdir::D::new();
+        let mut idx = Index::load(&d.index()).unwrap();
+        idx.insert("a");
+        idx.save(&d.index()).unwrap();
+        let e = list(&crate::secretstore::testing::FakeStore::short(), &d.index()).err().expect("must fail").to_string();
+        assert_eq!(e, "secret store returned 0 results for 1 names");
+    }
+
+    #[test]
+    fn list_reads_all_names_with_one_get_many_call() {
+        let d = tempdir::D::new();
+        let mut idx = Index::load(&d.index()).unwrap();
+        for n in ["a", "b", "c"] {
+            idx.insert(n);
+        }
+        idx.save(&d.index()).unwrap();
+        let st = crate::secretstore::testing::FakeStore::default();
+        let rows = list(&st, &d.index()).unwrap();
+        assert_eq!((rows.len(), st.get_many_calls()), (3, 1));
     }
 
     #[test]
