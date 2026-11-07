@@ -126,8 +126,9 @@ platform, not the all-in-one `keyring` crate. Register one store at startup with
 **WSL store.** `WinCredStore` (`cbox/src/secretstore/wincred.rs`) implements `SecretStore`
 directly, not a `keyring-core` store. It runs `powershell.exe` through WSL interop with an
 embedded script (`wincred.ps1`) that calls `CredWriteW/CredReadW/CredDeleteW` via a compiled
-C# type, under the target name `cbox/<name>`. It is used when `/proc/sys/kernel/osrelease`
-contains "microsoft". The secret goes over stdin only, never argv. Each operation is one
+C# type, under the target name `cbox/<name>`. It is used when any of three signals says WSL:
+`/proc/sys/kernel/osrelease` contains "microsoft", `WSL_DISTRO_NAME` is set and non-empty, or
+`/proc/sys/fs/binfmt_misc/WSLInterop` exists (the last two cover custom kernels; untested on one). The secret goes over stdin only, never argv. Each operation is one
 PowerShell call of about 0.5 s (almost all startup). `list` and `up --secret NAME` read all
 their names with one batched call (`get_many`; the names go over stdin and the script
 re-validates each), so they cost one call per command; `create`, `edit` and `delete` take one

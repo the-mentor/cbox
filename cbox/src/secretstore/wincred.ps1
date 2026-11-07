@@ -36,6 +36,7 @@ try {
     'getmany' {
       foreach ($n in ([Console]::In.ReadToEnd() -split "`n")) {
         $n = $n.Trim(); if ($n -eq '') { continue }
+        # keep this regex in step with name_charset_ok in mod.rs
         if ($n -cnotmatch '^[a-z][a-z0-9_-]*$') { throw 'invalid secret name' }
         try { $v = [WinCred]::Get("cbox/$n"); [Console]::Out.Write($n + "`t" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($v)) + "`n") }
         catch {

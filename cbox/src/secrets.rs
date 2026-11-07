@@ -108,13 +108,6 @@ pub fn is_store_reference(flag: &str) -> bool {
     !flag.contains('=') && !flag.contains('@')
 }
 
-/// Look `name` up in the store. A missing name is an error, never a fallback
-/// to a host variable: the user asked for the stored secret.
-#[cfg(test)]
-pub fn spec_from_store(store: &dyn SecretStore, name: &str) -> Result<SecretSpec> {
-    Ok(specs_from_store(store, &[name])?.remove(0))
-}
-
 /// Specs for `--secret` flags, in flag order. Full-form flags are parsed first, so their errors
 /// come before the store is opened; `open` runs only when a bare name exists.
 pub fn specs_from_flags(flags: &[String], open: impl FnOnce() -> Result<Box<dyn SecretStore>>) -> Result<Vec<SecretSpec>> {
@@ -127,7 +120,8 @@ pub fn specs_from_flags(flags: &[String], open: impl FnOnce() -> Result<Box<dyn 
     slots.into_iter().map(|s| s.or_else(|| stored.next()).ok_or_else(|| anyhow!("fewer stored secrets than --secret names"))).collect()
 }
 
-/// `spec_from_store` for several names with one batched store read; errors are reported in name order.
+/// Look the names up in the store with one batched read. A missing name is an error, never a
+/// fallback to a host variable: the user asked for the stored secret. Errors come in name order.
 pub fn specs_from_store(store: &dyn SecretStore, names: &[&str]) -> Result<Vec<SecretSpec>> {
     for name in names {
         crate::secretstore::validate_name(name)?;
@@ -587,14 +581,14 @@ mod tests {
     #[test]
     fn missing_store_secret_fails_naming_create() {
         let store = FakeStore::with("other", "v", &["a.com"], "OTHER");
-        let err = spec_from_store(&store, "x").unwrap_err().to_string();
+        let err = specs_from_store(&store, &["x"]).map(|mut v| v.remove(0)).unwrap_err().to_string();
         assert_eq!(err, "secret \"x\" not found; run cbox secret create x");
     }
 
     #[test]
     fn duplicate_secret_names_are_rejected_even_with_different_env() {
         let store = FakeStore::with("openai", "v", &["a.com"], "OPENAI_API_KEY");
-        let specs = vec![spec_from_store(&store, "openai").unwrap(), parse_secret_flag("openai=OTHER@b.com").unwrap()];
+        let specs = vec![specs_from_store(&store, &["openai"]).map(|mut v| v.remove(0)).unwrap(), parse_secret_flag("openai=OTHER@b.com").unwrap()];
         let err = check_unique_env(&specs).unwrap_err().to_string();
         assert!(err.contains("openai") && err.contains("more than once"), "{err}");
     }
@@ -602,7 +596,7 @@ mod tests {
     #[test]
     fn gh_bare_name_is_reserved() {
         let store = FakeStore::with("gh", "v", &["a.com"], "GH_TOKEN");
-        let err = spec_from_store(&store, "gh").unwrap_err().to_string();
+        let err = specs_from_store(&store, &["gh"]).map(|mut v| v.remove(0)).unwrap_err().to_string();
         assert!(err.contains("reserved"), "{err}");
     }
 
@@ -612,7 +606,7 @@ mod tests {
         // A host variable of the same name must not be read instead.
         let _guard = EnvGuard::remove("CBOX_T_STORED");
         let store = FakeStore::with("mine", "sk-stored-value", &["a.com", "b.com"], "CBOX_T_STORED");
-        let spec = spec_from_store(&store, "mine").unwrap();
+        let spec = specs_from_store(&store, &["mine"]).map(|mut v| v.remove(0)).unwrap();
         assert!(spec.stored);
         assert!(!format!("{spec:?}").contains("sk-stored-value"), "Debug leaks the value");
 
@@ -629,7 +623,7 @@ mod tests {
         let _lock = crate::test_env_lock::lock();
         let _guard = EnvGuard::set("ANTHROPIC_API_KEY", "host-MARKER-value");
         let store = FakeStore::with("anthropic", "sk-stored", &["api.anthropic.com"], "ANTHROPIC_API_KEY");
-        let specs = [spec_from_store(&store, "anthropic").unwrap()];
+        let specs = [specs_from_store(&store, &["anthropic"]).map(|mut v| v.remove(0)).unwrap()];
         let built = build(&specs).unwrap();
         let passthrough = vec!["ANTHROPIC_API_KEY".to_string(), "ANTHROPIC_MODEL".to_string()];
         let passthrough = passthrough_without_stored(passthrough, &specs);
@@ -658,7 +652,7 @@ mod tests {
     #[test]
     fn store_secret_env_name_collides_with_dash_e() {
         let store = FakeStore::with("mine", "sk-stored", &["a.com"], "CBOX_T_DASH_E");
-        let built = build(&[spec_from_store(&store, "mine").unwrap()]).unwrap();
+        let built = build(&[specs_from_store(&store, &["mine"]).map(|mut v| v.remove(0)).unwrap()]).unwrap();
         let err = crate::env::compose(&["CBOX_T_DASH_E=x".to_string()], &[], &built.source_vars)
             .unwrap_err()
             .to_string();
@@ -669,18 +663,18 @@ mod tests {
     fn two_store_secrets_with_one_env_name_error() {
         let mut store = FakeStore::with("one", "v1", &["a.com"], "SAME_VAR");
         store.0.insert("two".into(), ("v2".into(), vec!["b.com".into()], "SAME_VAR".into()));
-        let specs = vec![spec_from_store(&store, "one").unwrap(), spec_from_store(&store, "two").unwrap()];
+        let specs = vec![specs_from_store(&store, &["one"]).map(|mut v| v.remove(0)).unwrap(), specs_from_store(&store, &["two"]).map(|mut v| v.remove(0)).unwrap()];
         let err = check_unique_env(&specs).unwrap_err().to_string();
         assert!(err.contains("SAME_VAR"), "{err}");
 
         // Mixed with the flag form too.
         let specs = vec![
-            spec_from_store(&store, "one").unwrap(),
+            specs_from_store(&store, &["one"]).map(|mut v| v.remove(0)).unwrap(),
             parse_secret_flag("flag=SAME_VAR@c.com").unwrap(),
         ];
         assert!(check_unique_env(&specs).is_err());
 
-        let specs = vec![spec_from_store(&store, "one").unwrap(), parse_secret_flag("flag=OTHER@c.com").unwrap()];
+        let specs = vec![specs_from_store(&store, &["one"]).map(|mut v| v.remove(0)).unwrap(), parse_secret_flag("flag=OTHER@c.com").unwrap()];
         check_unique_env(&specs).unwrap();
     }
 

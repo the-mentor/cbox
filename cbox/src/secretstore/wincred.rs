@@ -26,8 +26,14 @@ pub fn is_wsl_release(osrelease: &str) -> bool {
     osrelease.to_ascii_lowercase().contains("microsoft")
 }
 
+/// Any one signal is enough: custom WSL kernels need not say "microsoft".
+pub fn is_wsl_from(osrelease: &str, distro_env: Option<&str>, interop_file_exists: bool) -> bool {
+    is_wsl_release(osrelease) || distro_env.is_some_and(|d| !d.is_empty()) || interop_file_exists
+}
+
 pub fn is_wsl() -> bool {
-    std::fs::read_to_string("/proc/sys/kernel/osrelease").is_ok_and(|s| is_wsl_release(&s))
+    let release = std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
+    is_wsl_from(&release, std::env::var("WSL_DISTRO_NAME").ok().as_deref(), std::path::Path::new("/proc/sys/fs/binfmt_misc/WSLInterop").exists())
 }
 
 /// Base64 of the UTF-16LE script with `$Op` and `$Target` assigned first. The target is
@@ -135,7 +141,7 @@ impl SecretStore for WinCredStore {
     }
     fn get_many(&self, names: &[&str]) -> Vec<Result<Option<StoredSecret>>> {
         // Same charset the script re-checks; an invalid name is never sent.
-        let valid = |n: &str| n.starts_with(|c: char| c.is_ascii_lowercase()) && n.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_'));
+        let valid = super::name_charset_ok;
         let sent: Vec<&str> = names.iter().copied().filter(|n| valid(n)).collect();
         let mut fetched: Result<std::collections::HashMap<&str, String>, String> = Ok(Default::default());
         if !sent.is_empty() {
@@ -229,6 +235,15 @@ mod tests {
             assert!(encode_command("get", bad).is_err(), "{bad:?}");
         }
         assert!(encode_command("rm", "cbox/a").is_err());
+    }
+
+    #[test]
+    fn is_wsl_from_accepts_any_of_three_signals() {
+        assert!(is_wsl_from("6.6.0-custom\n", Some("Ubuntu"), false));
+        assert!(is_wsl_from("6.6.0-custom\n", None, true));
+        assert!(is_wsl_from("5.15-microsoft-standard-WSL2", None, false));
+        assert!(!is_wsl_from("6.12.87\n", None, false));
+        assert!(!is_wsl_from("6.12.87\n", Some(""), false), "an empty WSL_DISTRO_NAME is not a signal");
     }
 
     #[test]

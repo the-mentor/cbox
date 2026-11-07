@@ -48,10 +48,13 @@ impl StoredSecret {
 /// Names of the built-in GitHub secrets; neither store nor flag form may use them.
 pub const RESERVED_NAMES: &[&str] = &["gh", "gh_basic"];
 
+/// A lowercase letter, then lowercase letters, digits, '-' or '_'. Must match the regex in wincred.ps1.
+pub(super) fn name_charset_ok(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_lowercase()) && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+}
+
 pub fn validate_name(name: &str) -> Result<()> {
-    let ok = name.starts_with(|c: char| c.is_ascii_lowercase())
-        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
-    if !ok {
+    if !name_charset_ok(name) {
         bail!("invalid secret name {name:?}: use lowercase letters, digits, '-' or '_', starting with a letter");
     }
     if RESERVED_NAMES.contains(&name) {
