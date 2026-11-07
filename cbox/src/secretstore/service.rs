@@ -547,46 +547,25 @@ mod tests {
 
     #[test]
     fn list_errors_when_the_store_returns_the_wrong_number_of_results() {
-        struct Short;
-        impl SecretStore for Short {
-            fn label(&self) -> &'static str { "s" }
-            fn max_entry_bytes(&self) -> Option<usize> { None }
-            fn get(&self, _: &str) -> Result<Option<StoredSecret>> { Ok(None) }
-            fn get_many(&self, _: &[&str]) -> Vec<Result<Option<StoredSecret>>> { vec![] }
-            fn put(&self, _: &str, _: &StoredSecret) -> Result<()> { unimplemented!() }
-            fn delete(&self, _: &str) -> Result<bool> { unimplemented!() }
-        }
         let d = tempdir::D::new();
         let mut idx = Index::load(&d.index()).unwrap();
         idx.insert("a");
         idx.save(&d.index()).unwrap();
-        let e = list(&Short, &d.index()).err().expect("must fail").to_string();
+        let e = list(&crate::secretstore::testing::FakeStore::short(), &d.index()).err().expect("must fail").to_string();
         assert_eq!(e, "secret store returned 0 results for 1 names");
     }
 
     #[test]
     fn list_reads_all_names_with_one_get_many_call() {
-        struct Counting(std::cell::Cell<usize>);
-        impl SecretStore for Counting {
-            fn label(&self) -> &'static str { "c" }
-            fn max_entry_bytes(&self) -> Option<usize> { None }
-            fn get(&self, _: &str) -> Result<Option<StoredSecret>> { panic!("list must batch") }
-            fn get_many(&self, names: &[&str]) -> Vec<Result<Option<StoredSecret>>> {
-                self.0.set(self.0.get() + 1);
-                names.iter().map(|_| Ok(None)).collect()
-            }
-            fn put(&self, _: &str, _: &StoredSecret) -> Result<()> { unimplemented!() }
-            fn delete(&self, _: &str) -> Result<bool> { unimplemented!() }
-        }
         let d = tempdir::D::new();
         let mut idx = Index::load(&d.index()).unwrap();
         for n in ["a", "b", "c"] {
             idx.insert(n);
         }
         idx.save(&d.index()).unwrap();
-        let st = Counting(Default::default());
+        let st = crate::secretstore::testing::FakeStore::default();
         let rows = list(&st, &d.index()).unwrap();
-        assert_eq!((rows.len(), st.0.get()), (3, 1));
+        assert_eq!((rows.len(), st.get_many_calls()), (3, 1));
     }
 
     #[test]

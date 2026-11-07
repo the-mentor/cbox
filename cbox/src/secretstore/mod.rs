@@ -5,6 +5,8 @@ use anyhow::{Result, bail};
 mod index;
 mod service;
 mod store;
+#[cfg(test)]
+pub(crate) mod testing;
 #[cfg(target_os = "linux")]
 mod wincred;
 pub use index::Index;

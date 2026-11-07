@@ -3,13 +3,13 @@
 //! The script (`wincred.ps1`) is compiled into the binary and handed to PowerShell
 //! as base64 on the command line, so no script file ever exists for anyone to edit.
 //! The secret travels over stdin only: never argv (visible in `ps`), never an error.
-//! The script and flags were checked on real Windows PowerShell 5.1 with a standalone script
-//! (19 checks, including `getmany` and the `!` marker), and this
-//! module was round-tripped by hand on WSL (create, duplicate, list, edit, not-found, size
-//! limit, `up --secret`, and batched `list` and `up` with one and with three secrets).
-//! Not verified: a non-English locale, interop off, PowerShell blocked by policy or
-//! Constrained Language Mode, a hung PowerShell (there is no timeout), a macOS build.
-//! Exit code 3 means "no such entry" (locale-proof); any other non-zero exit is an error.
+//! Not covered: a non-English locale, WSL interop off, PowerShell blocked by policy or
+//! Constrained Language Mode, a hung PowerShell (there is no timeout), a macOS build, and
+//! WSL detection on a custom kernel.
+//! Exit code 3 means "no such entry" (locale-proof); any other non-zero exit is an error. In a
+//! batched read, a `name<TAB>!` line marks one entry that failed (never with message text).
+//! Entries are at most 2560 bytes, the Windows Credential Manager limit; targets are `cbox/<name>`
+//! with names restricted to a charset that is safe to inline into the script.
 
 use super::store::SecretStore;
 use super::{StoredSecret, WSL_MAX_ENTRY_BYTES, check_size};
