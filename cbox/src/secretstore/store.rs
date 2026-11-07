@@ -1,3 +1,6 @@
+// KeyringStore is compiled everywhere but only used where a keyring store is registered (macOS).
+#![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
+
 use super::StoredSecret;
 use anyhow::{Context, Result, anyhow};
 use keyring_core::{Entry, Error};

@@ -31,7 +31,7 @@ shaped so a profile can later refer to a secret by name without a migration.
   for boxes that already used it: they keep the placeholder and BoxLite's copy of
   the value until they are removed.
 - macOS: the Keychain (implemented). WSL: Windows Credential Manager
-  (implemented; the Rust store is untested on real WSL until a manual round trip).
+  (implemented; see the verification note under the WSL store below).
 - `cbox up --secret NAME` takes the value from the store and feeds the existing
   substitution path (`cbox/src/secrets.rs`), unchanged. The box still only sees a
   placeholder; the host-side proxy swaps in the real value, only for the secret's
@@ -130,7 +130,7 @@ C# type, under the target name `cbox/<name>`. It is used when `/proc/sys/kernel/
 contains "microsoft". The secret goes over stdin only, never argv. Each operation is one
 PowerShell call of about 0.5 s (almost all startup), so `list` costs one call per secret.
 Credential Manager caps a value at 2560 bytes (fine for tokens). It needs WSL interop and
-`powershell.exe` on PATH; if the program cannot be started, the error names both.
+`powershell.exe` on PATH; if the program cannot be started, the error points at both.
 
 **What is stored where.** One entry per secret in the OS store, under service
 `cbox` with the secret name as the account (on WSL the Credential Manager target is `cbox/<name>`), whose stored value is a small JSON document holding the **value,
@@ -263,7 +263,10 @@ user's; each is small enough to change in review.
   lowercase letters, digits, `-` and `_` (and `encode_command` re-checks it). The secret still travels over stdin
   only. This removes the temporary file, `wslpath`, the UNC script path and
   `-ExecutionPolicy Bypass`. The same script and flags were verified on Windows
-  PowerShell 5.1 under WSL by a spike (stdin free, UTF-8, not-found as exit code 3, other failures as exit code 1, long command line); the Rust store itself has not been run on real WSL yet. This protects against
+  PowerShell 5.1 under WSL by a spike (stdin free, UTF-8, not-found as exit code 3, other failures as exit code 1, long command line); the Rust store was then round-tripped by hand on WSL (create hidden and piped, duplicate, list,
+  edit with every flag and value-only, not-found for get, edit, delete and `up`, the size limit,
+  `up --secret` placeholder). Not verified: a non-English locale, WSL interop off, PowerShell blocked by
+  policy or Constrained Language Mode, a hung PowerShell (there is no timeout). This protects against
   tampering with cbox's script, not against other software running as the same
   Windows user, which can call Credential Manager directly (it has no per-app
   access control).

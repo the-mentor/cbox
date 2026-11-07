@@ -1,8 +1,5 @@
 //! Pure data rules for stored secrets: names, hosts, env vars, JSON form, size limit.
 
-// KeyringStore is compiled everywhere, but only usable where a store is registered (macOS today).
-#![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
-
 use anyhow::{Result, bail};
 
 mod index;
@@ -93,7 +90,7 @@ pub fn check_size(json: &str, limit: Option<usize>) -> Result<()> {
     if let Some(limit) = limit
         && json.len() > limit
     {
-        bail!("secret entry is {} bytes, over the {limit}-byte limit", json.len());
+        bail!("the stored entry is {} bytes (value plus hosts and env name), over the {limit}-byte limit", json.len());
     }
     Ok(())
 }

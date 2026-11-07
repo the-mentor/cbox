@@ -1,3 +1,4 @@
+$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
 Add-Type -TypeDefinition @'
 using System; using System.Runtime.InteropServices; using System.Text;
 public static class WinCred {
@@ -26,7 +27,6 @@ public static class WinCred {
   public static void Del(string t) { if (!CredDeleteW(t, 1, 0)) throw new System.ComponentModel.Win32Exception(); }
 }
 '@
-$ErrorActionPreference = 'Stop'
 $u = New-Object System.Text.UTF8Encoding $false; [Console]::InputEncoding = $u; [Console]::OutputEncoding = $u
 try {
   switch ($Op) {
@@ -36,7 +36,8 @@ try {
   }
 } catch {
   # PowerShell wraps .NET exceptions (MethodInvocationException), so walk to the Win32Exception.
-  $e = $_.Exception; while ($e -and $e -isnot [System.ComponentModel.Win32Exception]) { $e = $e.InnerException }
-  if ($e -and $e.NativeErrorCode -eq 1168) { [Console]::Error.Write('CBOX_NOT_FOUND'); exit 3 }
-  throw
+  $e = $_.Exception; while ($e -and $e -isnot [System.ComponentModel.Win32Exception] -and $e.InnerException) { $e = $e.InnerException }
+  # CBOX_NOT_FOUND is a debug aid: Rust reads only the exit code (3).
+  if ($e -is [System.ComponentModel.Win32Exception] -and $e.NativeErrorCode -eq 1168) { [Console]::Error.Write('CBOX_NOT_FOUND'); exit 3 }
+  [Console]::Error.Write($e.Message); exit 1
 }

@@ -3,8 +3,11 @@
 //! The script (`wincred.ps1`) is compiled into the binary and handed to PowerShell
 //! as base64 on the command line, so no script file ever exists for anyone to edit.
 //! The secret travels over stdin only: never argv (visible in `ps`), never an error.
-//! The script and flags were verified on Windows PowerShell 5.1 by a spike
-//! (spikes/encodedcommand on the scratch branch); this Rust module has not been run on WSL.
+//! The script and flags were verified on Windows PowerShell 5.1 by a spike (11/11,
+//! spikes/encodedcommand on the scratch branch), and this module was round-tripped by hand on
+//! WSL (create, duplicate, list, edit, not-found, size limit, `up --secret`). Not verified:
+//! a non-English locale, interop off, PowerShell blocked by policy or Constrained Language
+//! Mode, and a hung PowerShell (there is no timeout).
 //! Exit code 3 means "no such entry" (locale-proof); any other non-zero exit is an error.
 
 use super::store::SecretStore;
@@ -51,7 +54,7 @@ fn spawn_error(e: &std::io::Error) -> anyhow::Error {
              and that /mnt/c/Windows/System32/WindowsPowerShell/v1.0 is on PATH"
         )
     } else {
-        anyhow!("cannot run powershell.exe: {e}")
+        anyhow!("cannot run powershell.exe: {e} (cbox reaches Windows Credential Manager through WSL interop and powershell.exe on PATH)")
     }
 }
 
