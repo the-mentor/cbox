@@ -93,12 +93,18 @@ impl Outcome {
     }
 }
 
+const PROGRAM: &str = "powershell.exe";
+
 fn run(op: &str, name: &str, stdin: Option<&str>) -> Result<Outcome> {
-    exec(&encode_command(op, &format!("cbox/{name}"))?, stdin)
+    run_with(PROGRAM, op, name, stdin)
 }
 
-fn exec(cmd: &str, stdin: Option<&str>) -> Result<Outcome> {
-    let mut child = Command::new("powershell.exe")
+fn run_with(program: &str, op: &str, name: &str, stdin: Option<&str>) -> Result<Outcome> {
+    exec(program, &encode_command(op, &format!("cbox/{name}"))?, stdin)
+}
+
+fn exec(program: &str, cmd: &str, stdin: Option<&str>) -> Result<Outcome> {
+    let mut child = Command::new(program)
         .args(["-NoProfile", "-NonInteractive", "-EncodedCommand", cmd])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -146,7 +152,7 @@ impl SecretStore for WinCredStore {
         let mut fetched: Result<std::collections::HashMap<&str, String>, String> = Ok(Default::default());
         if !sent.is_empty() {
             let stdin = sent.iter().map(|n| format!("{n}\n")).collect::<String>();
-            fetched = match exec(&encode_command("getmany", "").expect("getmany takes no target"), Some(&stdin)) {
+            fetched = match exec(PROGRAM, &encode_command("getmany", "").expect("getmany takes no target"), Some(&stdin)) {
                 Err(e) => Err(format!("{e:#}")),
                 Ok(out) if !out.ok() => Err(format!("reading secrets from {LABEL}: {}", out.stderr)),
                 Ok(out) => Ok(out
@@ -357,10 +363,9 @@ mod tests {
 
     #[test]
     fn run_reports_a_missing_powershell() {
-        let _lock = crate::test_env_lock::lock();
-        let _path = crate::test_env_lock::EnvVarGuard::set("PATH", "/nonexistent-cbox-dir");
-        let r = WinCredStore.get("x");
-        assert!(r.unwrap_err().to_string().contains("powershell.exe was not found"));
+        // Calls run_with directly: no PATH change, so parallel tests are unaffected.
+        let r = run_with("cbox-no-such-powershell.exe", "get", "x", None);
+        assert!(r.err().expect("must fail").to_string().contains("powershell.exe was not found"));
     }
 
     fn entry_line(name: &str, json: &str) -> String {
