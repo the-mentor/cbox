@@ -33,6 +33,17 @@ try {
     'set' { [WinCred]::Set($Target, [Console]::In.ReadToEnd().TrimEnd("`r","`n")) }
     'get' { [Console]::Out.Write([WinCred]::Get($Target)) }
     'del' { [WinCred]::Del($Target) }
+    'getmany' {
+      foreach ($n in ([Console]::In.ReadToEnd() -split "`n")) {
+        $n = $n.Trim(); if ($n -eq '') { continue }
+        if ($n -cnotmatch '^[a-z][a-z0-9_-]*$') { throw 'invalid secret name' }
+        try { $v = [WinCred]::Get("cbox/$n"); [Console]::Out.Write($n + "`t" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($v)) + "`n") }
+        catch {
+          $x = $_.Exception; while ($x -and $x -isnot [System.ComponentModel.Win32Exception] -and $x.InnerException) { $x = $x.InnerException }
+          if ($x -is [System.ComponentModel.Win32Exception] -and $x.NativeErrorCode -eq 1168) { [Console]::Out.Write($n + "`t-`n") } else { throw }
+        }
+      }
+    }
   }
 } catch {
   # PowerShell wraps .NET exceptions (MethodInvocationException), so walk to the Win32Exception.

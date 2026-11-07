@@ -22,7 +22,8 @@ ps() {
   powershell.exe -NoProfile -NonInteractive -EncodedCommand "$enc" 2> >(tr -d '\r' >"$ERRF")
 }
 ERRF=$(mktemp)
-cleanup() { powershell.exe -NoProfile -NonInteractive -EncodedCommand "$(encode del "$T")" </dev/null >/dev/null 2>&1; rm -f "$ERRF"; }
+EXTRA=()
+cleanup() { for x in "${EXTRA[@]}"; do powershell.exe -NoProfile -NonInteractive -EncodedCommand "$(encode del "$x")" </dev/null >/dev/null 2>&1; done; powershell.exe -NoProfile -NonInteractive -EncodedCommand "$(encode del "$T")" </dev/null >/dev/null 2>&1; rm -f "$ERRF"; }
 trap cleanup EXIT
 
 echo "== environment"
@@ -75,6 +76,34 @@ wait $SP
 if grep -q "$M" <<<"$CL"; then bad "6 secret visible in a Windows process command line"
 elif grep -q "EncodedCommand" <<<"$CL"; then ok "6 secret not in any command line (the set process was visible)"
 else bad "6 inconclusive: set process not seen in the process list" "(try again; or Get-CimInstance is blocked)"; fi
+
+# 6b. getmany: one call reads several names; a missing one is "-", the rest still come back
+NA="spk${ID}a"; NB="spk${ID}b"; NC="spk${ID}c"
+EXTRA+=("cbox/$NA" "cbox/$NC")
+VA='sk-batch-A-1234'; VC=$'batch-\u00e4\u20ac-\u65e5\U0001F511'
+printf '%s' "$VA" | ps set "cbox/$NA" >/dev/null; printf '%s' "$VC" | ps set "cbox/$NC" >/dev/null
+OUT=$(printf '%s\n%s\n%s\n' "$NA" "$NB" "$NC" | ps getmany "" ); rc=$?
+mapfile -t L <<<"$OUT"
+dec() { printf '%s' "$1" | base64 -d; }
+[ $rc -eq 0 ] && [ ${#L[@]} -eq 3 ] && ok "8a getmany exits 0 and prints one line per name" || bad "8a getmany" "rc=$rc lines=${#L[@]} $(head -c 200 "$ERRF")"
+[ "${L[0]%%$'\t'*}" = "$NA" ] && [ "$(dec "${L[0]#*$'\t'}"; echo x)" = "${VA}x" ] && ok "8b first name returns its exact value" || bad "8b first value"
+[ "${L[1]}" = "$NB"$'\t-' ] && ok "8c missing name in the middle is 'name<TAB>-' and does not stop the batch" || bad "8c missing name" "got: ${L[1]}"
+[ "$(dec "${L[2]#*$'\t'}"; echo x)" = "${VC}x" ] && ok "8d non-ASCII value after the missing one round-trips" || bad "8d non-ASCII"
+
+# 6c. a bad name is refused by the script (names are data, never evaluated); nothing is printed
+OUT=$(printf '%s\n%s\n' "Bad;Name" "$NA" | ps getmany ""); rc=$?
+[ $rc -eq 1 ] && [ -z "$OUT" ] && grep -q "invalid secret name" "$ERRF" && ok "9 invalid name: exit 1, readable message, no output" || bad "9 invalid name" "rc=$rc out=${#OUT} $(head -c 200 "$ERRF")"
+
+# 6d. empty stdin: nothing to do
+OUT=$(ps getmany "" </dev/null); rc=$?
+[ $rc -eq 0 ] && [ -z "$OUT" ] && ok "10 empty name list: exit 0, no output" || bad "10 empty list" "rc=$rc"
+
+# 6e. timing: 10 names in one call versus 10 single calls
+TEN=$(for i in 1 2 3 4 5 6 7 8 9 10; do echo "$NA"; done)
+s=$(date +%s%N); printf '%s\n' "$TEN" | ps getmany "" >/dev/null; e=$(date +%s%N)
+echo "      getmany of 10 names, one call: $(( (e - s) / 1000000 )) ms"
+s=$(date +%s%N); for i in 1 2 3 4 5 6 7 8 9 10; do ps get "cbox/$NA" </dev/null >/dev/null; done; e=$(date +%s%N)
+echo "      10 single get calls:           $(( (e - s) / 1000000 )) ms"
 
 # 7. delete, then delete-missing exits 1
 ps del "$T" </dev/null >/dev/null; rc=$?
