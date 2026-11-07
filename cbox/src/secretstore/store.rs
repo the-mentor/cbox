@@ -13,6 +13,10 @@ pub trait SecretStore {
     fn exists(&self, name: &str) -> Result<bool> {
         Ok(self.get(name)?.is_some())
     }
+    /// Reads several entries, results in input order. Stores with a costly call override this to batch.
+    fn get_many(&self, names: &[&str]) -> Vec<Result<Option<StoredSecret>>> {
+        names.iter().map(|n| self.get(n)).collect()
+    }
     fn put(&self, name: &str, s: &StoredSecret) -> Result<()>;
     /// Returns whether an entry existed.
     fn delete(&self, name: &str) -> Result<bool>;

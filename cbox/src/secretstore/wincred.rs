@@ -32,8 +32,15 @@ pub fn is_wsl() -> bool {
 /// Base64 of the UTF-16LE script with `$Op` and `$Target` assigned first. The target is
 /// inlined, which is safe only because the charset is checked here.
 fn encode_command(op: &str, target: &str) -> Result<String> {
-    if !matches!(op, "set" | "get" | "del") {
+    if !matches!(op, "set" | "get" | "del" | "getmany") {
         bail!("internal error: unknown credential operation {op:?}");
+    }
+    if op == "getmany" {
+        // Names travel over stdin, so there is no target to inline.
+        if !target.is_empty() {
+            bail!("internal error: getmany takes no target");
+        }
+        return Ok(encode_script(&format!("$Op='getmany'; $Target=''\n{SCRIPT}")));
     }
     let target_ok = target.len() > "cbox/".len()
         && target.starts_with("cbox/")
@@ -41,9 +48,12 @@ fn encode_command(op: &str, target: &str) -> Result<String> {
     if !target_ok {
         bail!("internal error: credential target {target:?} is outside the allowed charset");
     }
-    let script = format!("$Op='{op}'; $Target='{target}'\n{SCRIPT}");
+    Ok(encode_script(&format!("$Op='{op}'; $Target='{target}'\n{SCRIPT}")))
+}
+
+fn encode_script(script: &str) -> String {
     let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    Ok(BASE64.encode(utf16))
+    BASE64.encode(utf16)
 }
 
 fn spawn_error(e: &std::io::Error) -> anyhow::Error {
@@ -77,9 +87,12 @@ impl Outcome {
 }
 
 fn run(op: &str, name: &str, stdin: Option<&str>) -> Result<Outcome> {
-    let cmd = encode_command(op, &format!("cbox/{name}"))?;
+    exec(&encode_command(op, &format!("cbox/{name}"))?, stdin)
+}
+
+fn exec(cmd: &str, stdin: Option<&str>) -> Result<Outcome> {
     let mut child = Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &cmd])
+        .args(["-NoProfile", "-NonInteractive", "-EncodedCommand", cmd])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -118,6 +131,40 @@ impl SecretStore for WinCredStore {
             bail!("reading secret {name:?} from {LABEL}: {}", out.stderr);
         }
         Ok(Some(StoredSecret::from_json(&out.stdout).with_context(|| format!("secret {name:?} in {LABEL}"))?))
+    }
+    fn get_many(&self, names: &[&str]) -> Vec<Result<Option<StoredSecret>>> {
+        // Same charset the script re-checks; an invalid name is never sent.
+        let valid = |n: &str| n.starts_with(|c: char| c.is_ascii_lowercase()) && n.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_'));
+        let sent: Vec<&str> = names.iter().copied().filter(|n| valid(n)).collect();
+        let mut fetched: Result<std::collections::HashMap<&str, Option<String>>, String> = Ok(Default::default());
+        if !sent.is_empty() {
+            let stdin = sent.iter().map(|n| format!("{n}\n")).collect::<String>();
+            fetched = match exec(&encode_command("getmany", "").expect("getmany takes no target"), Some(&stdin)) {
+                Err(e) => Err(format!("{e:#}")),
+                Ok(out) if !out.ok() => Err(format!("reading secrets from {LABEL}: {}", out.stderr)),
+                Ok(out) => Ok(out
+                    .stdout
+                    .lines()
+                    .filter_map(|l| l.trim_end_matches('\r').split_once('\t'))
+                    .filter_map(|(n, v)| sent.iter().find(|s| **s == n).map(|s| (*s, (v != "-").then(|| v.to_string()))))
+                    .collect()),
+            };
+        }
+        names
+            .iter()
+            .map(|&name| {
+                if !valid(name) {
+                    bail!("invalid secret name {name:?}");
+                }
+                let map = fetched.as_ref().map_err(|e| anyhow!("{e}"))?;
+                let Some(entry) = map.get(name) else {
+                    bail!("reading secret {name:?} from {LABEL}: no result returned");
+                };
+                let Some(b64) = entry else { return Ok(None) };
+                let json = BASE64.decode(b64).ok().and_then(|b| String::from_utf8(b).ok()).ok_or_else(|| anyhow!("reading secret {name:?} from {LABEL}: malformed result"))?;
+                Ok(Some(StoredSecret::from_json(&json).with_context(|| format!("secret {name:?} in {LABEL}"))?))
+            })
+            .collect()
     }
     fn exists(&self, name: &str) -> Result<bool> {
         let out = run("get", name, None)?;
@@ -208,7 +255,7 @@ mod tests {
         let sh = dir.join("powershell.exe");
         std::fs::write(
             &sh,
-            "#!/bin/sh\nd=$(dirname \"$0\")\ncat > \"$d/stdin\"\nprintf '%s\\n' \"$@\" > \"$d/args\"\n\
+            "#!/bin/sh\nd=$(dirname \"$0\")\necho x >> \"$d/count\"\ncat > \"$d/stdin\"\nprintf '%s\\n' \"$@\" > \"$d/args\"\n\
              s=$(cat \"$d/scenario\")\ncase \"$s\" in\n ok:*) printf '%s' \"${s#ok:}\"; exit 0;;\n nf) exit 3;;\n fail:*) printf '%s\\r\\n' \"${s#fail:}\" >&2; exit 1;;\nesac\n",
         )
         .unwrap();
@@ -291,5 +338,75 @@ mod tests {
         let _path = crate::test_env_lock::EnvVarGuard::set("PATH", "/nonexistent-cbox-dir");
         let r = WinCredStore.get("x");
         assert!(r.unwrap_err().to_string().contains("powershell.exe was not found"));
+    }
+
+    fn entry_line(name: &str, json: &str) -> String {
+        format!("{name}\t{}\n", BASE64.encode(json))
+    }
+
+    fn calls(d: &std::path::Path) -> usize {
+        std::fs::read_to_string(d.join("count")).unwrap().lines().count()
+    }
+
+    #[test]
+    fn get_many_is_one_spawn_and_keeps_order_and_states() {
+        let corrupt = r#"{"value":1}"#;
+            let scenario = format!("ok:{}b\t-\n{}", entry_line("a", JSON), entry_line("c", corrupt));
+        let (res, n, stdin, args) = with_fake(&scenario, |d| {
+            let r = WinCredStore.get_many(&["a", "b", "c"]);
+            (r, calls(d), std::fs::read_to_string(d.join("stdin")).unwrap(), std::fs::read_to_string(d.join("args")).unwrap())
+        });
+        assert_eq!(n, 1);
+        assert_eq!(stdin, "a\nb\nc\n");
+        let lines: Vec<&str> = args.lines().collect();
+        assert!(!args.contains("a\nb") && lines.len() == 4);
+        let script = decode(lines[3]);
+        assert!(script.starts_with("$Op='getmany'; $Target=''\n"));
+        assert_eq!(res.len(), 3);
+        assert_eq!(res[0].as_ref().unwrap().as_ref().unwrap().value, "sk-abc");
+        assert!(res[1].as_ref().unwrap().is_none());
+        let e = format!("{:#}", res[2].as_ref().unwrap_err());
+        assert!(e.contains("secret \"c\" in Windows Credential Manager"), "{e}");
+    }
+
+    #[test]
+    fn get_many_does_not_send_an_invalid_name() {
+        let scenario = format!("ok:{}", entry_line("a", JSON));
+        let (res, stdin) = with_fake(&scenario, |d| (WinCredStore.get_many(&["a", "Bad'; x", "a/b"]), std::fs::read_to_string(d.join("stdin")).unwrap()));
+        assert_eq!(stdin, "a\n");
+        assert!(res[0].is_ok() && res[1].is_err() && res[2].is_err());
+    }
+
+    #[test]
+    fn get_many_with_no_names_spawns_nothing() {
+        let n = with_fake("ok:", |d| {
+            assert!(WinCredStore.get_many(&[]).is_empty());
+            d.join("count").exists()
+        });
+        assert!(!n);
+    }
+
+    #[test]
+    fn get_many_whole_call_failure_is_an_error_for_every_entry() {
+        let res = with_fake("fail:boom", |_| WinCredStore.get_many(&["a", "b"]));
+        assert_eq!(res.len(), 2);
+        for r in res {
+            assert!(r.unwrap_err().to_string().contains("boom"));
+        }
+    }
+
+    #[test]
+    fn get_many_missing_output_line_is_an_error_not_none() {
+        let scenario = format!("ok:{}", entry_line("a", JSON));
+        let res = with_fake(&scenario, |_| WinCredStore.get_many(&["a", "b"]));
+        assert!(res[0].as_ref().unwrap().is_some());
+        assert!(res[1].as_ref().unwrap_err().to_string().contains("no result"));
+    }
+
+    #[test]
+    fn the_getmany_script_text_contains_no_name() {
+        let script = decode(&encode_command("getmany", "").unwrap());
+        assert!(script.contains("-cnotmatch '^[a-z][a-z0-9_-]*$'"));
+        assert!(encode_command("getmany", "cbox/x").is_err());
     }
 }

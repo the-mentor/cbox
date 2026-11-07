@@ -128,7 +128,11 @@ directly, not a `keyring-core` store. It runs `powershell.exe` through WSL inter
 embedded script (`wincred.ps1`) that calls `CredWriteW/CredReadW/CredDeleteW` via a compiled
 C# type, under the target name `cbox/<name>`. It is used when `/proc/sys/kernel/osrelease`
 contains "microsoft". The secret goes over stdin only, never argv. Each operation is one
-PowerShell call of about 0.5 s (almost all startup), so `list` costs one call per secret.
+PowerShell call of about 0.5 s (almost all startup). `list` and `up --secret NAME` read all
+their names with one batched call (`get_many`; the names go over stdin and the script
+re-validates each), so they cost one call per command; `create`, `edit` and `delete` take one
+to three calls. The batched `getmany` operation has only been tested against a fake
+`powershell.exe`; it has not been run on real WSL.
 Credential Manager caps a value at 2560 bytes (fine for tokens). It needs WSL interop and
 `powershell.exe` on PATH; if the program cannot be started, the error points at both.
 

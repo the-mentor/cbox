@@ -110,11 +110,25 @@ pub fn is_store_reference(flag: &str) -> bool {
 
 /// Look `name` up in the store. A missing name is an error, never a fallback
 /// to a host variable: the user asked for the stored secret.
+#[cfg(test)]
 pub fn spec_from_store(store: &dyn SecretStore, name: &str) -> Result<SecretSpec> {
-    crate::secretstore::validate_name(name)?;
-    let StoredSecret { value, hosts, env } =
-        store.get(name)?.ok_or_else(|| anyhow!("secret {name:?} not found; run cbox secret create {name}"))?;
-    Ok(SecretSpec { name: name.to_string(), env_var: env, hosts, value: Some(value), stored: true })
+    Ok(specs_from_store(store, &[name])?.remove(0))
+}
+
+/// `spec_from_store` for several names with one batched store read; errors are reported in name order.
+pub fn specs_from_store(store: &dyn SecretStore, names: &[&str]) -> Result<Vec<SecretSpec>> {
+    for name in names {
+        crate::secretstore::validate_name(name)?;
+    }
+    names
+        .iter()
+        .zip(store.get_many(names))
+        .map(|(name, found)| {
+            let StoredSecret { value, hosts, env } =
+                found?.ok_or_else(|| anyhow!("secret {name:?} not found; run cbox secret create {name}"))?;
+            Ok(SecretSpec { name: name.to_string(), env_var: env, hosts, value: Some(value), stored: true })
+        })
+        .collect()
 }
 
 /// Two secrets writing the same in-box variable (or sharing a name, hence a
@@ -487,6 +501,30 @@ mod tests {
         }
         fn put(&self, _: &str, _: &StoredSecret) -> Result<()> { unimplemented!() }
         fn delete(&self, _: &str) -> Result<bool> { unimplemented!() }
+    }
+
+    #[test]
+    fn specs_from_store_batches_and_reports_the_first_missing_name() {
+        use std::cell::Cell;
+        struct Counting(FakeStore, Cell<usize>);
+        impl SecretStore for Counting {
+            fn label(&self) -> &'static str { "c" }
+            fn max_entry_bytes(&self) -> Option<usize> { None }
+            fn get(&self, _: &str) -> Result<Option<StoredSecret>> { panic!("must batch") }
+            fn get_many(&self, names: &[&str]) -> Vec<Result<Option<StoredSecret>>> {
+                self.1.set(self.1.get() + 1);
+                names.iter().map(|n| self.0.get(n)).collect()
+            }
+            fn put(&self, _: &str, _: &StoredSecret) -> Result<()> { unimplemented!() }
+            fn delete(&self, _: &str) -> Result<bool> { unimplemented!() }
+        }
+        let st = Counting(FakeStore::with("one", "v", &["a.com"], "K1"), Cell::new(0));
+        let specs = specs_from_store(&st, &["one"]).unwrap();
+        assert_eq!((specs[0].name.as_str(), st.1.get()), ("one", 1));
+        let err = specs_from_store(&st, &["one", "x"]).unwrap_err().to_string();
+        assert_eq!((err.as_str(), st.1.get()), ("secret \"x\" not found; run cbox secret create x", 2));
+        assert!(specs_from_store(&st, &["one", "gh"]).is_err());
+        assert_eq!(st.1.get(), 2, "validation happens before any read");
     }
 
     #[test]

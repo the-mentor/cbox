@@ -51,11 +51,13 @@ pub fn create(store: &dyn SecretStore, index_path: &Path, name: &str, s: StoredS
 }
 
 pub fn list(store: &dyn SecretStore, index_path: &Path) -> Result<Vec<ListRow>> {
-    Ok(Index::load(index_path)?
-        .names
+    let names = Index::load(index_path)?.names;
+    let results = store.get_many(&names.iter().map(String::as_str).collect::<Vec<_>>());
+    Ok(names
         .into_iter()
-        .map(|name| {
-            let state = match store.get(&name) {
+        .zip(results)
+        .map(|(name, result)| {
+            let state = match result {
                 Ok(Some(s)) => RowState::Ok { hosts: s.hosts, env: s.env },
                 Ok(None) => RowState::Missing,
                 Err(_) => RowState::Unreadable,
@@ -538,6 +540,31 @@ mod tests {
         assert!(e.ends_with("(run `cbox secret edit openai` to add it to the index)"), "{e}");
         assert!(!e.contains("TOPSECRET"), "{e}");
         assert_eq!(st.get("openai").unwrap().unwrap().value, "sk-TOPSECRET");
+    }
+
+    #[test]
+    fn list_reads_all_names_with_one_get_many_call() {
+        struct Counting(std::cell::Cell<usize>);
+        impl SecretStore for Counting {
+            fn label(&self) -> &'static str { "c" }
+            fn max_entry_bytes(&self) -> Option<usize> { None }
+            fn get(&self, _: &str) -> Result<Option<StoredSecret>> { panic!("list must batch") }
+            fn get_many(&self, names: &[&str]) -> Vec<Result<Option<StoredSecret>>> {
+                self.0.set(self.0.get() + 1);
+                names.iter().map(|_| Ok(None)).collect()
+            }
+            fn put(&self, _: &str, _: &StoredSecret) -> Result<()> { unimplemented!() }
+            fn delete(&self, _: &str) -> Result<bool> { unimplemented!() }
+        }
+        let d = tempdir::D::new();
+        let mut idx = Index::load(&d.index()).unwrap();
+        for n in ["a", "b", "c"] {
+            idx.insert(n);
+        }
+        idx.save(&d.index()).unwrap();
+        let st = Counting(Default::default());
+        let rows = list(&st, &d.index()).unwrap();
+        assert_eq!((rows.len(), st.0.get()), (3, 1));
     }
 
     #[test]
