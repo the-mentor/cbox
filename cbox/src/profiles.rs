@@ -72,7 +72,11 @@ impl Profiles {
     /// Atomic: temp file in the same directory, then rename.
     pub fn save(&self, path: &Path) -> Result<()> {
         // The toml error text is never shown: it can quote a value.
-        let body = toml::to_string_pretty(&self.0).map_err(|_| anyhow::anyhow!("cannot encode profiles for {}", path.display()))?;
+        let enc = |m: &BTreeMap<&String, &Profile>| toml::to_string_pretty(m).map_err(|_| anyhow::anyhow!("cannot encode profiles for {}", path.display()));
+        // `[default]` first (the map would sort it alphabetically), the rest alphabetical.
+        let (first, rest): (BTreeMap<_, _>, BTreeMap<_, _>) = self.0.iter().partition(|(n, _)| n.as_str() == DEFAULT);
+        let (a, b) = (enc(&first)?, enc(&rest)?);
+        let body = if b.is_empty() { a } else if a.is_empty() { b } else { format!("{a}\n{b}") };
         write_atomic(path, &body)
     }
 
@@ -901,6 +905,45 @@ mod tests {
         assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
         assert_eq!(std::fs::metadata(f.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
         assert!(!std::fs::read_to_string(&f).unwrap().contains("cpus = null"));
+    }
+
+    #[test]
+    fn save_writes_default_first_then_alphabetical() {
+        let f = tmp("order").join("profiles.toml");
+        let mut m = BTreeMap::new();
+        for n in ["work", "default", "cbox-builder", "aaa"] {
+            m.insert(n.to_string(), Profile::default());
+        }
+        m.get_mut("default").unwrap().cpus = Some(2);
+        m.get_mut("work").unwrap().env = vec!["K=v".into(), "L=w".into()];
+        let p = Profiles(m);
+        p.save(&f).unwrap();
+        let body = std::fs::read_to_string(&f).unwrap();
+        let heads: Vec<&str> = body.lines().filter(|l| l.starts_with('[')).collect();
+        assert_eq!(heads, ["[default]", "[aaa]", "[cbox-builder]", "[work]"]);
+        assert!(body.starts_with("[default]\ncpus = 2\n\n[aaa]\n"), "{body}");
+        assert!(body.ends_with('\n') && !body.ends_with("\n\n") && !body.contains("\n\n\n"));
+        assert!(body.contains("env = ["));
+        assert_eq!(Profiles::load(&f).unwrap(), p);
+        p.save(&f).unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), body);
+    }
+
+    #[test]
+    fn save_empty_default_is_still_first() {
+        let f = tmp("order2").join("profiles.toml");
+        let mut m = BTreeMap::new();
+        m.insert("default".to_string(), Profile::default());
+        m.insert("aaa".to_string(), Profile { cpus: Some(1), ..Profile::default() });
+        let p = Profiles(m);
+        p.save(&f).unwrap();
+        let body = std::fs::read_to_string(&f).unwrap();
+        assert_eq!(body, "[default]\n\n[aaa]\ncpus = 1\n");
+        assert_eq!(Profiles::load(&f).unwrap(), p);
+        // default alone
+        let g = tmp("order3").join("profiles.toml");
+        Profiles::load(&g).unwrap().save(&g).unwrap();
+        assert_eq!(std::fs::read_to_string(&g).unwrap(), "[default]\n");
     }
 
     #[test]

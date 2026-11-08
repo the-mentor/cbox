@@ -190,7 +190,8 @@ cbox profile validate [NAME]
   `default`). A TOML syntax, key or type error is reported alone, since the file cannot be
   read past it.
 - `create`, `edit` and `delete` rewrite the whole file: comments are dropped, and a
-  symlinked `profiles.toml` becomes a regular file.
+  symlinked `profiles.toml` becomes a regular file. `[default]` is always written first,
+  the other profiles after it alphabetically (a hand-edited order stays until the next write).
 - Nothing prints a secret value (none are read).
 
 ### The `just` recipe
