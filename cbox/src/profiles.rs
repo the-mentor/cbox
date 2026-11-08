@@ -30,7 +30,7 @@ pub struct Profiles(pub BTreeMap<String, Profile>);
 impl Profiles {
     pub fn load(path: &Path) -> Result<Profiles> {
         let mut map: BTreeMap<String, Profile> = match std::fs::read_to_string(path) {
-            Ok(s) => toml::from_str(&s).map_err(|e| anyhow::anyhow!("invalid {}: {e}", path.display()))?,
+            Ok(s) => toml::from_str(&s).map_err(|e| parse_error(path, &s, &e))?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
             Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
         };
@@ -40,12 +40,25 @@ impl Profiles {
 
     /// Atomic: temp file in the same directory, then rename.
     pub fn save(&self, path: &Path) -> Result<()> {
-        write_atomic(path, &toml::to_string_pretty(&self.0)?)
+        // The toml error text is never shown: it can quote a value.
+        let body = toml::to_string_pretty(&self.0).map_err(|_| anyhow::anyhow!("cannot encode profiles for {}", path.display()))?;
+        write_atomic(path, &body)
     }
 
     pub fn get(&self, name: &str) -> Option<&Profile> {
         self.0.get(name)
     }
+}
+
+/// Path and location only: toml's message and source excerpt can quote a pasted value.
+fn parse_error(path: &Path, src: &str, e: &toml::de::Error) -> anyhow::Error {
+    let at = e.span().map_or(String::new(), |s| {
+        let before = src.get(..s.start).unwrap_or(src);
+        let line = before.matches('\n').count() + 1;
+        let column = before.rsplit('\n').next().unwrap_or("").chars().count() + 1;
+        format!("line {line}, column {column}: ")
+    });
+    anyhow::anyhow!("invalid {}: {at}not valid TOML or not a valid profile (unknown key or wrong type); fix or remove that entry", path.display())
 }
 
 /// Sorted names of the profiles that list `secret`.
@@ -523,7 +536,25 @@ mod tests {
         let f = d.join("profiles.toml");
         std::fs::write(&f, "[default]\nmemroy = 4\n").unwrap();
         let e = Profiles::load(&f).unwrap_err().to_string();
-        assert!(e.contains(&f.display().to_string()) && e.contains("memroy"), "{e}");
+        assert_eq!(e, format!("invalid {}: line 2, column 1: not valid TOML or not a valid profile (unknown key or wrong type); fix or remove that entry", f.display()));
+    }
+
+    #[test]
+    fn parse_errors_never_echo_the_file_contents() {
+        let d = tmp("leak");
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("profiles.toml");
+        for (body, line) in [
+            ("[default]\n\n[x]\ntoken = \"sk-DUMMY-VALUE-123\"\n", 4),
+            ("[default]\ncpus = \"sk-DUMMY-VALUE-123\"\n", 2),
+            ("[default]\n[x]\nimage = \"i\"\nsecrets = \"sk-DUMMY-VALUE-123\"\n", 4),
+            ("[default]\nsk-DUMMY-VALUE-123 = = 1\n", 2),
+        ] {
+            std::fs::write(&f, body).unwrap();
+            let e = format!("{:#}", Profiles::load(&f).unwrap_err());
+            assert!(!e.contains("sk-DUMMY"), "{e}");
+            assert!(e.contains(&f.display().to_string()) && e.contains(&format!("line {line},")), "{e}");
+        }
     }
 
     #[test]

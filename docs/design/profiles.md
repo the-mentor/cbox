@@ -201,7 +201,10 @@ longer exists in `profiles.toml`; the error says to pass `--profile NAME`.
   empty `default`; no command fails because of it. Startup never overwrites or edits an
   existing file.
 - A `profiles.toml` that does not parse (syntax error, unknown key, wrong type) is an
-  error naming the file and line. `up` fails on it; there is no fallback to built-ins.
+  error naming the file, line and column, e.g. `invalid <path>: line 4, column 1: not
+  valid TOML or not a valid profile (unknown key or wrong type); fix or remove that
+  entry`. It never quotes the file: no source line, key or value (a value pasted by
+  mistake would otherwise reach the terminal). `up` fails on it; there is no fallback to built-ins.
   `secret delete` warns that it could not check the profiles and still deletes.
 - Boxes created before this feature have no recorded profile in their sidecar. The new
   sidecar fields are optional, and on resume the profile diff is skipped for them.
