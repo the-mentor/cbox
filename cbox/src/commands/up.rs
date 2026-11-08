@@ -47,21 +47,12 @@ pub async fn run(args: UpArgs) -> Result<()> {
     // Profile first: a bad profiles.toml or profile aborts before any box work.
     let profiles_file = config::profiles_path().context("cannot locate config directory for profiles.toml")?;
     let all_profiles = profiles::Profiles::load(&profiles_file)?;
-    // With -f the old box is discarded, so its recorded profile no longer applies.
-    let old_sidecar = if args.force { None } else { sidecar::read(&config::box_home(&name)) };
-    let profile_name = match (&args.profile, old_sidecar.as_ref().and_then(|s| s.profile.as_ref())) {
-        (Some(p), _) => p.clone(),
-        (None, Some(snap)) => {
-            anyhow::ensure!(
-                all_profiles.get(&snap.name).is_some(),
-                "profile {} (used to create this box) no longer exists in profiles.toml; \
-                 pass --profile NAME or recreate the box with -f",
-                snap.name
-            );
-            snap.name.clone()
-        }
-        (None, None) => profiles::DEFAULT.to_string(),
-    };
+    let old_sidecar = sidecar::read(&config::box_home(&name));
+    let profile_name = profiles::choose(
+        args.profile.as_deref(),
+        old_sidecar.as_ref().and_then(|s| s.profile.as_ref()).map(|s| s.name.as_str()),
+        &all_profiles,
+    )?;
     let resolved_profile = profiles::resolve(
         &all_profiles, &profile_name, &args.secret_flags,
         args.image.as_deref(), args.cpus, args.memory_gb, args.disk_size_gb,
@@ -203,7 +194,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
                 );
             }
             let new = resolved_profile.snapshot();
-            if let Some(w) = existing.profile.as_ref().and_then(|old| profiles::resume_warning(old, &new, args.profile.as_deref())) {
+            if let Some(w) = profiles::resume_warning(existing.profile.as_ref(), &new, args.profile.as_deref()) {
                 eprintln!("{w}");
             }
         }

@@ -64,7 +64,8 @@ impl Resolved {
     pub fn snapshot(&self) -> ProfileSnapshot {
         ProfileSnapshot {
             name: self.profile_name.clone(),
-            secrets: self.secrets.clone(),
+            // Names only: no env var, host or pasted value from a `NAME=ENV@hosts` flag.
+            secrets: self.secrets.iter().map(|s| s.split('=').next().unwrap_or(s).to_string()).collect(),
             image: self.image.clone(),
             cpus: self.cpus,
             memory_gb: self.memory_gb,
@@ -99,6 +100,18 @@ pub fn resolve(
     })
 }
 
+/// `--profile` if given, else the box's recorded profile, else `default`.
+pub fn choose(asked: Option<&str>, recorded: Option<&str>, profiles: &Profiles) -> Result<String> {
+    match (asked, recorded) {
+        (Some(a), _) => Ok(a.to_string()),
+        (None, Some(r)) if profiles.get(r).is_none() => anyhow::bail!(
+            "profile {r} (used to create this box) no longer exists in profiles.toml; pass --profile NAME"
+        ),
+        (None, Some(r)) => Ok(r.to_string()),
+        (None, None) => Ok(DEFAULT.to_string()),
+    }
+}
+
 /// Human-readable differences, empty when the snapshots match.
 pub fn diff(old: &ProfileSnapshot, new: &ProfileSnapshot) -> Vec<String> {
     let mut out = Vec::new();
@@ -128,7 +141,8 @@ pub fn diff(old: &ProfileSnapshot, new: &ProfileSnapshot) -> Vec<String> {
 
 /// The stderr warning for a resumed box whose profile now resolves differently.
 /// `asked` is the `--profile` passed on this run, if any.
-pub fn resume_warning(old: &ProfileSnapshot, new: &ProfileSnapshot, asked: Option<&str>) -> Option<String> {
+pub fn resume_warning(old: Option<&ProfileSnapshot>, new: &ProfileSnapshot, asked: Option<&str>) -> Option<String> {
+    let old = old?; // boxes from before profiles record none: stay quiet
     let lines = diff(old, new);
     if lines.is_empty() {
         return None;
@@ -274,6 +288,23 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_keeps_secret_names_only() {
+        let r = resolve(&two(), "foo", &strs(&["Q=ENV@h"]), None, None, None, None).unwrap();
+        assert_eq!(r.snapshot().secrets, strs(&["a", "b", "Q"]));
+    }
+
+    #[test]
+    fn choose_picks_asked_then_recorded_then_default() {
+        let p = two();
+        assert_eq!(choose(Some("default"), Some("foo"), &p).unwrap(), "default");
+        assert_eq!(choose(None, Some("foo"), &p).unwrap(), "foo");
+        assert_eq!(choose(None, None, &p).unwrap(), "default");
+        let e = choose(None, Some("gone"), &p).unwrap_err().to_string();
+        assert!(e.contains("gone") && e.contains("--profile"), "{e}");
+        assert_eq!(choose(Some("other"), Some("gone"), &p).unwrap(), "other");
+    }
+
+    #[test]
     fn resolve_rejects_a_flag_secret_already_in_the_profile() {
         for f in ["b", "b=ENV@h"] {
             let e = resolve(&two(), "foo", &strs(&[f]), None, None, None, None).unwrap_err().to_string();
@@ -314,13 +345,14 @@ mod tests {
         let a = resolve(&two(), "foo", &[], None, None, None, None).unwrap().snapshot();
         let mut b = a.clone();
         b.memory_gb = Some(8);
-        let w = resume_warning(&a, &b, None).unwrap();
+        let w = resume_warning(Some(&a), &b, None).unwrap();
         assert!(w.starts_with("cbox: warning: profile foo differs from this box (created with foo):\n  memory: default -> 8 GiB\n"), "{w}");
         assert!(w.ends_with("the box keeps its OLD settings until you run with -f/--force to recreate it."), "{w}");
         b.name = "bar".into();
-        let w = resume_warning(&a, &b, Some("bar")).unwrap();
+        let w = resume_warning(Some(&a), &b, Some("bar")).unwrap();
         assert!(w.starts_with("cbox: warning: you asked for profile bar; this box was created with profile foo:\n"), "{w}");
-        assert_eq!(resume_warning(&a, &a, None), None);
+        assert_eq!(resume_warning(Some(&a), &a, None), None);
+        assert_eq!(resume_warning(None, &b, None), None);
     }
 
     fn tmp(tag: &str) -> std::path::PathBuf {
