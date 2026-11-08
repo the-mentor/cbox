@@ -320,6 +320,11 @@ pub fn diff(old: &ProfileSnapshot, new: &ProfileSnapshot) -> Vec<String> {
     num(&mut out, "cpus", "", old.cpus, new.cpus);
     num(&mut out, "memory", " GiB", old.memory_gb, new.memory_gb);
     num(&mut out, "disk size", " GB", old.disk_size_gb, new.disk_size_gb);
+    if let (None, Some(b)) = (&old.env, &new.env) {
+        if !b.is_empty() {
+            out.push(format!("env: this box predates env tracking and may lack: {}", b.keys().cloned().collect::<Vec<_>>().join(", ")));
+        }
+    }
     if let (Some(a), Some(b)) = (&old.env, &new.env) {
         let names = |f: &dyn Fn(&String) -> bool| b.keys().chain(a.keys()).filter(|k| f(k)).cloned().collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>().join(", ");
         for (label, list) in [
@@ -766,7 +771,18 @@ mod tests {
         assert!(!d.join("\n").contains("old") && !d.join("\n").contains("new"));
         let old: ProfileSnapshot = serde_json::from_str(r#"{"name":"foo","secrets":["a","b"],"image":"cbox-custom","cpus":null,"memory_gb":null,"disk_size_gb":null}"#).unwrap();
         assert_eq!(old.env, None);
-        assert_eq!((diff(&old, &b), diff(&b, &old)), (vec![], vec![]));
+        assert_eq!(diff(&b, &old), Vec::<String>::new());
+        assert_eq!(diff(&old, &env_snap(&[])), Vec::<String>::new());
+    }
+
+    #[test]
+    fn diff_tells_a_pre_env_box_which_variables_it_may_lack() {
+        let old: ProfileSnapshot = serde_json::from_str(r#"{"name":"foo","secrets":["a","b"],"image":"cbox-custom","cpus":null,"memory_gb":null,"disk_size_gb":null}"#).unwrap();
+        let new = env_snap(&["Z=secretvalue", "A=1"]);
+        let d = diff(&old, &new);
+        assert_eq!(d, strs(&["env: this box predates env tracking and may lack: A, Z"]));
+        let w = resume_warning(Some(&old), &new, None).unwrap();
+        assert!(w.contains("may lack: A, Z") && !w.contains("secretvalue") && w.ends_with("-f/--force to recreate it."), "{w}");
     }
 
     #[test]

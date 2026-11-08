@@ -273,7 +273,10 @@ longer exists in `profiles.toml`; the error says to pass `--profile NAME`.
   mistake would otherwise reach the terminal). `up` fails on it; there is no fallback to built-ins.
   `secret delete` warns that it could not check the profiles and still deletes.
 - Boxes created before this feature have no recorded profile in their sidecar. The new
-  sidecar fields are optional, and on resume the profile diff is skipped for them.
+  sidecar fields are optional, and on resume the profile diff is skipped for them. A box
+  that recorded a profile but predates `env` tracking (its snapshot has no `env`) gets one
+  line when the profile now has variables: `env: this box predates env tracking and may
+  lack: A, B` (names, sorted). It is silent when the profile has no variables.
 - Profile values are validated with the same limits as the flags (memory at least 1,
   `cpus` 1 to 255, disk size at least 1), by the same code, at `create`/`edit` and at `up`.
 - A missing `secrets.json` counts as no secrets, so `profile create --secrets a`
