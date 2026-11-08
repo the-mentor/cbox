@@ -94,9 +94,11 @@ valid inside a profile.
   nothing is written.
 - A secret deleted later is not tracked. For a new box, `cbox up --profile foo` fails
   validation with `profile foo: secrets: no secret named X (<profiles.toml path>)`.
-  Resuming a box whose profile lists it only warns (see Resuming a box).
-- `cbox secret delete NAME` names the profiles that use `NAME` in its confirmation
-  prompt. With `-y` it prints the same warning and proceeds. It does not refuse.
+  Resuming a box whose profile lists it only warns (see Resuming a box). The store's
+  "secret not found" error only appears if the index and the OS store disagree.
+- `cbox secret delete NAME` prints a separate line to stderr before the prompt, with or
+  without `-y`: `cbox: warning: secret "NAME" is used by profile(s): a, b. ...`. The
+  prompt itself is just `Delete secret "NAME"? [y/N]`. It does not refuse.
 
 ### Commands
 
@@ -162,7 +164,9 @@ longer exists in `profiles.toml`; the error says to pass `--profile NAME`.
   names, image, CPUs, memory, disk size.
 - With no `--profile` on a resume, `up` uses the profile name recorded in the box's
   sidecar (not `default`), so resuming a box made from `client-a` compares against
-  `client-a`'s current contents and is quiet if nothing changed. A new box with no
+  `client-a`'s current contents and is quiet if nothing changed. `up -f NAME` without
+  `--profile` also recreates the box from its recorded profile, and the "recorded profile
+  no longer exists" refusal applies to `-f` too. A new box with no
   `--profile` uses `default`. With `--profile X` on a resume, `up` compares against `X`,
   and says so when `X` is not the profile the box was created from.
 - On resume, `up` resolves that profile again, with the flags of this invocation, and
@@ -210,8 +214,10 @@ longer exists in `profiles.toml`; the error says to pass `--profile NAME`.
   sidecar fields are optional, and on resume the profile diff is skipped for them.
 - Profile values are validated with the same limits as the flags (memory at least 1,
   `cpus` 1 to 255, disk size at least 1), by the same code, at `create`/`edit` and at `up`.
-- A missing or empty `secrets.json` counts as no secrets, so `profile create --secrets a`
-  fails with the usual "no secret named a" error.
+- A missing `secrets.json` counts as no secrets, so `profile create --secrets a`
+  fails with the usual "no secret named a" error. A zero-byte or malformed one is an
+  error (`invalid index <path>`), for `profile create`/`edit`/`validate` and for `up`
+  with a profile that names secrets.
 - A full-form `--secret NAME=ENV@hosts` whose NAME is already in the profile fails the
   same way as a plain duplicate. Env-name collision checks run over the merged set.
 - `profile list` is plain text, one block per profile.
