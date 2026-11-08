@@ -223,7 +223,7 @@ mod tests {
         let src = dir.join("slow-hook.src");
         std::fs::write(&src, format!("#!/bin/sh\nsleep 0.2\ncat >> '{}'\necho >> '{}'\n", log.display(), log.display()))
             .unwrap();
-        assert!(std::process::Command::new("cp").arg(&src).arg(&cmd).status().unwrap().success());
+        assert!(std::process::Command::new("/bin/cp").arg(&src).arg(&cmd).status().unwrap().success());
         std::fs::set_permissions(&cmd, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
 
         let (tx, rx) = mpsc::unbounded_channel();

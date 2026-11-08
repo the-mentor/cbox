@@ -1,20 +1,21 @@
 //! Pure data rules for stored secrets: names, hosts, env vars, JSON form, size limit.
 
-// KeyringStore is compiled everywhere, but only usable where a store is registered (macOS today).
-#![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
-
 use anyhow::{Result, bail};
 
 mod index;
 mod service;
 mod store;
+#[cfg(test)]
+pub(crate) mod testing;
+#[cfg(target_os = "linux")]
+mod wincred;
 pub use index::Index;
 pub use service::{EditChanges, EditOutcome, HostChange, ListRow, RowState, check_absent, check_editable, create, delete, edit, exists, list};
 pub use store::{SecretStore, open_default};
 use serde::{Deserialize, Serialize};
 
-/// Windows Credential Manager (the planned WSL store) caps an entry at this many bytes.
-#[allow(dead_code)] // the WSL store that will use it is not implemented yet
+/// Windows Credential Manager (the WSL store) caps an entry at this many bytes.
+#[cfg_attr(target_os = "macos", allow(dead_code))] // only the Linux WSL store uses it
 pub const WSL_MAX_ENTRY_BYTES: usize = 2560;
 
 #[derive(Serialize, Deserialize)]
@@ -49,10 +50,13 @@ impl StoredSecret {
 /// Names of the built-in GitHub secrets; neither store nor flag form may use them.
 pub const RESERVED_NAMES: &[&str] = &["gh", "gh_basic"];
 
+/// A lowercase letter, then lowercase letters, digits, '-' or '_'. Must match the regex in wincred.ps1.
+pub(super) fn name_charset_ok(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_lowercase()) && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+}
+
 pub fn validate_name(name: &str) -> Result<()> {
-    let ok = name.starts_with(|c: char| c.is_ascii_lowercase())
-        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
-    if !ok {
+    if !name_charset_ok(name) {
         bail!("invalid secret name {name:?}: use lowercase letters, digits, '-' or '_', starting with a letter");
     }
     if RESERVED_NAMES.contains(&name) {
@@ -91,7 +95,7 @@ pub fn check_size(json: &str, limit: Option<usize>) -> Result<()> {
     if let Some(limit) = limit
         && json.len() > limit
     {
-        bail!("secret entry is {} bytes, over the {limit}-byte limit", json.len());
+        bail!("the stored entry is {} bytes (value plus hosts and env name), over the {limit}-byte limit", json.len());
     }
     Ok(())
 }

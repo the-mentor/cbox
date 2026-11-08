@@ -61,7 +61,7 @@ default) in the running box; against a `Stopped` box it says so and starts it (a
 before attaching, rather than either failing or doing that silently.
 
 Secrets live in the OS secret store and are managed with `cbox secret create|list|edit|delete`
-(macOS Keychain now; WSL and Linux desktop planned). `create NAME --host HOSTS --env VAR` reads
+(macOS Keychain and, under WSL, Windows Credential Manager; Linux desktop planned). `create NAME --host HOSTS --env VAR` reads
 the value from a hidden prompt or stdin; `edit NAME` with no flags replaces the value, while
 `--host` (replace), `--add-host`, `--remove-host` and `--env` change metadata and leave the value
 alone; `delete NAME [-y]` confirms first. Values are never printed. cbox never writes a value to

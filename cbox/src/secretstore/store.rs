@@ -1,3 +1,6 @@
+// KeyringStore is compiled everywhere but only used where a keyring store is registered (macOS).
+#![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
+
 use super::StoredSecret;
 use anyhow::{Context, Result, anyhow};
 use keyring_core::{Entry, Error};
@@ -9,6 +12,10 @@ pub trait SecretStore {
     /// Whether an entry exists, without parsing it (a corrupt entry still counts).
     fn exists(&self, name: &str) -> Result<bool> {
         Ok(self.get(name)?.is_some())
+    }
+    /// Reads several entries, results in input order. Stores with a costly call override this to batch.
+    fn get_many(&self, names: &[&str]) -> Vec<Result<Option<StoredSecret>>> {
+        names.iter().map(|n| self.get(n)).collect()
     }
     fn put(&self, name: &str, s: &StoredSecret) -> Result<()>;
     /// Returns whether an entry existed.
@@ -79,7 +86,11 @@ pub fn open_default() -> Result<Box<dyn SecretStore>> {
 
 #[cfg(not(target_os = "macos"))]
 pub fn open_default() -> Result<Box<dyn SecretStore>> {
+    #[cfg(target_os = "linux")]
+    if super::wincred::is_wsl() {
+        return Ok(Box::new(super::wincred::WinCredStore));
+    }
     anyhow::bail!(
-        "no secret store available on this platform (macOS Keychain is supported today; Windows/WSL and Linux desktop are planned)"
+        "no secret store available on this platform (macOS Keychain and Windows Credential Manager under WSL are supported; Linux desktop is planned)"
     )
 }

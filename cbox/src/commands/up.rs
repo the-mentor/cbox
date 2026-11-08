@@ -48,18 +48,8 @@ pub async fn run(args: UpArgs) -> Result<()> {
     if secrets::has_github_token() {
         specs.push(secrets::github_spec());
     }
-    // Opened only on first use, so users without stored secrets never touch it.
-    let mut store: Option<Box<dyn secretstore::SecretStore>> = None;
-    for flag in &args.secret_flags {
-        if secrets::is_store_reference(flag) {
-            if store.is_none() {
-                store = Some(secretstore::open_default()?);
-            }
-            specs.push(secrets::spec_from_store(store.as_deref().unwrap(), flag)?);
-        } else {
-            specs.push(secrets::parse_secret_flag(flag)?);
-        }
-    }
+    // The store opens only when a bare name exists; all bare names are read in one call.
+    specs.extend(secrets::specs_from_flags(&args.secret_flags, secretstore::open_default)?);
     secrets::check_unique_env(&specs)?;
     let built = secrets::build(&specs)?;
     let has_github = specs.iter().any(|s| s.name == "gh");
