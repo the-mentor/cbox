@@ -17,12 +17,15 @@ the user's personal GitHub token is a feature, not an accident.
 
 | Field | Meaning |
 |---|---|
-| `secrets` | Names of stored secrets (see `secrets.md`). Names only, never values or hosts. |
 | `image` | Image the box boots (same meaning as `up -i`). |
-| `cpus`, `memory` (GiB), `disk_size` (GB) | Same meaning as `up --cpus/--memory/--disk-size`. |
 | `env` | Plain, non-secret environment variables for the box, as `"KEY=VALUE"` strings (same meaning as `up -e`, except that a bare `KEY` host lookup is not allowed in a profile). |
+| `secrets` | Names of stored secrets (see `secrets.md`). Names only, never values or hosts. |
+| `cpus`, `memory` (GiB), `disk_size` (GB) | Same meaning as `up --cpus/--memory/--disk-size`. |
 
-Every field is optional. Volumes (`-v`) are **not** in a profile in this version (see
+Every field is optional. Fields have one fixed order, both in `profiles.toml` as cbox
+writes it and in `cbox profile list`: `image`, `env`, `secrets`, `cpus`, `memory`,
+`disk_size` (unset fields are omitted). A hand-written file may use any order; it is
+normalised on the next write. Volumes (`-v`) are **not** in a profile in this version (see
 Follow-ups).
 
 ## Goals
@@ -56,10 +59,10 @@ else `~/.config/cbox/profiles.toml` (the same lookup as `config::secrets_index_p
 [default]
 
 [client-a]
-secrets = ["anthropic", "client-a-gh"]
 image = "ghcr.io/example/cbox-rust:latest"
-memory = 8
+secrets = ["anthropic", "client-a-gh"]
 cpus = 4
+memory = 8
 ```
 
 ### The default profile
@@ -110,11 +113,11 @@ valid inside a profile.
 
 ```toml
 [work]
-secrets = ["openai"]
 env = [
   "GIT_AUTHOR_NAME=Avri Chen-Roth",
   "GIT_AUTHOR_EMAIL=11185446+the-mentor@users.noreply.github.com",
 ]
+secrets = ["openai"]
 ```
 
 - `env` is an array of `"KEY=VALUE"` strings, split at the first `=` (a value may contain
@@ -180,7 +183,7 @@ cbox profile validate [NAME]
   `--unset-env`); `--reset image --cpus 4` is fine.
 - `create` refuses a name that exists. `edit` and `delete` fail on a missing name.
 - `delete` confirms first, like `secret delete`. `delete default` is refused.
-- `list` prints every profile with its contents.
+- `list` prints every profile with its contents, `[default]` first, fields in the fixed order above (`image`, each `env:` line, `secrets`, `cpus`, `memory`, `disk size`).
 - `validate` checks `profiles.toml` without starting anything: it parses the file
   (syntax, unknown keys, wrong types), applies the flag limits to every value, rejects
   `gh`/`gh_basic`, and checks that each named secret exists in the index. With NAME it
@@ -190,7 +193,8 @@ cbox profile validate [NAME]
   `default`). A TOML syntax, key or type error is reported alone, since the file cannot be
   read past it.
 - `create`, `edit` and `delete` rewrite the whole file: comments are dropped, and a
-  symlinked `profiles.toml` becomes a regular file.
+  symlinked `profiles.toml` becomes a regular file. `[default]` is always written first,
+  the other profiles after it alphabetically (a hand-edited order stays until the next write).
 - Nothing prints a secret value (none are read).
 
 ### The `just` recipe

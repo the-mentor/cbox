@@ -12,13 +12,13 @@ pub const DEFAULT: &str = "default";
 #[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub secrets: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
     /// "KEY=VALUE" entries, split at the first `=`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub image: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secrets: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpus: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31,9 +31,9 @@ pub struct Profile {
 impl std::fmt::Debug for Profile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Profile")
-            .field("secrets", &self.secrets)
-            .field("env", &RedactedEnv(&self.env))
             .field("image", &self.image)
+            .field("env", &RedactedEnv(&self.env))
+            .field("secrets", &self.secrets)
             .field("cpus", &self.cpus)
             .field("memory", &self.memory)
             .field("disk_size", &self.disk_size)
@@ -72,7 +72,11 @@ impl Profiles {
     /// Atomic: temp file in the same directory, then rename.
     pub fn save(&self, path: &Path) -> Result<()> {
         // The toml error text is never shown: it can quote a value.
-        let body = toml::to_string_pretty(&self.0).map_err(|_| anyhow::anyhow!("cannot encode profiles for {}", path.display()))?;
+        let enc = |m: &BTreeMap<&String, &Profile>| toml::to_string_pretty(m).map_err(|_| anyhow::anyhow!("cannot encode profiles for {}", path.display()));
+        // `[default]` first (the map would sort it alphabetically), the rest alphabetical.
+        let (first, rest): (BTreeMap<_, _>, BTreeMap<_, _>) = self.0.iter().partition(|(n, _)| n.as_str() == DEFAULT);
+        let (a, b) = (enc(&first)?, enc(&rest)?);
+        let body = if b.is_empty() { a } else if a.is_empty() { b } else { format!("{a}\n{b}") };
         write_atomic(path, &body)
     }
 
@@ -901,6 +905,69 @@ mod tests {
         assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
         assert_eq!(std::fs::metadata(f.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
         assert!(!std::fs::read_to_string(&f).unwrap().contains("cpus = null"));
+    }
+
+    #[test]
+    fn save_writes_default_first_then_alphabetical() {
+        let f = tmp("order").join("profiles.toml");
+        let mut m = BTreeMap::new();
+        for n in ["work", "default", "cbox-builder", "aaa"] {
+            m.insert(n.to_string(), Profile::default());
+        }
+        m.get_mut("default").unwrap().cpus = Some(2);
+        m.get_mut("work").unwrap().env = vec!["K=v".into(), "L=w".into()];
+        let p = Profiles(m);
+        p.save(&f).unwrap();
+        let body = std::fs::read_to_string(&f).unwrap();
+        let heads: Vec<&str> = body.lines().filter(|l| l.starts_with('[')).collect();
+        assert_eq!(heads, ["[default]", "[aaa]", "[cbox-builder]", "[work]"]);
+        assert!(body.starts_with("[default]\ncpus = 2\n\n[aaa]\n"), "{body}");
+        assert!(body.ends_with('\n') && !body.ends_with("\n\n") && !body.contains("\n\n\n"));
+        assert!(body.contains("env = ["));
+        assert_eq!(Profiles::load(&f).unwrap(), p);
+        p.save(&f).unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), body);
+    }
+
+    #[test]
+    fn save_writes_fields_in_the_fixed_order() {
+        let f = tmp("fields").join("profiles.toml");
+        let mut m = BTreeMap::new();
+        m.insert("a".to_string(), Profile {
+            secrets: vec!["s1".into()], env: vec!["A=1".into(), "B=2".into()], image: Some("img".into()),
+            cpus: Some(2), memory: Some(4), disk_size: Some(20),
+        });
+        let p = Profiles(m);
+        p.save(&f).unwrap();
+        let body = std::fs::read_to_string(&f).unwrap();
+        assert_eq!(body, "[a]\nimage = \"img\"\nenv = [\n    \"A=1\",\n    \"B=2\",\n]\nsecrets = [\"s1\"]\ncpus = 2\nmemory = 4\ndisk_size = 20\n");
+    }
+
+    #[test]
+    fn a_file_in_the_old_field_order_loads_equal() {
+        let d = tmp("oldorder");
+        std::fs::create_dir_all(&d).unwrap();
+        let (old, new) = (d.join("old.toml"), d.join("new.toml"));
+        std::fs::write(&old, "[a]\nsecrets = [\"s\"]\nenv = [\"A=1\"]\nimage = \"i\"\ncpus = 2\nmemory = 4\ndisk_size = 20\n").unwrap();
+        std::fs::write(&new, "[a]\nimage = \"i\"\nenv = [\"A=1\"]\nsecrets = [\"s\"]\ncpus = 2\nmemory = 4\ndisk_size = 20\n").unwrap();
+        assert_eq!(Profiles::load(&old).unwrap(), Profiles::load(&new).unwrap());
+    }
+
+    #[test]
+    fn save_empty_default_is_still_first() {
+        let f = tmp("order2").join("profiles.toml");
+        let mut m = BTreeMap::new();
+        m.insert("default".to_string(), Profile::default());
+        m.insert("aaa".to_string(), Profile { cpus: Some(1), ..Profile::default() });
+        let p = Profiles(m);
+        p.save(&f).unwrap();
+        let body = std::fs::read_to_string(&f).unwrap();
+        assert_eq!(body, "[default]\n\n[aaa]\ncpus = 1\n");
+        assert_eq!(Profiles::load(&f).unwrap(), p);
+        // default alone
+        let g = tmp("order3").join("profiles.toml");
+        Profiles::load(&g).unwrap().save(&g).unwrap();
+        assert_eq!(std::fs::read_to_string(&g).unwrap(), "[default]\n");
     }
 
     #[test]
