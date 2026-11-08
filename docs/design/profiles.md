@@ -93,7 +93,7 @@ valid inside a profile.
   index (`secrets.json`), not the OS store. A missing name fails the command and
   nothing is written.
 - A secret deleted later is not tracked. For a new box, `cbox up --profile foo` fails
-  validation with `profile foo: secrets: no secret named X (<profiles.toml path>)`.
+  validation with `profile foo: secrets entry N is not a stored secret (see cbox secret list) (<profiles.toml path>)` (entries are reported by position, never by text, so a value pasted into the list by mistake is not echoed).
   Resuming a box whose profile lists it only warns (see Resuming a box). The store's
   "secret not found" error only appears if the index and the OS store disagree.
 - `cbox secret delete NAME` prints a separate line to stderr before the prompt, with or
@@ -215,7 +215,7 @@ longer exists in `profiles.toml`; the error says to pass `--profile NAME`.
 - Profile values are validated with the same limits as the flags (memory at least 1,
   `cpus` 1 to 255, disk size at least 1), by the same code, at `create`/`edit` and at `up`.
 - A missing `secrets.json` counts as no secrets, so `profile create --secrets a`
-  fails with the usual "no secret named a" error. A zero-byte or malformed one is an
+  fails with the usual "is not a stored secret" error. A zero-byte or malformed one is an
   error (`invalid index <path>`), for `profile create`/`edit`/`validate` and for `up`
   with a profile that names secrets.
 - A full-form `--secret NAME=ENV@hosts` whose NAME is already in the profile fails the

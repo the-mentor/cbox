@@ -362,15 +362,19 @@ pub fn validate(name: &str, p: &Profile, known_secrets: &BTreeSet<String>) -> Ve
     if !crate::secretstore::name_charset_ok(name) {
         bad("invalid profile name: use lowercase letters, digits, '-' or '_', starting with a letter".into());
     }
-    let mut seen = BTreeSet::new();
-    for s in &p.secrets {
-        if let Err(e) = crate::secretstore::validate_name(s) {
-            bad(format!("secrets: {e}"));
+    // Entries are reported by position, never by text: a secret value pasted into the list by
+    // mistake must not be echoed back (rule: values never appear in errors).
+    for (i, s) in p.secrets.iter().enumerate() {
+        let n = i + 1;
+        if crate::secretstore::validate_name(s).is_err() {
+            bad(format!(
+                "secrets entry {n} is not a valid secret name (lowercase letters, digits, '-' or '_', starting with a letter; gh and gh_basic are reserved)"
+            ));
         } else if !known_secrets.contains(s) {
-            bad(format!("secrets: no secret named {s}"));
+            bad(format!("secrets entry {n} is not a stored secret (see cbox secret list)"));
         }
-        if !seen.insert(s) {
-            bad(format!("secrets: duplicate secret {s}"));
+        if let Some(first) = p.secrets[..i].iter().position(|o| o == s) {
+            bad(format!("secrets entry {n} repeats entry {}", first + 1));
         }
     }
     // One field at a time so every bad value is reported; name the field, not the CLI flag.
@@ -462,11 +466,11 @@ mod tests {
         let p = Profile { secrets: strs(&["a", "gone"]), ..Default::default() };
         let problems = validate("foo", &p, &known);
         let e = up_check(problems.clone(), false, &p.secrets, &known, "/x/profiles.toml").unwrap_err().to_string();
-        assert_eq!(e, "profile foo: secrets: no secret named gone (/x/profiles.toml)");
+        assert_eq!(e, "profile foo: secrets entry 2 is not a stored secret (see cbox secret list) (/x/profiles.toml)");
         let c = up_check(problems, true, &p.secrets, &known, "/x/profiles.toml").unwrap();
         assert_eq!(c.downgraded.as_deref(), Some(e.as_str()));
         assert_eq!(c.drop_secrets, strs(&["gone"]));
-        assert!(c.warnings[0].starts_with("cbox: warning: profile foo: secrets: no secret named gone"), "{:?}", c.warnings);
+        assert!(c.warnings[0].starts_with("cbox: warning: profile foo: secrets entry 2 is not a stored secret"), "{:?}", c.warnings);
         assert!(c.warnings.last().unwrap().contains("-f/--force"), "{:?}", c.warnings);
         assert_eq!(up_check(vec![], false, &p.secrets, &known, "f").unwrap(), UpCheck::default());
     }
@@ -522,7 +526,7 @@ mod tests {
         let f = prep_file("prep-strip", "[default]\nsecrets = [\"a\", \"ghost\"]\ncpus = 0\n");
         let flags = Profile { secrets: strs(&["b"]), ..Default::default() };
         let e = prepare_up(Some(&f), None, None, false, &flags, known_ab).unwrap_err().to_string();
-        assert!(e.contains("no secret named ghost") && e.contains("cpus must be greater than 0"), "{e}");
+        assert!(e.contains("is not a stored secret") && e.contains("cpus must be greater than 0"), "{e}");
         let p = prepare_up(Some(&f), None, None, true, &flags, known_ab).unwrap();
         assert_eq!(p.resolved.secrets, strs(&["a", "b"]));
         assert_eq!(p.snapshot.secrets, strs(&["a", "b"]));
@@ -698,18 +702,30 @@ mod tests {
     }
 
     #[test]
+    fn validate_never_echoes_a_secret_entry() {
+        let known: BTreeSet<String> = ["real".to_string()].into();
+        let p = Profile {
+            secrets: vec!["sk-DUMMY-VALUE-123".into(), "sk-dummyvalue456".into(), "real".into(), "real".into()],
+            ..Default::default()
+        };
+        let v = validate("foo", &p, &known).join("\n");
+        assert!(!v.contains("DUMMY") && !v.contains("dummyvalue"), "{v}");
+        assert!(v.contains("entry 1 is not a valid secret name") && v.contains("entry 2 is not a stored secret") && v.contains("entry 4 repeats entry 3"), "{v}");
+    }
+
+    #[test]
     fn validate_reports_every_problem() {
         let known: BTreeSet<String> = ["good".to_string()].into();
         let p = Profile { secrets: vec!["gh".into(), "good".into(), "good".into(), "nope".into()], memory: Some(0), ..Default::default() };
         let v = validate("Bad", &p, &known);
         assert_eq!(v.len(), 5, "{v:?}");
         assert!(v.iter().any(|m| m.contains("invalid profile name")));
-        assert!(v.iter().any(|m| m.contains("secrets:") && m.contains("gh")));
+        assert!(v.iter().any(|m| m.contains("secrets entry") && m.contains("gh")));
         assert!(v.iter().all(|m| m.starts_with("profile Bad:")), "{v:?}");
         assert!(v.iter().any(|m| m.contains("name")));
         assert!(v.iter().any(|m| m.contains("gh")));
-        assert!(v.iter().any(|m| m.contains("duplicate")));
-        assert!(v.iter().any(|m| m.contains("no secret named nope")));
+        assert!(v.iter().any(|m| m.contains("repeats entry")));
+        assert!(v.iter().any(|m| m.contains("is not a stored secret")));
         assert!(v.iter().any(|m| m.contains("memory must be greater than 0") && !m.contains("--")));
         let e = Profile { image: Some(String::new()), ..Default::default() };
         assert!(validate("ok", &e, &known)[0].contains("image"));

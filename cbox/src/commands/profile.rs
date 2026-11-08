@@ -359,7 +359,7 @@ mod tests {
         std::fs::write(&p, body).unwrap();
         let problems = validate_file(&p, &idx, None).unwrap();
         assert!(problems.iter().any(|m| m.contains("profile Bad")), "{problems:?}");
-        assert!(problems.iter().any(|m| m.contains("no secret named ghost")), "{problems:?}");
+        assert!(problems.iter().any(|m| m.contains("is not a stored secret")), "{problems:?}");
         assert!(run_at(ProfileCmd::Validate { name: None }, &p, &idx, &mut no_ask, &mut Vec::new()).is_err());
         assert!(validate_file(&p, &idx, Some("nope")).is_err());
         assert_eq!(std::fs::read_to_string(&p).unwrap(), body);
@@ -401,7 +401,7 @@ mod tests {
         let (p, idx) = files("edit-fail", body);
         let cmd = edit("dev", Some("ghost"), None, None);
         let e = run_at(cmd, &p, &idx, &mut no_ask, &mut Vec::new()).unwrap_err().to_string();
-        assert!(e.contains("no secret named ghost"), "{e}");
+        assert!(e.contains("is not a stored secret"), "{e}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), body);
         let e = run_at(edit("nope", None, None, None), &p, &idx, &mut no_ask, &mut Vec::new()).unwrap_err().to_string();
         assert_eq!(e, "profile \"nope\" not found");
@@ -415,7 +415,7 @@ mod tests {
         let (p, idx) = files("edit-cpus", body);
         let cmd = edit("dev", None, None, Some(4));
         let e = run_at(cmd, &p, &idx, &mut no_ask, &mut Vec::new()).unwrap_err().to_string();
-        assert!(e.contains("no secret named deleted"), "{e}");
+        assert!(e.contains("is not a stored secret"), "{e}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), body);
         let fix = edit("dev", None, Some("deleted"), Some(4));
         run_at(fix, &p, &idx, &mut no_ask, &mut Vec::new()).unwrap();
@@ -438,7 +438,7 @@ mod tests {
         let (p, idx) = files("gh-basic", "[default]\nsecrets = [\"gh_basic\"]\n");
         let problems = validate_file(&p, &idx, None).unwrap();
         assert_eq!(problems.len(), 1, "{problems:?}");
-        assert!(problems[0].starts_with("profile default: secrets:") && problems[0].contains("reserved"), "{problems:?}");
+        assert!(problems[0].starts_with("profile default: secrets entry 1") && problems[0].contains("reserved"), "{problems:?}");
     }
 
     #[test]
