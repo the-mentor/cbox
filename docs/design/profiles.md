@@ -119,13 +119,16 @@ env = [
 
 - `env` is an array of `"KEY=VALUE"` strings, split at the first `=` (a value may contain
   more `=`). Order is kept. The variables reach the box the way `up -e` ones do.
-- Checks (`validate`, `create`, `edit`, `up`): an entry without `=`, a name that `up -e`
-  would reject, or the same name twice is an error. A well-formed variable (the part
-  before the first `=` is a valid name) is named in the error, since a name is not secret
-  (`env GIT_AUTHOR_NAME is set twice`). A malformed entry (no `=`, or an invalid name) is
-  reported by position (`env entry 2 ...`) and never by its text: a token pasted into the
-  list can end in `=` (base64 padding) and its first part would otherwise be echoed as
-  the "name".
+- Checks (`validate`, `create`, `edit`, `up`): an entry without `=`, a name that is not
+  letters, digits and `_` (not starting with a digit), or the same name twice is an error.
+  The name rule is stricter than `up -e`, which only rejects an empty name. A well-formed
+  variable is named in the error, since a name is not secret (`env GIT_AUTHOR_NAME is set
+  twice`). A malformed entry (no `=`, or an invalid name) is reported by position
+  (`env entry 2 ...`) and never by its text, because a bare token pasted without a
+  variable name would otherwise be split at its first `=` and its first part echoed as the
+  "name". A residual risk is accepted: a token of plain letters and digits followed by
+  `=` passes the name rule, and would show only in a duplicate error or the credential
+  warning.
 - **Credential warning (warn, never refuse).** A variable is flagged when its name has
   `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD` or `CREDENTIAL` as a whole word (split on
   `_`, any case), or when its value starts with `sk-`, `ghp_`, `github_pat_`, `AKIA` or
@@ -284,6 +287,8 @@ longer exists in `profiles.toml`; the error says to pass `--profile NAME`.
   matches `secrets = [...]` and the `up -e` syntax.
 - `--unset-env` takes a comma-separated list of names (names have no commas); `--env` is
   repeated instead, because a value may contain commas.
+- Variable names must match `[A-Za-z_][A-Za-z0-9_]*` in a profile. `up -e` accepts any
+  non-empty name; `up` applies the profile rule to profile entries only.
 - The credential check is names plus a short prefix list. No entropy test, no new
   dependency (user: it must be cheap to implement).
 
