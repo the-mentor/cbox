@@ -20,7 +20,7 @@ the user's personal GitHub token is a feature, not an accident.
 | `secrets` | Names of stored secrets (see `secrets.md`). Names only, never values or hosts. |
 | `image` | Image the box boots (same meaning as `up -i`). |
 | `cpus`, `memory` (GiB), `disk_size` (GB) | Same meaning as `up --cpus/--memory/--disk-size`. |
-| `env` | Plain, non-secret environment variables for the box, as `"KEY=VALUE"` strings (same meaning as `up -e`). |
+| `env` | Plain, non-secret environment variables for the box, as `"KEY=VALUE"` strings (same meaning as `up -e`, except that a bare `KEY` host lookup is not allowed in a profile). |
 
 Every field is optional. Volumes (`-v`) are **not** in a profile in this version (see
 Follow-ups).
@@ -210,7 +210,7 @@ longer exists in `profiles.toml`; the error says to pass `--profile NAME`.
   value) does not stop a resume. "Resume" means the box has a sidecar and `-f` was not
   passed, with or without `--profile`. `up` prints each problem as a `cbox: warning:`
   line, says the box keeps the settings it was created with and that this run ignores
-  the missing secrets, and points to `-f`. Profile secrets the index does not know (or
+  the missing secrets and the invalid env entries, and points to `-f`. Profile secrets the index does not know (or
   that are not a valid name) are left out of this run, so they show as removed in the
   diff below; a bad profile resource value falls back to the built-in for this run (the
   resumed box ignores it anyway). A `--secret X` flag for a missing `X` still fails, and

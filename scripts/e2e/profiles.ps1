@@ -5,11 +5,15 @@
 
 .DESCRIPTION
   Part A needs no VM: profiles.toml handling, the help-without-arguments behaviour, secrets
-  in the real OS store (dummy values), edit/--reset, delete warnings, and a check that no
-  dummy value is ever printed.
-  Part B boots one real box (skip it with -SkipUp; each `up` runs `sleep 2` and and the in-box checks start the cbox binary directly through .NET: build it first with `cb build-cbox`): the profile's cpus, memory, image and secret
-  reach the box, the "already in profile" check, and the resume cases (diff warning, deleted
-  secret, deleted profile, -f).
+  in the real OS store (dummy values), edit/--reset, delete warnings, environment variables
+  in a profile (A8: --env/--unset-env/--reset env, the credential warning, malformed and
+  duplicate entries), and a check that no dummy value is ever printed.
+  Part B boots one real box (skip it with -SkipUp; each `up` runs `sleep 2` and the in-box
+  checks start the cbox binary directly through .NET: build it first with `cb build-cbox`):
+  the profile's cpus, memory, image, secret and env variables (B4: exact values reach the
+  box) reach the box, the "already in profile" check, and the resume cases (diff warning,
+  including an env change that names the variable but not the value (B5b), deleted secret,
+  deleted profile, -f).
 
   Safe by design:
     * XDG_CONFIG_HOME points at a temp folder, so your real profiles.toml and secrets.json are

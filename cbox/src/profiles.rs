@@ -215,7 +215,7 @@ pub fn up_check(problems: Vec<String>, resuming: bool, profile_secrets: &[String
     let mut warnings: Vec<String> = problems.iter().map(|p| format!("cbox: warning: {p} ({file})")).collect();
     warnings.push(
         "cbox: warning: resuming anyway: the box keeps the settings it was created with, and this run ignores \
-         the missing secrets. Fix the profile, then run with -f/--force to recreate the box."
+         the missing secrets and the invalid env entries. Fix the profile, then run with -f/--force to recreate the box."
             .into(),
     );
     let drop_secrets = profile_secrets
@@ -255,7 +255,8 @@ pub fn prepare_up(
     let check = up_check(validate(&name, p, &known), resuming, &p.secrets, &known, &label)?;
     resolved.drop_profile_secrets(p.secrets.len(), &check.drop_secrets);
     if check.downgraded.is_some() {
-        // Keep compose from failing on a bare KEY (host lookup) or a bad name; first of a duplicate stays.
+        // Drop what validate() rejects (bare KEY, invalid name, bare-token shape, repeats; the first of a
+        // duplicate stays) so a resumed box never receives those entries.
         let mut seen = BTreeSet::new();
         resolved.env.retain(|e| env_pair(e).is_some_and(|(n, _)| seen.insert(n.to_string())));
         // A resumed box ignores options, but boxopts::build still checks them: fall back to
