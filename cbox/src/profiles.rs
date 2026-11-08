@@ -295,11 +295,17 @@ fn create_new_via(path: &Path, body: &str, link: impl Fn(&Path, &Path) -> std::i
         Ok(()) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
         // Filesystems without hard links (FAT, some SMB/9p/FUSE mounts): create_new still never replaces.
-        // A crash mid-write can leave a partial file on this fallback path only.
-        Err(_) => match std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path) {
-            Ok(mut f) => f.write_all(body.as_bytes()).map(|()| true).with_context(|| format!("writing {}", path.display())),
+        // A failed write removes the file it just created; only a crash mid-write can leave a partial one.
+        Err(orig) => match std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path) {
+            Ok(mut f) => match f.write_all(body.as_bytes()) {
+                Ok(()) => Ok(true),
+                Err(e) => {
+                    std::fs::remove_file(path).ok();
+                    Err(e).with_context(|| format!("writing {}", path.display()))
+                }
+            },
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
-            Err(e) => Err(e).with_context(|| format!("creating {}", path.display())),
+            Err(e) => Err(e).with_context(|| format!("creating {} (hard link failed first: {orig})", path.display())),
         },
     }
 }
@@ -639,6 +645,24 @@ mod tests {
         assert!(!create_new_via(&f, "[default]\n", no_link).unwrap());
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "[real]\n");
         assert_eq!(std::fs::read_dir(f.parent().unwrap()).unwrap().count(), 1, "tmp file left behind");
+    }
+
+    #[test]
+    fn a_failed_fallback_create_keeps_the_hard_link_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let f = tmp("fallback-ro").join("profiles.toml");
+        let dir = f.parent().unwrap().to_path_buf();
+        // The link "fails" and leaves the dir read-only, so the create_new retry fails too.
+        let no_link = |_: &Path, _: &Path| {
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+            Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
+        };
+        let e = create_new_via(&f, "[default]\n", no_link).unwrap_err();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let e = format!("{e:#}");
+        assert!(e.contains("creating ") && e.contains("hard link failed first: unsupported"), "{e}");
+        assert!(!f.exists());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

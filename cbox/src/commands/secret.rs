@@ -162,7 +162,7 @@ fn delete_warning(profiles: &Result<crate::profiles::Profiles>, name: &str) -> O
                 format!("cbox: warning: secret \"{name}\" is used by profile(s): {}. A new box from them will fail at \"cbox up\" (a resumed one only warns) until you remove it from them.", used.join(", "))
             })
         }
-        Err(e) => Some(format!("cbox: warning: could not check profiles.toml for uses of this secret ({e}).")),
+        Err(e) => Some(format!("cbox: warning: could not check profiles.toml for uses of this secret ({e:#}).")),
     }
 }
 
@@ -391,8 +391,8 @@ mod tests {
             Some("cbox: warning: secret \"k\" is used by profile(s): a, b. A new box from them will fail at \"cbox up\" (a resumed one only warns) until you remove it from them.")
         );
         assert_eq!(delete_warning(&p, "other"), None);
-        let e = Err(anyhow::anyhow!("boom"));
-        assert_eq!(delete_warning(&e, "k").as_deref(), Some("cbox: warning: could not check profiles.toml for uses of this secret (boom)."));
+        let e = Err(anyhow::anyhow!("boom").context("reading /x/profiles.toml"));
+        assert_eq!(delete_warning(&e, "k").as_deref(), Some("cbox: warning: could not check profiles.toml for uses of this secret (reading /x/profiles.toml: boom)."));
     }
 
     fn row(name: &str, state: RowState) -> ListRow {
