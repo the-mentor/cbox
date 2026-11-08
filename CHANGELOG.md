@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.27](https://github.com/the-mentor/cbox/compare/v0.1.26...v0.1.27) (2026-11-08)
+
+
+### Features
+
+* environment variables in profiles ([#154](https://github.com/the-mentor/cbox/issues/154)) ([ceabfa1](https://github.com/the-mentor/cbox/commit/ceabfa163229b11e9f7e011012ede52b732ddc33))
+
 ## [0.1.26](https://github.com/the-mentor/cbox/compare/v0.1.25...v0.1.26) (2026-11-08)
 
 
