@@ -25,7 +25,7 @@
   the script never uses them.
 .PARAMETER Image
   Image for the test profile. It must be pullable; the first run pulls it, which can take a while.
-  Default: ghcr.io/the-mentor/cbox-base-rust:latest. Pass -Image '' to skip the image check.
+  Default: ghcr.io/the-mentor/cbox-base:latest. Pass -Image '' to skip the image check.
 .PARAMETER SkipUp
   Run Part A only (no VM is started).
 
@@ -36,7 +36,7 @@
 #>
 param(
     [string]$Cbox = 'cb',
-    [string]$Image = 'ghcr.io/the-mentor/cbox-base-rust:latest',
+    [string]$Image = 'ghcr.io/the-mentor/cbox-base:latest',
     [switch]$SkipUp
 )
 
