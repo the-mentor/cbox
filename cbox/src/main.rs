@@ -21,7 +21,7 @@ mod terminal_guard;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
@@ -116,6 +116,8 @@ enum Commands {
         #[command(subcommand)]
         cmd: commands::profile::ProfileCmd,
     },
+    /// Print a shell completion script (bash, zsh, fish, powershell, elvish).
+    Completion { shell: clap_complete::Shell },
 }
 
 #[tokio::main]
@@ -152,6 +154,7 @@ async fn main() -> Result<()> {
         Commands::List { all } => commands::list::run(all).await?,
         Commands::Secret { cmd } => commands::secret::run(cmd)?,
         Commands::Profile { cmd } => commands::profile::run(cmd)?,
+        Commands::Completion { shell } => clap_complete::generate(shell, &mut Cli::command(), "cbox", &mut std::io::stdout()),
     }
     Ok(())
 }
