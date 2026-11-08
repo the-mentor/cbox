@@ -181,7 +181,7 @@ pub fn apply_edit(existing: &Profiles, name: &str, a: EditArgs) -> Result<Profil
     }
     for e in a.env {
         // A malformed entry is kept as-is (appended) so `check` reports it by position.
-        let key = profiles::split_env(&e).map(|(k, _)| k.to_string());
+        let key = profiles::split_env(&e).filter(|(k, _)| profiles::valid_env_name(k)).map(|(k, _)| k.to_string());
         if let Some(k) = &key {
             if a.unset_env.contains(k) {
                 bail!("--env {k} conflicts with --unset-env {k}");
@@ -192,7 +192,10 @@ pub fn apply_edit(existing: &Profiles, name: &str, a: EditArgs) -> Result<Profil
             None => p.env.push(e),
         }
     }
-    for n in a.unset_env {
+    for (i, n) in a.unset_env.into_iter().enumerate() {
+        if !profiles::valid_env_name(&n) {
+            bail!("--unset-env: item {} is not a valid variable name", i + 1);
+        }
         let Some(i) = p.env.iter().position(|x| profiles::split_env(x).is_some_and(|(k, _)| k == n)) else {
             bail!("profile {name:?} has no env variable {n:?}");
         };
@@ -229,7 +232,7 @@ fn format_list(p: &Profiles) -> String {
             lines.push(format!("secrets: {}", x.secrets.join(", ")));
         }
         for (i, e) in x.env.iter().enumerate() {
-            lines.push(match profiles::split_env(e) {
+            lines.push(match profiles::split_env(e).filter(|(k, _)| profiles::valid_env_name(k)) {
                 Some((k, v)) if profiles::is_credential_like(k, v) => format!("env: {k}=<hidden>"),
                 Some((k, v)) => format!("env: {k}={v}"),
                 None => format!("env: (invalid entry {})", i + 1),
@@ -654,6 +657,9 @@ mod tests {
         assert_eq!(e, "profile \"dev\" has no env variable \"X\"");
         let e = ed(EditArgs { env: v(&["A=1"]), unset_env: v(&["A"]), ..Default::default() }).unwrap_err().to_string();
         assert_eq!(e, "--env A conflicts with --unset-env A");
+        let e = ed(EditArgs { unset_env: v(&["A", "bad.LEAK"]), ..Default::default() }).unwrap_err().to_string();
+        assert_eq!(e, "--unset-env: item 2 is not a valid variable name");
+        assert!(!e.contains("LEAK"));
         for a in [EditArgs { env: v(&["A=1"]), ..Default::default() }, EditArgs { unset_env: v(&["A"]), ..Default::default() }] {
             let e = ed(EditArgs { reset: rs("env"), ..a }).unwrap_err().to_string();
             assert_eq!(e, "--reset env conflicts with --env and --unset-env");
@@ -676,10 +682,10 @@ mod tests {
 
     #[test]
     fn list_shows_env_and_hides_credential_like_values() {
-        let p = Profile { secrets: v(&["a"]), image: Some("i".into()), env: v(&["GIT_AUTHOR_NAME=Avri Chen-Roth", "MY_API_TOKEN=sk-DUMMY-VALUE-123", "bad"]), ..Default::default() };
+        let p = Profile { secrets: v(&["a"]), image: Some("i".into()), env: v(&["GIT_AUTHOR_NAME=Avri Chen-Roth", "MY_API_TOKEN=sk-DUMMY-VALUE-123", "bad", "sk-x=LEAK", "a.b=LEAK", "1A=LEAK"]), ..Default::default() };
         let out = format_list(&Profiles([("dev".to_string(), p)].into()));
-        assert_eq!(out, "dev\n  secrets: a\n  env: GIT_AUTHOR_NAME=Avri Chen-Roth\n  env: MY_API_TOKEN=<hidden>\n  env: (invalid entry 3)\n  image: i\n");
-        assert!(!out.contains("DUMMY"));
+        assert_eq!(out, "dev\n  secrets: a\n  env: GIT_AUTHOR_NAME=Avri Chen-Roth\n  env: MY_API_TOKEN=<hidden>\n  env: (invalid entry 3)\n  env: (invalid entry 4)\n  env: (invalid entry 5)\n  env: (invalid entry 6)\n  image: i\n");
+        assert!(!out.contains("DUMMY") && !out.contains("LEAK"));
     }
 
     #[test]

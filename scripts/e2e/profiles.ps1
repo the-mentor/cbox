@@ -305,6 +305,10 @@ try {
     Set-Content $profilesToml ($good + "`n[envbad]`nenv = [`"$noEq`"]`n")
     $r = Cbox @('profile', 'validate')
     Check 'env entry without "=": reported by position, value hidden' { $r.Code -ne 0 -and $r.Out -match 'env entry 1' -and $r.Out -notmatch $noEq } $r.Out
+    $leakEnv = "LEAK-$rand"
+    Set-Content $profilesToml ($good + "`n[envbad]`nenv = [`"sk-x=$leakEnv`", `"a.b=$leakEnv`"]`n")
+    $r = Cbox @('profile', 'list')
+    Check 'list shows a malformed env entry with "=" positionally, never its text' { $r.Code -eq 0 -and $r.Out -match '\(invalid entry 1\)' -and $r.Out -match '\(invalid entry 2\)' -and -not $r.Out.Contains($leakEnv) -and $r.Out -notmatch 'sk-x' } $r.Out
     Set-Content $profilesToml $good
 
     # ---------------------------------------------------------------- Part B

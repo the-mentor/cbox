@@ -381,7 +381,6 @@ fn create_new_via(path: &Path, body: &str, link: impl Fn(&Path, &Path) -> std::i
     }
 }
 
-/// One message per problem, each prefixed `profile NAME:`.
 /// Split "KEY=VALUE" at the first `=`.
 pub fn split_env(entry: &str) -> Option<(&str, &str)> {
     entry.split_once('=')
@@ -410,6 +409,7 @@ pub fn credential_warnings(profile_name: &str, p: &Profile) -> Vec<String> {
         .collect()
 }
 
+/// One message per problem, each prefixed `profile NAME:`.
 pub fn validate(name: &str, p: &Profile, known_secrets: &BTreeSet<String>) -> Vec<String> {
     let mut out = Vec::new();
     let mut bad = |m: String| out.push(format!("profile {name}: {m}"));
