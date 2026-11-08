@@ -220,10 +220,14 @@ try {
         else {
             $r = Cbox @('list', '-a')
             Check 'B2 list shows the box' { $r.Out -match [regex]::Escape($box) } $r.Out
+            # Look at this box's own row: other boxes on the machine may share the image.
+            $row = ($r.Out -split "`n" | Where-Object { $_ -match [regex]::Escape($box) } | Select-Object -First 1)
             if ($Image) {
+                # `list` truncates long image names, so compare the first 20 characters.
                 $prefix = $Image.Substring(0, [Math]::Min(20, $Image.Length))
-                Check 'B2 list shows the profile image' { $r.Out -match [regex]::Escape($prefix) } $r.Out
+                Check 'B2 the box row shows the profile''s image' { $row -match [regex]::Escape($prefix) } $row
             }
+            else { Skip 'B2 the box row shows the profile''s image' 'pass -Image <pullable image> to test it' }
 
             $r = InBox 'echo cpus=$(nproc); awk ''/MemTotal/{print "memmb=" int($2/1024)}'' /proc/meminfo; sleep 2'
             if ($r.Code -ne 0) { Skip 'B3/B4 resource and secret checks' "command failed: $($r.Out)" }
@@ -261,6 +265,9 @@ try {
 
             $r = Cbox @('up', $box, '-f', '--profile', 'pb', '-d', '--', 'sleep', '2')
             Check 'B9 -f recreates the box from profile pb' { $r.Code -eq 0 } "exit $($r.Code): $($r.Out)"
+            $r = Cbox @('list', '-a')
+            $row = ($r.Out -split "`n" | Where-Object { $_ -match [regex]::Escape($box) } | Select-Object -First 1)
+            Check 'B9 pb sets no image, so the recreated box uses the built-in cbox-custom' { $row -match 'cbox-custom' } $row
             $r = InBox 'echo cpus=$(nproc); sleep 2'
             Check 'B9 the recreated box has pb''s 3 vCPUs (built-in is 2)' { $r.Code -eq 0 -and $r.Out -match 'cpus=3\b' } $r.Out
             $r = Cbox @('up', $box, '-d', '--', 'sleep', '2')
