@@ -11,6 +11,7 @@ use std::path::Path;
 #[derive(Subcommand)]
 pub enum ProfileCmd {
     /// Create a profile in profiles.toml.
+    #[command(arg_required_else_help = true)]
     Create {
         name: String,
         /// Comma-separated secret names.
@@ -30,6 +31,7 @@ pub enum ProfileCmd {
     /// List profiles.
     List,
     /// Change a profile; flags given replace that field.
+    #[command(arg_required_else_help = true)]
     Edit {
         name: String,
         /// Replace the secret list (comma-separated).
@@ -51,6 +53,7 @@ pub enum ProfileCmd {
         disk_size: Option<u64>,
     },
     /// Delete a profile.
+    #[command(arg_required_else_help = true)]
     Delete {
         name: String,
         /// Skip the confirmation prompt.
@@ -474,6 +477,14 @@ mod tests {
         std::fs::write(&f, "").unwrap();
         let w = ensure_warning(&f.join("profiles.toml")).expect("warning");
         assert!(w.starts_with("cbox: warning: could not create ") && w.ends_with("using an empty default profile."), "{w}");
+    }
+
+    #[test]
+    fn create_edit_delete_without_args_show_help() {
+        for sub in ["create", "edit", "delete"] {
+            let e = Cli::try_parse_from(["cbox", "profile", sub]).err().unwrap();
+            assert_eq!(e.kind(), clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand, "{sub}");
+        }
     }
 
     #[test]
