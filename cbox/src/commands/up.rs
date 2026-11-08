@@ -60,6 +60,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
             cpus: args.cpus,
             memory: args.memory_gb,
             disk_size: args.disk_size_gb,
+            env: Vec::new(),
         },
         || {
             let index = config::secrets_index_path().context("cannot locate config directory for the secrets index")?;
@@ -67,6 +68,10 @@ pub async fn run(args: UpArgs) -> Result<()> {
         },
     )?;
     for w in &prepared.check.warnings {
+        eprintln!("{w}");
+    }
+    // Every run, new or resumed: the profile's own entries this run uses, never `-e` flags.
+    for w in profiles::credential_warnings(&prepared.resolved.profile_name, &prepared.resolved.env) {
         eprintln!("{w}");
     }
     let (resolved_profile, check) = (&prepared.resolved, &prepared.check);
@@ -88,7 +93,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
     let secret_hashes = secrets::resume_hashes(&specs, &built);
 
     let passthrough = secrets::passthrough_without_stored(env::passthrough_vars(), &specs);
-    let mut plain = env::compose(&args.env_flags, &passthrough, &built.source_vars)?;
+    let mut plain = env::compose(&profiles::env_with_flags(&resolved_profile.env, &args.env_flags), &passthrough, &built.source_vars)?;
     env::add_gateway_placeholder(&mut plain);
     plain.extend(built.env.clone());
     plain.push((

@@ -139,7 +139,7 @@ pub fn compose(
         let (key, value) = parse_e_flag(flag)?;
         if secret_vars.iter().any(|s| *s == key) {
             bail!(
-                "{key} is named as a secret source and cannot also be set with -e. \
+                "{key} is named as a secret source and cannot also be set with -e or in a profile's env. \
                  The guest must see the placeholder, not a value."
             );
         }

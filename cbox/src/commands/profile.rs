@@ -27,6 +27,9 @@ pub enum ProfileCmd {
         /// Rootfs disk size in GB.
         #[arg(long = "disk-size")]
         disk_size: Option<u64>,
+        /// Environment variable for the box, KEY=VALUE (repeatable).
+        #[arg(long, value_name = "KEY=VALUE")]
+        env: Vec<String>,
     },
     /// List profiles.
     List,
@@ -51,6 +54,12 @@ pub enum ProfileCmd {
         cpus: Option<u8>,
         #[arg(long = "disk-size")]
         disk_size: Option<u64>,
+        /// Set an environment variable, KEY=VALUE (repeatable; replaces the same name).
+        #[arg(long, value_name = "KEY=VALUE")]
+        env: Vec<String>,
+        /// Remove environment variables by name (comma-separated).
+        #[arg(long = "unset-env")]
+        unset_env: Option<String>,
         /// Stop setting these fields so cbox's built-ins apply (comma-separated).
         #[arg(long, value_enum, value_delimiter = ',', value_name = "FIELDS")]
         reset: Vec<ResetField>,
@@ -76,6 +85,8 @@ pub struct EditArgs {
     pub memory: Option<u32>,
     pub cpus: Option<u8>,
     pub disk_size: Option<u64>,
+    pub env: Vec<String>,
+    pub unset_env: Vec<String>,
     /// Fields to stop setting, from `--reset`.
     pub reset: Vec<ResetField>,
 }
@@ -87,6 +98,7 @@ pub enum ResetField {
     Cpus,
     Memory,
     DiskSize,
+    Env,
 }
 
 impl ResetField {
@@ -104,6 +116,22 @@ pub fn parse_names(s: &str) -> Result<Vec<String>> {
         }
         if out.iter().any(|o| o == item) {
             bail!("duplicate name {item:?}");
+        }
+        out.push(item.to_string());
+    }
+    Ok(out)
+}
+
+/// Like `parse_names` for `--unset-env`, but errors cite the item's position, never its text:
+/// a pasted `NAME=value` must not be echoed back.
+pub fn parse_unset_env(s: &str) -> Result<Vec<String>> {
+    let mut out: Vec<String> = Vec::new();
+    for (i, item) in s.split(',').map(str::trim).enumerate() {
+        if item.is_empty() {
+            bail!("--unset-env: item {} is empty", i + 1);
+        }
+        if let Some(j) = out.iter().position(|o| o == item) {
+            bail!("--unset-env: item {} repeats item {}", i + 1, j + 1);
         }
         out.push(item.to_string());
     }
@@ -132,10 +160,14 @@ pub fn apply_edit(existing: &Profiles, name: &str, a: EditArgs) -> Result<Profil
             ResetField::Cpus => a.cpus.is_some(),
             ResetField::Memory => a.memory.is_some(),
             ResetField::DiskSize => a.disk_size.is_some(),
+            ResetField::Env => !a.env.is_empty() || !a.unset_env.is_empty(),
         };
         if also_set {
             if *f == ResetField::Secrets {
                 bail!("--reset secrets conflicts with --secrets, --add-secrets and --remove-secrets");
+            }
+            if *f == ResetField::Env {
+                bail!("--reset env conflicts with --env and --unset-env");
             }
             bail!("--reset {0} conflicts with --{0}", f.flag());
         }
@@ -145,6 +177,7 @@ pub fn apply_edit(existing: &Profiles, name: &str, a: EditArgs) -> Result<Profil
             ResetField::Cpus => p.cpus = None,
             ResetField::Memory => p.memory = None,
             ResetField::DiskSize => p.disk_size = None,
+            ResetField::Env => p.env.clear(),
         }
     }
     if let Some(s) = a.secrets {
@@ -161,6 +194,28 @@ pub fn apply_edit(existing: &Profiles, name: &str, a: EditArgs) -> Result<Profil
             bail!("profile {name:?} has no secret {s:?}");
         };
         p.secrets.remove(i);
+    }
+    for e in a.env {
+        // A malformed entry is kept as-is (appended) so `check` reports it by position.
+        let key = profiles::env_pair(&e).map(|(k, _)| k.to_string());
+        if let Some(k) = &key {
+            if a.unset_env.contains(k) {
+                bail!("--env {k} conflicts with --unset-env {k}");
+            }
+        }
+        match key.and_then(|k| p.env.iter().position(|x| profiles::env_pair(x).is_some_and(|(n, _)| n == k))) {
+            Some(i) => p.env[i] = e,
+            None => p.env.push(e),
+        }
+    }
+    for (i, n) in a.unset_env.into_iter().enumerate() {
+        if !profiles::valid_env_name(&n) {
+            bail!("--unset-env: item {} is not a valid variable name", i + 1);
+        }
+        let Some(i) = p.env.iter().position(|x| profiles::env_pair(x).is_some_and(|(k, _)| k == n)) else {
+            bail!("profile {name:?} has no env variable {n:?}");
+        };
+        p.env.remove(i);
     }
     p.image = a.image.or(p.image);
     p.memory = a.memory.or(p.memory);
@@ -191,6 +246,13 @@ fn format_list(p: &Profiles) -> String {
         let mut lines = Vec::new();
         if !x.secrets.is_empty() {
             lines.push(format!("secrets: {}", x.secrets.join(", ")));
+        }
+        for (i, e) in x.env.iter().enumerate() {
+            lines.push(match profiles::env_pair(e) {
+                Some((k, v)) if profiles::is_credential_like(k, v) => format!("env: {k}=<hidden>"),
+                Some((k, v)) => format!("env: {k}={v}"),
+                None => format!("env: (invalid entry {})", i + 1),
+            });
         }
         if let Some(v) = &x.image {
             lines.push(format!("image: {v}"));
@@ -242,17 +304,19 @@ pub fn run(cmd: ProfileCmd) -> Result<()> {
 /// `ask` answers the delete prompt; `out` is stdout (both injected for tests).
 fn run_at(cmd: ProfileCmd, path: &Path, index: &Path, ask: &mut dyn FnMut(&str) -> io::Result<String>, out: &mut dyn Write) -> Result<()> {
     match cmd {
-        ProfileCmd::Create { name, secrets, image, memory, cpus, disk_size } => {
+        ProfileCmd::Create { name, secrets, image, memory, cpus, disk_size, env } => {
             let p = Profile {
                 secrets: secrets.as_deref().map(parse_names).transpose()?.unwrap_or_default(),
-                image, cpus, memory, disk_size,
+                image, cpus, memory, disk_size, env,
             };
             check(&name, &p, index)?;
-            apply_create(&Profiles::load(path)?, &name, p)?.save(path)?;
+            let next = apply_create(&Profiles::load(path)?, &name, p)?;
+            next.save(path)?;
             writeln!(out, "Created profile \"{name}\".")?;
+            warn_credentials(&next, Some(&name));
         }
         ProfileCmd::List => write!(out, "{}", format_list(&Profiles::load(path)?))?,
-        ProfileCmd::Edit { name, secrets, add_secrets, remove_secrets, image, memory, cpus, disk_size, reset } => {
+        ProfileCmd::Edit { name, secrets, add_secrets, remove_secrets, image, memory, cpus, disk_size, reset, env, unset_env } => {
             let names = |s: Option<String>| s.as_deref().map(parse_names).transpose();
             let a = EditArgs {
                 secrets: names(secrets)?,
@@ -260,11 +324,14 @@ fn run_at(cmd: ProfileCmd, path: &Path, index: &Path, ask: &mut dyn FnMut(&str) 
                 remove_secrets: names(remove_secrets)?.unwrap_or_default(),
                 image, memory, cpus, disk_size,
                 reset,
+                env,
+                unset_env: unset_env.as_deref().map(parse_unset_env).transpose()?.unwrap_or_default(),
             };
             let next = apply_edit(&Profiles::load(path)?, &name, a)?;
             check(&name, next.get(&name).expect("just edited"), index)?;
             next.save(path)?;
             writeln!(out, "Updated profile \"{name}\".")?;
+            warn_credentials(&next, Some(&name));
         }
         ProfileCmd::Delete { name, yes } => {
             let next = apply_delete(&Profiles::load(path)?, &name)?;
@@ -278,17 +345,33 @@ fn run_at(cmd: ProfileCmd, path: &Path, index: &Path, ask: &mut dyn FnMut(&str) 
         }
         ProfileCmd::Validate { name } => {
             let problems = validate_file(path, index, name.as_deref())?;
+            for p in &problems {
+                writeln!(out, "{p}")?;
+            }
             if problems.is_empty() {
                 writeln!(out, "profiles.toml is valid")?;
-            } else {
-                for p in &problems {
-                    writeln!(out, "{p}")?;
-                }
+            }
+            // Also when there are problems; an unparseable file has no profiles to check.
+            if let Ok(all) = Profiles::load(path) {
+                warn_credentials(&all, name.as_deref());
+            }
+            if !problems.is_empty() {
                 bail!("{} problem(s) in {}", problems.len(), path.display());
             }
         }
     }
     Ok(())
+}
+
+/// Credential-like env warnings to stderr, for one profile or all; never an error.
+fn warn_credentials(all: &Profiles, only: Option<&str>) {
+    for w in credential_lines(all, only) {
+        eprintln!("{w}");
+    }
+}
+
+fn credential_lines(all: &Profiles, only: Option<&str>) -> Vec<String> {
+    all.0.iter().filter(|(n, _)| only.is_none_or(|o| o == n.as_str())).flat_map(|(n, p)| profiles::credential_warnings(n, &p.env)).collect()
 }
 
 /// A parse error is the single problem; a named profile that is absent is an error.
@@ -347,11 +430,32 @@ mod tests {
     }
 
     #[test]
+    fn format_list_hides_a_bare_token_entry() {
+        let mut m = base();
+        m.0.insert("t".into(), Profile { env: v(&["dGhpc2lzYXRva2Vu==", "FOO="]), ..Default::default() });
+        let out = format_list(&m);
+        assert!(out.contains("env: (invalid entry 1)") && out.contains("env: FOO=") && !out.contains("dGhpc2"), "{out}");
+    }
+
+    #[test]
     fn parse_names_trims_keeps_order_and_rejects_empty_and_duplicates() {
         assert_eq!(parse_names(" b , a,c").unwrap(), v(&["b", "a", "c"]));
         assert!(parse_names("a,,b").is_err());
         assert!(parse_names("").is_err());
         assert!(parse_names("a,b,a").is_err());
+    }
+
+    #[test]
+    fn unset_env_errors_cite_position_never_text() {
+        assert_eq!(parse_unset_env(" B , A").unwrap(), v(&["B", "A"]));
+        let e = parse_unset_env("MY_TOKEN=sk-DUMMY-VALUE-123,").unwrap_err().to_string();
+        assert_eq!(e, "--unset-env: item 2 is empty");
+        let e = parse_unset_env("MY_TOKEN=sk-DUMMY-VALUE-123,x,MY_TOKEN=sk-DUMMY-VALUE-123").unwrap_err().to_string();
+        assert_eq!(e, "--unset-env: item 3 repeats item 1");
+        let (p, idx) = files("unset-run", "[default]\n");
+        let edit = |u: &str| ProfileCmd::Edit { name: "default".into(), secrets: None, add_secrets: None, remove_secrets: None, image: None, memory: None, cpus: None, disk_size: None, reset: vec![], env: vec![], unset_env: Some(u.into()) };
+        let e = format!("{:#}", run_at(edit("MY_TOKEN=sk-DUMMY-VALUE-123,"), &p, &idx, &mut |_| Ok(String::new()), &mut Vec::new()).unwrap_err());
+        assert!(e.contains("item 2 is empty") && !e.contains("DUMMY"), "{e}");
     }
 
     #[test]
@@ -387,7 +491,7 @@ mod tests {
 
     #[test]
     fn reset_clears_the_named_fields_and_only_those() {
-        let full = Profile { image: Some("i".into()), memory: Some(8), cpus: Some(2), disk_size: Some(20), secrets: v(&["a"]) };
+        let full = Profile { image: Some("i".into()), memory: Some(8), cpus: Some(2), disk_size: Some(20), secrets: v(&["a"]), env: v(&["X=1"]) };
         let base = Profiles([("dev".to_string(), full)].into());
         let ed = |a: EditArgs| apply_edit(&base, "dev", a);
         let r = ed(EditArgs { reset: rs("image,disk-size"), ..Default::default() }).unwrap();
@@ -423,7 +527,7 @@ mod tests {
         assert_eq!(reset("disk-size").unwrap(), vec![ResetField::DiskSize]);
         for bad in ["secret", "disk_size", "image,", "bogus"] {
             let e = reset(bad).unwrap_err();
-            assert!(e.contains("possible values: secrets, image, cpus, memory, disk-size"), "{bad:?}: {e}");
+            assert!(e.contains("possible values: secrets, image, cpus, memory, disk-size, env"), "{bad:?}: {e}");
         }
     }
 
@@ -462,7 +566,7 @@ mod tests {
         let d = tmp("roundtrip");
         let (p, idx) = (d.join("profiles.toml"), d.join("secrets.json"));
         std::fs::write(&idx, r#"{"names":["a"]}"#).unwrap();
-        let create = |n: &str, s: &str| ProfileCmd::Create { name: n.into(), secrets: Some(s.into()), image: None, memory: None, cpus: None, disk_size: None };
+        let create = |n: &str, s: &str| ProfileCmd::Create { name: n.into(), secrets: Some(s.into()), image: None, memory: None, cpus: None, disk_size: None, env: vec![] };
         assert!(run_at(create("dev", "ghost"), &p, &idx, &mut no_ask, &mut Vec::new()).is_err());
         assert!(!p.exists());
         run_at(create("dev", "a"), &p, &idx, &mut no_ask, &mut Vec::new()).unwrap();
@@ -473,7 +577,7 @@ mod tests {
 
     fn edit(name: &str, add: Option<&str>, remove: Option<&str>, cpus: Option<u8>) -> ProfileCmd {
         let s = |x: Option<&str>| x.map(String::from);
-        ProfileCmd::Edit { name: name.into(), secrets: None, add_secrets: s(add), remove_secrets: s(remove), image: None, memory: None, cpus, disk_size: None, reset: vec![] }
+        ProfileCmd::Edit { name: name.into(), secrets: None, add_secrets: s(add), remove_secrets: s(remove), image: None, memory: None, cpus, disk_size: None, reset: vec![], env: vec![], unset_env: None }
     }
 
     /// A dir with `body` as profiles.toml and an index naming `a`.
@@ -535,7 +639,7 @@ mod tests {
     fn a_zero_byte_secrets_index_is_an_error_not_an_empty_one() {
         let (p, idx) = files("empty-index", "[default]\n");
         std::fs::write(&idx, "").unwrap();
-        let create = ProfileCmd::Create { name: "dev".into(), secrets: Some("a".into()), image: None, memory: None, cpus: None, disk_size: None };
+        let create = ProfileCmd::Create { name: "dev".into(), secrets: Some("a".into()), image: None, memory: None, cpus: None, disk_size: None, env: vec![] };
         let e = format!("{:#}", run_at(create, &p, &idx, &mut no_ask, &mut Vec::new()).unwrap_err());
         assert!(e.starts_with(&format!("invalid index {}", idx.display())), "{e}");
         assert!(validate_file(&p, &idx, None).is_err());
@@ -583,5 +687,90 @@ mod tests {
         assert!(matches!(cli.command, crate::Commands::Profile { cmd: ProfileCmd::Create { .. } }));
         assert!(Cli::try_parse_from(["cbox", "profile", "edit", "foo", "--secrets", "a", "--add-secrets", "b"]).is_err());
         assert!(Cli::try_parse_from(["cbox", "profile", "edit", "foo", "--add-secrets", "b", "--remove-secrets", "c"]).is_ok());
+    }
+
+    #[test]
+    fn env_flags_set_replace_append_unset_and_reset() {
+        let base = Profiles([("dev".to_string(), Profile { env: v(&["A=1", "B=2"]), cpus: Some(2), ..Default::default() })].into());
+        let ed = |a: EditArgs| apply_edit(&base, "dev", a);
+        let env = |r: Profiles| r.get("dev").unwrap().env.clone();
+        assert_eq!(env(ed(EditArgs { env: v(&["A=9", "C=3"]), ..Default::default() }).unwrap()), v(&["A=9", "B=2", "C=3"]));
+        assert_eq!(env(ed(EditArgs { unset_env: v(&["A"]), ..Default::default() }).unwrap()), v(&["B=2"]));
+        let e = ed(EditArgs { unset_env: v(&["X"]), ..Default::default() }).unwrap_err().to_string();
+        assert_eq!(e, "profile \"dev\" has no env variable \"X\"");
+        let e = ed(EditArgs { env: v(&["A=1"]), unset_env: v(&["A"]), ..Default::default() }).unwrap_err().to_string();
+        assert_eq!(e, "--env A conflicts with --unset-env A");
+        let e = ed(EditArgs { unset_env: v(&["A", "bad.LEAK"]), ..Default::default() }).unwrap_err().to_string();
+        assert_eq!(e, "--unset-env: item 2 is not a valid variable name");
+        assert!(!e.contains("LEAK"));
+        for a in [EditArgs { env: v(&["A=1"]), ..Default::default() }, EditArgs { unset_env: v(&["A"]), ..Default::default() }] {
+            let e = ed(EditArgs { reset: rs("env"), ..a }).unwrap_err().to_string();
+            assert_eq!(e, "--reset env conflicts with --env and --unset-env");
+        }
+        let r = ed(EditArgs { reset: rs("env"), ..Default::default() }).unwrap();
+        assert_eq!((r.get("dev").unwrap().env.clone(), r.get("dev").unwrap().cpus), (vec![], Some(2)));
+    }
+
+    #[test]
+    fn clap_env_is_repeatable_and_not_comma_split() {
+        let c = Cli::try_parse_from(["cbox", "profile", "edit", "foo", "--env", "A=1", "--env", "B=2,3", "--unset-env", "X,Y", "--reset", "env"]).unwrap();
+        let Commands::Profile { cmd: ProfileCmd::Edit { env, unset_env, reset, .. } } = c.command else { panic!() };
+        assert_eq!((env, unset_env.as_deref(), reset), (v(&["A=1", "B=2,3"]), Some("X,Y"), vec![ResetField::Env]));
+        let c = Cli::try_parse_from(["cbox", "profile", "create", "foo", "--env", "A=1,2"]).unwrap();
+        let Commands::Profile { cmd: ProfileCmd::Create { env, .. } } = c.command else { panic!() };
+        assert_eq!(env, v(&["A=1,2"]));
+        let e = Cli::try_parse_from(["cbox", "profile", "edit", "foo", "--reset", "bogus"]).err().unwrap().to_string();
+        assert!(e.contains("env"), "{e}");
+    }
+
+    #[test]
+    fn list_shows_env_and_hides_credential_like_values() {
+        let p = Profile { secrets: v(&["a"]), image: Some("i".into()), env: v(&["GIT_AUTHOR_NAME=Avri Chen-Roth", "MY_API_TOKEN=sk-DUMMY-VALUE-123", "bad", "sk-x=LEAK", "a.b=LEAK", "1A=LEAK"]), ..Default::default() };
+        let out = format_list(&Profiles([("dev".to_string(), p)].into()));
+        assert_eq!(out, "dev\n  secrets: a\n  env: GIT_AUTHOR_NAME=Avri Chen-Roth\n  env: MY_API_TOKEN=<hidden>\n  env: (invalid entry 3)\n  env: (invalid entry 4)\n  env: (invalid entry 5)\n  env: (invalid entry 6)\n  image: i\n");
+        assert!(!out.contains("DUMMY") && !out.contains("LEAK"));
+    }
+
+    #[test]
+    fn create_and_edit_env_through_run_at() {
+        let (p, idx) = files("env-run", "[default]\n");
+        let create = |env: &[&str]| ProfileCmd::Create { name: "w".into(), secrets: None, image: None, memory: None, cpus: None, disk_size: None, env: v(env) };
+        let e = run_at(create(&["A=1", "no-equals"]), &p, &idx, &mut no_ask, &mut Vec::new()).unwrap_err().to_string();
+        assert!(e.contains("env entry 2"), "{e}");
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "[default]\n");
+        run_at(create(&["MY_API_TOKEN=sk-DUMMY-VALUE-123"]), &p, &idx, &mut no_ask, &mut Vec::new()).unwrap();
+        assert_eq!(Profiles::load(&p).unwrap().get("w").unwrap().env, v(&["MY_API_TOKEN=sk-DUMMY-VALUE-123"]));
+        let before = std::fs::read_to_string(&p).unwrap();
+        let bad = ProfileCmd::Edit { name: "w".into(), secrets: None, add_secrets: None, remove_secrets: None, image: None, memory: None, cpus: None, disk_size: None, reset: vec![], env: v(&["=x"]), unset_env: None };
+        assert!(run_at(bad, &p, &idx, &mut no_ask, &mut Vec::new()).is_err());
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), before);
+    }
+
+    #[test]
+    fn debug_output_never_shows_env_values() {
+        let envs = v(&["MY_API_TOKEN=sk-DUMMY-VALUE-123", "GIT_AUTHOR_NAME=Avri Chen-Roth", "bad-sk-DUMMY-VALUE-123"]);
+        let profile = Profile { env: envs, ..Default::default() };
+        let resolved = profiles::resolve(&Profiles([("w".to_string(), profile.clone())].into()), "w", &[], None, None, None, None).unwrap();
+        for d in [format!("{profile:?}"), format!("{resolved:?}")] {
+            assert!(!d.contains("sk-DUMMY") && !d.contains("Avri") && !d.contains("Chen-Roth"), "{d}");
+            assert!(d.contains("MY_API_TOKEN=<redacted>") && d.contains("GIT_AUTHOR_NAME=<redacted>") && d.contains("<invalid entry 3>"), "{d}");
+        }
+    }
+
+    #[test]
+    fn validate_warns_about_credentials_even_with_other_problems() {
+        let d = tmp("validate-cred");
+        let (p, idx) = (d.join("profiles.toml"), d.join("secrets.json"));
+        std::fs::write(&p, "[default]\n[dup]\nenv = [\"MY_API_TOKEN=sk-DUMMY-VALUE-123\", \"A=1\", \"A=2\"]\n").unwrap();
+        std::fs::write(&idx, r#"{"names":[]}"#).unwrap();
+        let problems = validate_file(&p, &idx, None).unwrap();
+        assert_eq!(problems, ["profile dup: env A is set twice"]);
+        let w = credential_lines(&Profiles::load(&p).unwrap(), None);
+        assert_eq!(w.len(), 1);
+        assert!(w[0].contains("profile dup: env MY_API_TOKEN looks like a credential") && !w[0].contains("DUMMY"), "{w:?}");
+        assert!(credential_lines(&Profiles::load(&p).unwrap(), Some("default")).is_empty());
+        let mut out = Vec::new();
+        assert!(run_at(ProfileCmd::Validate { name: None }, &p, &idx, &mut |_| Ok(String::new()), &mut out).is_err());
+        assert!(String::from_utf8(out).unwrap().contains("is set twice"));
     }
 }

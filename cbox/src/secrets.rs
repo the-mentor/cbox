@@ -593,7 +593,7 @@ mod tests {
         let err = crate::env::compose(&["ANTHROPIC_API_KEY=x".to_string()], &passthrough, &built.source_vars)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("cannot also be set with -e"), "{err}");
+        assert!(err.contains("cannot also be set with -e or in a profile's env"), "{err}");
     }
 
     #[test]

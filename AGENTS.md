@@ -72,12 +72,12 @@ but BoxLite keeps a copy of a box's secret values in that box's own database und
 stored secret (a missing name fails; there is no fallback to a host env var), and `gh`/`gh_basic`
 are reserved names. See `docs/design/secrets.md`.
 
-Profiles are named bundles of `cbox up` choices (secret names, image, memory, cpus, disk size) kept in
+Profiles are named bundles of `cbox up` choices (secret names, environment variables, image, memory, cpus, disk size) kept in
 `~/.config/cbox/profiles.toml` (or `$XDG_CONFIG_HOME/cbox/`), managed with
 `cbox profile create|list|edit|delete|validate` and applied with `cbox up --profile NAME`. There is no
 inheritance: a profile is just its own fields, and `up` flags override its image/memory/cpus/disk size and `--secret` adds to its secrets. The file is created on first
 run with an empty `default` profile; `cbox profile validate [NAME]` checks it. A resumed box warns when its
-profile has changed since creation or no longer validates (a new box fails on an invalid profile). Profiles hold secret names only, never values or hosts. See `docs/design/profiles.md`.
+profile has changed since creation or no longer validates (a new box fails on an invalid profile). Profiles hold secret names (never secret values or hosts); `env` values are stored in plain text in `profiles.toml`. A profile can also set plain environment variables (`--env NAME=VALUE`, repeatable; `edit` has `--unset-env NAME` and `--reset env`); they are not secrets, so `profile list` shows them, except a credential-looking one (e.g. `*_TOKEN`), which is warned about at create/edit/validate and on every `up` (name only) and shown as `<hidden>`. See `docs/design/profiles.md`.
 
 `build`, `build-image`, `build-base`, and `build-local` are variadic: everything after the recipe name is
 forwarded verbatim to `docker build` (`--pull`, `--progress=plain` and friends all work). `build`
