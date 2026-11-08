@@ -8,7 +8,7 @@ use std::io::{self, IsTerminal, Read, Write};
 #[derive(Subcommand)]
 pub enum SecretCmd {
     /// Store a secret in the OS secret store.
-    #[command(after_help = "\
+    #[command(arg_required_else_help = true, after_help = "\
 The value is read from a hidden prompt or from stdin and is never a command-line argument.
 
 Examples:
@@ -27,7 +27,7 @@ Examples:
     /// List stored secrets (never their values).
     List,
     /// Change a secret's hosts or variable name, or replace its value.
-    #[command(after_help = "\
+    #[command(arg_required_else_help = true, after_help = "\
 With no flags, the value is replaced (hidden prompt or stdin). With any flag, the value is left unchanged.
 
 Examples:
@@ -51,6 +51,7 @@ Examples:
         env: Option<String>,
     },
     /// Delete a secret.
+    #[command(arg_required_else_help = true)]
     Delete {
         name: String,
         /// Skip the confirmation prompt.
@@ -344,6 +345,14 @@ mod tests {
     #[test]
     fn read_value_uses_prompt_on_tty() {
         assert_eq!(read_value(true, &mut io::empty(), &mut || Ok("pw".into())).unwrap(), "pw");
+    }
+
+    #[test]
+    fn no_args_prints_help() {
+        for c in ["create", "edit", "delete"] {
+            let k = W::try_parse_from(["w", c]).err().unwrap().kind();
+            assert_eq!(k, clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand, "{c}");
+        }
     }
 
     #[test]
