@@ -18,7 +18,6 @@ just up-dev            # build custom on the published base (pushed to local reg
 just up                # boot the box without rebuilding (images and the cbox binary must already be built)
 just build              # start the local registry, build custom on the published base, push custom
 just build --no-cache   # same, bypassing the Docker layer cache (see below)
-just profile            # manage profiles: `just profile create NAME [--secrets a,b] [--image I] ...`, `list`, `edit`, `delete`, `validate` (see below)
 just build-local          # build base/ locally too (the published base is the default), for changing base/ itself
 just build-cbox          # build the cbox binary (cbox/target/release/cbox); up/exec/down/list all hard-fail without it
 just install-cbox [tag]  # download a prebuilt cbox binary (latest release, or a pinned tag) instead of compiling it
@@ -27,6 +26,7 @@ just ci-local           # run the ci workflow's Linux build job locally via nekt
 just exec               # open a session in the running box (alias: just shell)
 just list               # list running boxes across every box name (see below), forwarding args to cbox's own `list` command
 just secret             # manage stored secrets: `just secret create NAME --host HOSTS --env VAR`, `list`, `edit`, `delete` (see below)
+just profile            # manage profiles: `just profile create NAME [--secrets a,b] [--image I] ...`, `list`, `edit`, `delete`, `validate` (see below)
 just down               # stop and remove the box
 just gateway-up/down/logs # manage the host-side agentgateway
 just gateway-generate-ui-password # change the admin UI's default credentials, see below

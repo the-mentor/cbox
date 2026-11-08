@@ -48,12 +48,12 @@ impl Profiles {
     }
 }
 
-/// A profile with the flags of one `up` applied. `None` resources mean the built-in default.
 /// Sorted names of the profiles that list `secret`.
 pub fn profiles_using(profiles: &Profiles, secret: &str) -> Vec<String> {
     profiles.0.iter().filter(|(_, p)| p.secrets.iter().any(|s| s == secret)).map(|(n, _)| n.clone()).collect()
 }
 
+/// A profile with the flags of one `up` applied. `None` resources mean the built-in default.
 #[derive(Debug)]
 pub struct Resolved {
     pub profile_name: String,
