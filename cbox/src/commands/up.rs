@@ -45,8 +45,9 @@ pub async fn run(args: UpArgs) -> Result<()> {
     }
 
     // Profile first: a bad profiles.toml or profile aborts before any box work.
-    let profiles_file = config::profiles_path().context("cannot locate config directory for profiles.toml")?;
-    let all_profiles = profiles::Profiles::load(&profiles_file)?;
+    // No config dir (HOME and XDG_CONFIG_HOME unset) is an empty `default`, not an error.
+    let profiles_file = config::profiles_path();
+    let all_profiles = profiles::load_or_empty(profiles_file.as_deref())?;
     let old_sidecar = sidecar::read(&config::box_home(&name));
     let profile_name = profiles::choose(
         args.profile.as_deref(),
@@ -57,17 +58,19 @@ pub async fn run(args: UpArgs) -> Result<()> {
         &all_profiles, &profile_name, &args.secret_flags,
         args.image.as_deref(), args.cpus, args.memory_gb, args.disk_size_gb,
     )?;
-    let index = config::secrets_index_path().context("cannot locate config directory for the secrets index")?;
-    let problems = profiles::validate(
+    let problems = profiles::problems_for_up(
         &profile_name,
         all_profiles.get(&profile_name).expect("resolve found it"),
-        &crate::secretstore::Index::load(&index)?.names,
-    );
+        || {
+            let index = config::secrets_index_path().context("cannot locate config directory for the secrets index")?;
+            Ok(crate::secretstore::Index::load(&index)?.names)
+        },
+    )?;
     anyhow::ensure!(
         problems.is_empty(),
         "{} ({})",
         problems.join("\n"),
-        profiles_file.display()
+        profiles_file.as_deref().map_or("profiles.toml".into(), |p| p.display().to_string())
     );
 
     // Secrets first: their source variables must be withheld from passthrough.

@@ -121,7 +121,10 @@ cbox profile validate [NAME]
   checks that profile only; without, all of them. It reports every problem it finds
   (not only the first), names the profile and field, and exits 0 when clean, non-zero
   otherwise. It reads no secret values and never writes. A missing file is valid (empty
-  `default`).
+  `default`). A TOML syntax, key or type error is reported alone, since the file cannot be
+  read past it.
+- `create`, `edit` and `delete` rewrite the whole file: comments are dropped, and a
+  symlinked `profiles.toml` becomes a regular file.
 - Nothing prints a secret value (none are read).
 
 ### The `just` recipe
@@ -136,7 +139,9 @@ handling so `--secrets a,b` stays one argument). It is added to the `justfile`, 
 A box keeps the settings it was created with. This is already true for secrets, and
 `up` already warns when a stored secret's value, hosts or env name changed since the box
 was created (`sidecar::changed_secrets`, `up.rs`). Profiles follow the same rule: resume
-works and never refuses, and `up` prints a warning showing what differs.
+works and never refuses, and `up` prints a warning showing what differs. One accepted
+exception: with no `--profile`, `up` refuses to resume a box whose recorded profile no
+longer exists in `profiles.toml`; the error says to pass `--profile NAME`.
 
 - At creation, the box's sidecar records the resolved profile: profile name, secret
   names, image, CPUs, memory, disk size.

@@ -105,6 +105,24 @@ pub fn resolve(
     })
 }
 
+/// Without a resolvable config dir there is no file: an empty `default`, like a missing file.
+pub fn load_or_empty(path: Option<&Path>) -> Result<Profiles> {
+    match path {
+        Some(p) => Profiles::load(p),
+        None => Ok(Profiles(BTreeMap::from([(DEFAULT.to_string(), Profile::default())]))),
+    }
+}
+
+/// `validate`, reading the names-only secrets index only when the profile names secrets.
+pub fn problems_for_up(
+    name: &str,
+    p: &Profile,
+    known: impl FnOnce() -> Result<BTreeSet<String>>,
+) -> Result<Vec<String>> {
+    let known = if p.secrets.is_empty() { BTreeSet::new() } else { known()? };
+    Ok(validate(name, p, &known))
+}
+
 /// `--profile` if given, else the box's recorded profile, else `default`.
 pub fn choose(asked: Option<&str>, recorded: Option<&str>, profiles: &Profiles) -> Result<String> {
     match (asked, recorded) {
@@ -149,14 +167,15 @@ pub fn diff(old: &ProfileSnapshot, new: &ProfileSnapshot) -> Vec<String> {
 pub fn resume_warning(old: Option<&ProfileSnapshot>, new: &ProfileSnapshot, asked: Option<&str>) -> Option<String> {
     let old = old?; // boxes from before profiles record none: stay quiet
     let lines = diff(old, new);
-    if lines.is_empty() {
+    let other = asked.filter(|x| *x != old.name);
+    if lines.is_empty() && other.is_none() {
         return None;
     }
-    let head = match asked {
-        Some(x) if x != old.name => {
+    let head = match other {
+        Some(x) => {
             format!("you asked for profile {x}; this box was created with profile {}", old.name)
         }
-        _ => format!("profile {} differs from this box (created with {})", new.name, old.name),
+        None => format!("profile {} differs from this box (created with {})", new.name, old.name),
     };
     let body: String = lines.iter().map(|l| format!("  {l}\n")).collect();
     Some(format!(
@@ -200,6 +219,10 @@ fn write_atomic(path: &Path, body: &str) -> Result<()> {
 
 /// Create the file with an empty `[default]` unless the path exists. Returns whether it did.
 pub fn ensure_file(path: &Path) -> Result<bool> {
+    // Already there (even a dangling symlink): touch nothing, so a read-only config dir stays quiet.
+    if std::fs::symlink_metadata(path).is_ok() {
+        return Ok(false);
+    }
     create_new_with(path, "[default]\n")
 }
 
@@ -304,6 +327,47 @@ mod tests {
     fn snapshot_keeps_secret_names_only() {
         let r = resolve(&two(), "foo", &strs(&["Q=ENV@h"]), None, None, None, None).unwrap();
         assert_eq!(r.snapshot().secrets, strs(&["a", "b", "Q"]));
+    }
+
+    #[test]
+    fn same_contents_but_another_profile_asked_still_warns() {
+        let a = resolve(&two(), "foo", &[], None, None, None, None).unwrap().snapshot();
+        let mut b = a.clone();
+        b.name = "bar".into();
+        let w = resume_warning(Some(&a), &b, Some("bar")).unwrap();
+        assert!(w.starts_with("cbox: warning: you asked for profile bar; this box was created with profile foo:\n"), "{w}");
+        assert_eq!(resume_warning(Some(&a), &a, Some("foo")), None);
+    }
+
+    #[test]
+    fn no_config_dir_means_an_empty_default_profile() {
+        let p = load_or_empty(None).unwrap();
+        assert_eq!(p.get(DEFAULT), Some(&Profile::default()));
+    }
+
+    #[test]
+    fn the_secrets_index_is_not_read_for_a_profile_without_secrets() {
+        let boom = || -> Result<BTreeSet<String>> { anyhow::bail!("corrupt index") };
+        assert!(problems_for_up("default", &Profile::default(), boom).unwrap().is_empty());
+        let with = Profile { secrets: vec!["a".into()], ..Default::default() };
+        assert!(problems_for_up("foo", &with, boom).is_err());
+    }
+
+    #[test]
+    fn ensure_file_on_a_read_only_dir_with_an_existing_file_is_quiet() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = std::env::temp_dir().join(format!("cbox-ro-{}", std::process::id()));
+        std::fs::remove_dir_all(&d).ok();
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("profiles.toml");
+        std::fs::write(&f, "[default]\n").unwrap();
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let r = ensure_file(&f);
+        let names = std::fs::read_dir(&d).unwrap().count();
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::remove_dir_all(&d).ok();
+        assert!(!r.unwrap());
+        assert_eq!(names, 1);
     }
 
     #[test]
