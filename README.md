@@ -112,6 +112,8 @@ just up-dev            # build custom on the published base, compile cbox (needs
 just up                # boot the box without rebuilding (image and cbox must already exist)
 just exec              # open a session in the running box (alias: just shell)
 just list              # list running boxes (-a includes stopped ones)
+just secret list       # manage stored secrets (create, list, edit, delete)
+just profile list      # manage profiles (create, list, edit, delete, validate)
 just down              # stop and remove the box
 just gateway-up        # start the host-side agentgateway (also: gateway-down, gateway-logs)
 just --list            # everything else
@@ -133,11 +135,13 @@ enclosing git repo's root directory, falling back to the cwd's name; pin one wit
 | `-i`, `--image` | boot a different image instead of the locally built `cbox-custom` |
 | `--disk-size <GB>` | container rootfs size (default 10) |
 | `--memory <GB>` / `--cpus <N>` | guest RAM and vCPUs (default 4 GiB / 2) |
+| `--secret NAME` | give the box a stored secret (repeatable, see [Stored secrets](#stored-secrets-and-profiles-)) |
+| `--profile NAME` | apply a saved profile (default: `default`) |
+| `-d`, `--detach` | keep the box running after the terminal closes |
+| `-f`, `--force` | replace an existing box of the same name with a fresh one |
 
 Disk size, memory and CPUs are set when a box is created, so use `-f` to change them on an
 existing one.
-| `-d`, `--detach` | keep the box running after the terminal closes |
-| `-f`, `--force` | replace an existing box of the same name with a fresh one |
 
 ```bash
 just up-dev my-box                              # build + boot a box named "my-box"
@@ -347,6 +351,49 @@ two different ways, and the difference matters:
 
 Both paths are implemented by `cbox`; see `docs/design/cbox.md`.
 
+### Stored secrets and profiles 🗝️
+
+Any other credential (an OpenAI key, a second GitHub token) can be kept in the OS secret store
+and handed to a box the same substituted way: the box sees a placeholder, and the proxy swaps
+in the real value only for that secret's allowed hosts. The store is the macOS Keychain, or
+Windows Credential Manager under WSL; Linux desktop is not supported yet.
+
+```bash
+cbox secret create openai --host api.openai.com --env OPENAI_API_KEY   # hidden prompt, or pipe the value on stdin
+cbox secret list                                   # names, hosts, env vars; values are never printed
+cbox secret edit openai                            # replace the value
+cbox secret edit openai --add-host b.com           # or --host (replace), --remove-host, --env
+cbox secret delete openai                          # confirms first; -y skips
+cbox up --secret openai                            # boot with it
+```
+
+`--host` is a comma-separated list of bare host names and is required. `gh` and `gh_basic` are
+reserved for the `GH_TOKEN` path above. cbox never writes a value to disk itself, but BoxLite
+keeps a copy of a box's secret values in that box's own home (owner-only, not encrypted) until
+the box is removed, so deleting a secret does not revoke it for boxes that already use it. The
+older one-off form `--secret NAME=ENV_VAR@host[,host...]`, which reads the value from a host env
+var, still works.
+
+A **profile** is a named bundle of `up` choices: secret names, image, memory, CPUs and disk size.
+Profiles live in `~/.config/cbox/profiles.toml` (or `$XDG_CONFIG_HOME/cbox/`), which starts
+with an empty `default` profile that `up` uses when no `--profile` is given.
+
+```bash
+cbox profile create client-a --secrets openai,client-gh --memory 8 --cpus 4
+cbox profile edit client-a --add-secrets other --reset memory
+cbox profile list
+cbox profile validate                              # check every profile; or name one
+cbox profile delete client-a                       # `default` can't be deleted
+cbox up --profile client-a                         # flags still override for this run
+```
+
+There is no inheritance: a profile is cbox's built-in values plus its own fields, nothing from
+`default`. On `up`, `-i`/`--memory`/`--cpus`/`--disk-size` override the profile and `--secret`
+adds to its secrets. A profile holds secret names only, never values or hosts, so it can't widen
+where a secret goes. A resumed box keeps the settings it was created with and warns when its
+profile has changed or no longer validates. `just secret ...` and `just profile ...` (or `cb`)
+forward to the same commands. See `docs/design/secrets.md` and `docs/design/profiles.md`.
+
 ## The host-side gateway 🌉
 
 `just gateway-up` runs agentgateway from `agentgateway/docker-compose.yml`. It is long-lived
@@ -459,6 +506,8 @@ See `docs/design/agentgateway.md` for the full credential and port model.
 | [`docs/design/general.md`](docs/design/general.md) | the two-layer image, registry handoff, ECR, multiple boxes |
 | [`docs/design/images.md`](docs/design/images.md) | how `cbox-base` / `cbox-base-rust` are built, tagged and published |
 | [`docs/design/cbox.md`](docs/design/cbox.md) | the `cbox` binary: env passthrough, secrets, egress |
+| [`docs/design/secrets.md`](docs/design/secrets.md) | stored secrets: `cbox secret`, the OS stores, what is kept where |
+| [`docs/design/profiles.md`](docs/design/profiles.md) | profiles: `cbox profile`, `up --profile`, resume warnings |
 | [`docs/design/agentgateway.md`](docs/design/agentgateway.md) | the gateway's credential and port model |
 | [`docs/design/boxlite-sdk.md`](docs/design/boxlite-sdk.md) | historical design note: the SDK evaluation that led to cbox (partly superseded) |
 | [`docs/design/ci.md`](docs/design/ci.md) | CI and release workflows |
