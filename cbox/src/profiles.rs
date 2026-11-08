@@ -474,9 +474,8 @@ pub fn is_credential_like(name: &str, value: &str) -> bool {
 }
 
 /// One warning per flagged well-formed variable; names it, never the value.
-pub fn credential_warnings(profile_name: &str, p: &Profile) -> Vec<String> {
-    p.env
-        .iter()
+pub fn credential_warnings(profile_name: &str, env: &[String]) -> Vec<String> {
+    env.iter()
         .filter_map(|e| env_pair(e))
         .filter(|(n, v)| is_credential_like(n, v))
         .map(|(n, _)| format!("cbox: warning: profile {profile_name}: env {n} looks like a credential; tokens and secrets should not go in environment variables, use `cbox secret create` instead"))
@@ -805,6 +804,25 @@ mod tests {
     }
 
     #[test]
+    fn up_warns_about_credentials_in_the_resolved_profile_only_for_entries_it_uses() {
+        let git = ["GIT_AUTHOR_NAME=Avri Chen-Roth", "GIT_AUTHOR_EMAIL=11185446+the-mentor@users.noreply.github.com", "GIT_COMMITTER_NAME=Avri Chen-Roth", "GIT_COMMITTER_EMAIL=11185446+the-mentor@users.noreply.github.com"];
+        let f = prep_file("prep-cred-git", &format!("[default]\nenv = {:?}\n", git));
+        let p = prepare_up(Some(&f), None, None, false, &Profile::default(), known_ab).unwrap();
+        assert!(credential_warnings(&p.resolved.profile_name, &p.resolved.env).is_empty());
+        let f = prep_file("prep-cred", "[default]\nenv = [\"MY_API_TOKEN=sk-DUMMY-VALUE-123\", \"X=1\"]\n");
+        let p = prepare_up(Some(&f), None, None, false, &Profile::default(), known_ab).unwrap();
+        let w = credential_warnings(&p.resolved.profile_name, &p.resolved.env);
+        assert_eq!(w.len(), 1);
+        assert!(w[0].contains("profile default: env MY_API_TOKEN looks like a credential") && !w[0].contains("DUMMY"), "{w:?}");
+        // Resume: the duplicate and the malformed entry are dropped; only what remains is considered.
+        let f = prep_file("prep-cred-drop", "[default]\nenv = [\"A_TOKEN=x\", \"A_TOKEN=y\", \"B_TOKEN\", \"1_TOKEN=z\", \"OK=1\"]\n");
+        let p = prepare_up(Some(&f), None, None, true, &Profile::default(), known_ab).unwrap();
+        let w = credential_warnings(&p.resolved.profile_name, &p.resolved.env);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("env A_TOKEN ") && !w[0].contains("B_TOKEN") && !w[0].contains("1_TOKEN"), "{w:?}");
+    }
+
+    #[test]
     fn a_flag_beats_the_profile_in_compose() {
         let merged = env_with_flags(&strs(&["A=prof", "P=only"]), &strs(&["A=flag", "F=new"]));
         let out = crate::env::compose(&merged, &[], &[]).unwrap();
@@ -957,7 +975,7 @@ mod tests {
         let v = validate("foo", &env_profile(&["A=1", tok]), &BTreeSet::new());
         assert_eq!(v.len(), 1);
         assert!(v[0].starts_with("profile foo: env entry 2 looks like a token pasted") && !v[0].contains("dGhpc2"), "{v:?}");
-        assert!(credential_warnings("foo", &env_profile(&[tok])).is_empty());
+        assert!(credential_warnings("foo", &env_profile(&[tok]).env).is_empty());
         let pf = Profile { env: strs(&["A=1", tok, "dGhpc2lzYXRva2Vu="]), ..Default::default() };
         let r = resolve(&Profiles(BTreeMap::from([("foo".into(), pf)])), "foo", &[], None, None, None, None).unwrap();
         let env = r.snapshot().env.unwrap();
@@ -1044,7 +1062,7 @@ mod tests {
 
     #[test]
     fn credential_warnings_name_the_variable_not_the_value() {
-        let w = credential_warnings("foo", &env_profile(&["MY_API_TOKEN=sk-DUMMY-VALUE-123", "GIT_AUTHOR_NAME=Avri", "sk-DUMMY-VALUE-123"]));
+        let w = credential_warnings("foo", &env_profile(&["MY_API_TOKEN=sk-DUMMY-VALUE-123", "GIT_AUTHOR_NAME=Avri", "sk-DUMMY-VALUE-123"]).env);
         assert_eq!(w.len(), 1, "{w:?}");
         assert!(w[0].starts_with("cbox: warning: profile foo: env MY_API_TOKEN looks like a credential"), "{w:?}");
         assert!(w[0].contains("cbox secret") && !w[0].contains("DUMMY"), "{w:?}");

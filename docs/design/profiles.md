@@ -141,7 +141,10 @@ env = [
   `sk-`, `ghp_`, `github_pat_`, `AKIA`, `glpat-`, `npm_`, `AIza`, `eyJ`, `xoxb-`, `xoxp-`,
   `xoxa-`, `xoxs-` or `xoxr-`. The warning says tokens and secrets should not go in environment variables and
   to use `cbox secret`; it names the variable, never the value. It is printed by
-  `profile create`, `edit` and `validate`, not by every `up`. The check is a heuristic: it
+  `profile create`, `edit` and `validate` (also when the file has other problems), and on
+  every `up` (new box, `-f` or resume, to stderr before the box starts). `up` covers the
+  profile's own entries that the run uses (on a resume, not the ones dropped as invalid),
+  never the `-e` flags. The check is a heuristic: it
   will miss some and flag some wrongly, and there is no entropy test (a git email scores
   higher than a real token).
 - `profile list` prints `KEY=VALUE`; a flagged variable prints `KEY=<hidden>`.

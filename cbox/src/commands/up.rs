@@ -70,6 +70,10 @@ pub async fn run(args: UpArgs) -> Result<()> {
     for w in &prepared.check.warnings {
         eprintln!("{w}");
     }
+    // Every run, new or resumed: the profile's own entries this run uses, never `-e` flags.
+    for w in profiles::credential_warnings(&prepared.resolved.profile_name, &prepared.resolved.env) {
+        eprintln!("{w}");
+    }
     let (resolved_profile, check) = (&prepared.resolved, &prepared.check);
 
     // Secrets first: their source variables must be withheld from passthrough.

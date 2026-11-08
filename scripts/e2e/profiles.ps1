@@ -319,6 +319,9 @@ try {
     Check 'bare padded token: validate fails by position, never its text' { $r.Code -ne 0 -and $r.Out -match 'env entry 1' -and -not $r.Out.Contains($valBare) } $r.Out
     $r = Cbox @('profile', 'list')
     Check 'list shows a bare padded token as (invalid entry 1), never its text' { $r.Code -eq 0 -and $r.Out -match '\(invalid entry' -and -not $r.Out.Contains($valBare) } $r.Out
+    Set-Content $profilesToml ($good + "`n[envboth]`nenv = [`"MY_API_TOKEN=$valTok`", `"A=1`", `"A=2`"]`n")
+    $r = Cbox @('profile', 'validate')
+    Check 'validate with a problem AND a flagged variable: still warns, naming MY_API_TOKEN, never the value' { $r.Code -ne 0 -and $r.Out -match 'is set twice' -and $r.Out -match 'MY_API_TOKEN looks like a credential' -and -not $r.Out.Contains($valTok) } $r.Out
     Set-Content $profilesToml $good
 
     # ---------------------------------------------------------------- Part B

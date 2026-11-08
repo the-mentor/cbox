@@ -378,13 +378,17 @@ fn run_at(cmd: ProfileCmd, path: &Path, index: &Path, ask: &mut dyn FnMut(&str) 
         }
         ProfileCmd::Validate { name } => {
             let problems = validate_file(path, index, name.as_deref())?;
+            for p in &problems {
+                writeln!(out, "{p}")?;
+            }
             if problems.is_empty() {
                 writeln!(out, "profiles.toml is valid")?;
-                warn_credentials(&Profiles::load(path)?, name.as_deref());
-            } else {
-                for p in &problems {
-                    writeln!(out, "{p}")?;
-                }
+            }
+            // Also when there are problems; an unparseable file has no profiles to check.
+            if let Ok(all) = Profiles::load(path) {
+                warn_credentials(&all, name.as_deref());
+            }
+            if !problems.is_empty() {
                 bail!("{} problem(s) in {}", problems.len(), path.display());
             }
         }
@@ -394,11 +398,13 @@ fn run_at(cmd: ProfileCmd, path: &Path, index: &Path, ask: &mut dyn FnMut(&str) 
 
 /// Credential-like env warnings to stderr, for one profile or all; never an error.
 fn warn_credentials(all: &Profiles, only: Option<&str>) {
-    for (n, p) in all.0.iter().filter(|(n, _)| only.is_none_or(|o| o == n.as_str())) {
-        for w in profiles::credential_warnings(n, p) {
-            eprintln!("{w}");
-        }
+    for w in credential_lines(all, only) {
+        eprintln!("{w}");
     }
+}
+
+fn credential_lines(all: &Profiles, only: Option<&str>) -> Vec<String> {
+    all.0.iter().filter(|(n, _)| only.is_none_or(|o| o == n.as_str())).flat_map(|(n, p)| profiles::credential_warnings(n, &p.env)).collect()
 }
 
 /// A parse error is the single problem; a named profile that is absent is an error.
@@ -785,5 +791,22 @@ mod tests {
             assert!(!d.contains("sk-DUMMY") && !d.contains("Avri") && !d.contains("Chen-Roth"), "{d}");
             assert!(d.contains("MY_API_TOKEN=<redacted>") && d.contains("GIT_AUTHOR_NAME=<redacted>") && d.contains("<invalid entry 3>"), "{d}");
         }
+    }
+
+    #[test]
+    fn validate_warns_about_credentials_even_with_other_problems() {
+        let d = tmp("validate-cred");
+        let (p, idx) = (d.join("profiles.toml"), d.join("secrets.json"));
+        std::fs::write(&p, "[default]\n[dup]\nenv = [\"MY_API_TOKEN=sk-DUMMY-VALUE-123\", \"A=1\", \"A=2\"]\n").unwrap();
+        std::fs::write(&idx, r#"{"names":[]}"#).unwrap();
+        let problems = validate_file(&p, &idx, None).unwrap();
+        assert_eq!(problems, ["profile dup: env A is set twice"]);
+        let w = credential_lines(&Profiles::load(&p).unwrap(), None);
+        assert_eq!(w.len(), 1);
+        assert!(w[0].contains("profile dup: env MY_API_TOKEN looks like a credential") && !w[0].contains("DUMMY"), "{w:?}");
+        assert!(credential_lines(&Profiles::load(&p).unwrap(), Some("default")).is_empty());
+        let mut out = Vec::new();
+        assert!(run_at(ProfileCmd::Validate { name: None }, &p, &idx, &mut |_| Ok(String::new()), &mut out).is_err());
+        assert!(String::from_utf8(out).unwrap().contains("is set twice"));
     }
 }
