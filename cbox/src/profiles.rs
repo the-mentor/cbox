@@ -91,13 +91,26 @@ pub fn ensure_file(path: &Path) -> Result<bool> {
 /// Create `path` with `body` only if absent. `hard_link` fails if the target exists
 /// (rename would replace it), so a file that appears at any moment is never touched.
 fn create_new_with(path: &Path, body: &str) -> Result<bool> {
+    create_new_via(path, body, |tmp, to| std::fs::hard_link(tmp, to))
+}
+
+/// `link` stands in for `hard_link` so tests can force the fallback.
+fn create_new_via(path: &Path, body: &str, link: impl Fn(&Path, &Path) -> std::io::Result<()>) -> Result<bool> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
     let tmp = write_tmp(path, body)?;
-    let r = std::fs::hard_link(&tmp, path);
+    let r = link(&tmp, path);
     std::fs::remove_file(&tmp).ok();
     match r {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
-        Err(e) => Err(e).with_context(|| format!("creating {}", path.display())),
+        // Filesystems without hard links (FAT, some SMB/9p/FUSE mounts): create_new still never replaces.
+        // A crash mid-write can leave a partial file on this fallback path only.
+        Err(_) => match std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path) {
+            Ok(mut f) => f.write_all(body.as_bytes()).map(|()| true).with_context(|| format!("writing {}", path.display())),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+            Err(e) => Err(e).with_context(|| format!("creating {}", path.display())),
+        },
     }
 }
 
@@ -228,6 +241,20 @@ mod tests {
         std::fs::create_dir_all(f.parent().unwrap()).unwrap();
         std::fs::write(&f, "[real]\n").unwrap();
         assert!(!create_new_with(&f, "[default]\n").unwrap());
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "[real]\n");
+        assert_eq!(std::fs::read_dir(f.parent().unwrap()).unwrap().count(), 1, "tmp file left behind");
+    }
+
+    #[test]
+    fn create_new_falls_back_when_linking_fails() {
+        use std::os::unix::fs::PermissionsExt;
+        let no_link = |_: &Path, _: &Path| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        let f = tmp("fallback").join("profiles.toml");
+        assert!(create_new_via(&f, "[default]\n", no_link).unwrap());
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "[default]\n");
+        assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
+        std::fs::write(&f, "[real]\n").unwrap();
+        assert!(!create_new_via(&f, "[default]\n", no_link).unwrap());
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "[real]\n");
         assert_eq!(std::fs::read_dir(f.parent().unwrap()).unwrap().count(), 1, "tmp file left behind");
     }
