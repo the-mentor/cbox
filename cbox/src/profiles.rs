@@ -73,6 +73,8 @@ pub fn profiles_using(profiles: &Profiles, secret: &str) -> Vec<String> {
 #[derive(Debug)]
 pub struct Resolved {
     pub profile_name: String,
+    /// The profile's env entries, raw `KEY=VALUE`.
+    pub env: Vec<String>,
     /// Profile secrets in file order, then flag secrets as typed.
     pub secrets: Vec<String>,
     pub image: String,
@@ -85,6 +87,11 @@ impl Resolved {
     pub fn snapshot(&self) -> ProfileSnapshot {
         ProfileSnapshot {
             name: self.profile_name.clone(),
+            // Name -> value hash; the value itself is never recorded. First entry of a name wins.
+            env: Some(self.env.iter().filter_map(|e| split_env(e)).filter(|(n, _)| valid_env_name(n)).fold(BTreeMap::new(), |mut m, (n, v)| {
+                m.entry(n.to_string()).or_insert_with(|| crate::sidecar::hash_secret_value(v));
+                m
+            })),
             // Names only: no env var, host or pasted value from a `NAME=ENV@hosts` flag.
             secrets: self.secrets.iter().map(|s| s.split('=').next().unwrap_or(s).to_string()).collect(),
             image: self.image.clone(),
@@ -113,6 +120,7 @@ pub fn resolve(
     }
     Ok(Resolved {
         profile_name: name.to_string(),
+        env: p.env.clone(),
         secrets: p.secrets.iter().chain(flag_secrets).cloned().collect(),
         image: image.map(String::from).or_else(|| p.image.clone()).unwrap_or_else(|| "cbox-custom".into()),
         cpus: cpus.or(p.cpus),
@@ -197,6 +205,9 @@ pub fn prepare_up(
     let check = up_check(validate(&name, p, &known), resuming, &p.secrets, &known, &label)?;
     resolved.drop_profile_secrets(p.secrets.len(), &check.drop_secrets);
     if check.downgraded.is_some() {
+        // Keep compose from failing on a bare KEY (host lookup) or a bad name; first of a duplicate stays.
+        let mut seen = BTreeSet::new();
+        resolved.env.retain(|e| split_env(e).is_some_and(|(n, _)| valid_env_name(n) && seen.insert(n.to_string())));
         // A resumed box ignores options, but boxopts::build still checks them: fall back to
         // built-ins for a bad profile value so the resume is not refused. Bad flags still fail.
         use crate::boxopts::check_resources as ok;
@@ -259,6 +270,18 @@ pub fn diff(old: &ProfileSnapshot, new: &ProfileSnapshot) -> Vec<String> {
     num(&mut out, "cpus", "", old.cpus, new.cpus);
     num(&mut out, "memory", " GiB", old.memory_gb, new.memory_gb);
     num(&mut out, "disk size", " GB", old.disk_size_gb, new.disk_size_gb);
+    if let (Some(a), Some(b)) = (&old.env, &new.env) {
+        let names = |f: &dyn Fn(&String) -> bool| b.keys().chain(a.keys()).filter(|k| f(k)).cloned().collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>().join(", ");
+        for (label, list) in [
+            ("added", names(&|k| !a.contains_key(k))),
+            ("removed", names(&|k| !b.contains_key(k))),
+            ("changed", names(&|k| matches!((a.get(k), b.get(k)), (Some(x), Some(y)) if x != y))),
+        ] {
+            if !list.is_empty() {
+                out.push(format!("env {label}: {list}"));
+            }
+        }
+    }
     out
 }
 
@@ -648,6 +671,58 @@ mod tests {
             diff(&a, &b),
             strs(&["secrets added: c", "secrets removed: a", "image: cbox-custom -> other", "cpus: default -> 4", "memory: default -> 8 GiB", "disk size: default -> 20 GB"])
         );
+    }
+
+    fn env_snap(e: &[&str]) -> ProfileSnapshot {
+        let mut p = two();
+        p.0.get_mut("foo").unwrap().env = strs(e);
+        resolve(&p, "foo", &[], None, None, None, None).unwrap().snapshot()
+    }
+
+    #[test]
+    fn snapshot_env_holds_hashes_never_values() {
+        let s = env_snap(&["GIT_AUTHOR_NAME=Avri", "X=DUMMY", "bare", "1a=z"]);
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("Avri") && !json.contains("DUMMY"), "{json}");
+        assert_eq!(s.env.as_ref().unwrap().keys().cloned().collect::<Vec<_>>(), strs(&["GIT_AUTHOR_NAME", "X"]));
+        assert_eq!(resolve(&two(), "foo", &[], None, None, None, None).unwrap().snapshot().env, Some(BTreeMap::new()));
+    }
+
+    #[test]
+    fn diff_env_names_only_and_silent_for_old_sidecars() {
+        let a = env_snap(&["B=1", "C=1", "D=old"]);
+        let b = env_snap(&["D=new", "C=1", "A=1", "E=1"]);
+        let d = diff(&a, &b);
+        assert_eq!(d, strs(&["env added: A, E", "env removed: B", "env changed: D"]));
+        assert!(!d.join("\n").contains("old") && !d.join("\n").contains("new"));
+        let old: ProfileSnapshot = serde_json::from_str(r#"{"name":"foo","secrets":["a","b"],"image":"cbox-custom","cpus":null,"memory_gb":null,"disk_size_gb":null}"#).unwrap();
+        assert_eq!(old.env, None);
+        assert_eq!((diff(&old, &b), diff(&b, &old)), (vec![], vec![]));
+    }
+
+    #[test]
+    fn resolve_copies_env() {
+        let mut p = two();
+        p.0.get_mut("foo").unwrap().env = strs(&["A=1"]);
+        assert_eq!(resolve(&p, "foo", &[], None, None, None, None).unwrap().env, strs(&["A=1"]));
+    }
+
+    #[test]
+    fn prepare_up_resume_drops_bad_env_and_a_new_box_fails() {
+        let f = prep_file("prep-env", "[default]\nenv = [\"A=1\", \"bare\", \"A=2\", \"1x=y\", \"B=2\"]\n");
+        let e = prepare_up(Some(&f), None, None, false, &Profile::default(), known_ab).unwrap_err().to_string();
+        assert!(e.contains("env entry 2") && e.contains("env A is set twice"), "{e}");
+        let p = prepare_up(Some(&f), None, None, true, &Profile::default(), known_ab).unwrap();
+        assert_eq!(p.resolved.env, strs(&["A=1", "B=2"]));
+        assert!(!p.check.warnings.is_empty());
+        assert_eq!(p.snapshot.env.unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_flag_beats_the_profile_in_compose() {
+        let merged = [strs(&["A=prof", "P=only"]), strs(&["A=flag"])].concat();
+        let out = crate::env::compose(&merged, &[], &[]).unwrap();
+        assert_eq!(out, vec![("A".to_string(), "flag".to_string()), ("P".to_string(), "only".to_string())]);
     }
 
     #[test]

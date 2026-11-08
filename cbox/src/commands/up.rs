@@ -89,7 +89,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
     let secret_hashes = secrets::resume_hashes(&specs, &built);
 
     let passthrough = secrets::passthrough_without_stored(env::passthrough_vars(), &specs);
-    let mut plain = env::compose(&args.env_flags, &passthrough, &built.source_vars)?;
+    let mut plain = env::compose(&[resolved_profile.env.clone(), args.env_flags.clone()].concat(), &passthrough, &built.source_vars)?;
     env::add_gateway_placeholder(&mut plain);
     plain.extend(built.env.clone());
     plain.push((

@@ -42,6 +42,9 @@ pub struct ProfileSnapshot {
     pub cpus: Option<u8>,
     pub memory_gb: Option<u32>,
     pub disk_size_gb: Option<u64>,
+    /// Env name -> value hash. `None`: recorded before profile env existed.
+    #[serde(default)]
+    pub env: Option<BTreeMap<String, u64>>,
 }
 
 /// Hash a secret's value for drift detection. Never store or log the value
@@ -341,6 +344,7 @@ mod tests {
             cpus: None,
             memory_gb: Some(8),
             disk_size_gb: None,
+            env: Some(BTreeMap::from([("A".to_string(), 7)])),
         };
         write(&home, Path::new("/repo"), &BTreeMap::new(), Some(snap.clone())).unwrap();
         assert_eq!(read(&home).unwrap().profile, Some(snap));
