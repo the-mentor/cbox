@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.25](https://github.com/the-mentor/cbox/compare/v0.1.24...v0.1.25) (2026-11-08)
+
+
+### Features
+
+* profiles (cbox profile, cbox up --profile) ([#145](https://github.com/the-mentor/cbox/issues/145)) ([25ba94e](https://github.com/the-mentor/cbox/commit/25ba94ec9913dac2247a7674ad72d0433b64b518))
+
 ## [0.1.24](https://github.com/the-mentor/cbox/compare/v0.1.23...v0.1.24) (2026-11-08)
 
 
