@@ -12,13 +12,13 @@ pub const DEFAULT: &str = "default";
 #[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub secrets: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
     /// "KEY=VALUE" entries, split at the first `=`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub image: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secrets: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpus: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31,9 +31,9 @@ pub struct Profile {
 impl std::fmt::Debug for Profile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Profile")
-            .field("secrets", &self.secrets)
-            .field("env", &RedactedEnv(&self.env))
             .field("image", &self.image)
+            .field("env", &RedactedEnv(&self.env))
+            .field("secrets", &self.secrets)
             .field("cpus", &self.cpus)
             .field("memory", &self.memory)
             .field("disk_size", &self.disk_size)
@@ -927,6 +927,30 @@ mod tests {
         assert_eq!(Profiles::load(&f).unwrap(), p);
         p.save(&f).unwrap();
         assert_eq!(std::fs::read_to_string(&f).unwrap(), body);
+    }
+
+    #[test]
+    fn save_writes_fields_in_the_fixed_order() {
+        let f = tmp("fields").join("profiles.toml");
+        let mut m = BTreeMap::new();
+        m.insert("a".to_string(), Profile {
+            secrets: vec!["s1".into()], env: vec!["A=1".into(), "B=2".into()], image: Some("img".into()),
+            cpus: Some(2), memory: Some(4), disk_size: Some(20),
+        });
+        let p = Profiles(m);
+        p.save(&f).unwrap();
+        let body = std::fs::read_to_string(&f).unwrap();
+        assert_eq!(body, "[a]\nimage = \"img\"\nenv = [\n    \"A=1\",\n    \"B=2\",\n]\nsecrets = [\"s1\"]\ncpus = 2\nmemory = 4\ndisk_size = 20\n");
+    }
+
+    #[test]
+    fn a_file_in_the_old_field_order_loads_equal() {
+        let d = tmp("oldorder");
+        std::fs::create_dir_all(&d).unwrap();
+        let (old, new) = (d.join("old.toml"), d.join("new.toml"));
+        std::fs::write(&old, "[a]\nsecrets = [\"s\"]\nenv = [\"A=1\"]\nimage = \"i\"\ncpus = 2\nmemory = 4\ndisk_size = 20\n").unwrap();
+        std::fs::write(&new, "[a]\nimage = \"i\"\nenv = [\"A=1\"]\nsecrets = [\"s\"]\ncpus = 2\nmemory = 4\ndisk_size = 20\n").unwrap();
+        assert_eq!(Profiles::load(&old).unwrap(), Profiles::load(&new).unwrap());
     }
 
     #[test]

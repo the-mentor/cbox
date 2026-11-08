@@ -244,8 +244,8 @@ fn format_list(p: &Profiles) -> String {
         let x = &p.0[n];
         out.push_str(&format!("{n}\n"));
         let mut lines = Vec::new();
-        if !x.secrets.is_empty() {
-            lines.push(format!("secrets: {}", x.secrets.join(", ")));
+        if let Some(v) = &x.image {
+            lines.push(format!("image: {v}"));
         }
         for (i, e) in x.env.iter().enumerate() {
             lines.push(match profiles::env_pair(e) {
@@ -254,14 +254,14 @@ fn format_list(p: &Profiles) -> String {
                 None => format!("env: (invalid entry {})", i + 1),
             });
         }
-        if let Some(v) = &x.image {
-            lines.push(format!("image: {v}"));
-        }
-        if let Some(v) = x.memory {
-            lines.push(format!("memory: {v} GiB"));
+        if !x.secrets.is_empty() {
+            lines.push(format!("secrets: {}", x.secrets.join(", ")));
         }
         if let Some(v) = x.cpus {
             lines.push(format!("cpus: {v}"));
+        }
+        if let Some(v) = x.memory {
+            lines.push(format!("memory: {v} GiB"));
         }
         if let Some(v) = x.disk_size {
             lines.push(format!("disk size: {v} GB"));
@@ -540,6 +540,18 @@ mod tests {
     }
 
     #[test]
+    fn format_list_prints_fields_in_the_fixed_order() {
+        let mut m = base();
+        m.0.insert("full".into(), Profile {
+            secrets: v(&["a"]), env: v(&["A=1", "B=2"]), image: Some("img".into()),
+            cpus: Some(2), memory: Some(4), disk_size: Some(20),
+        });
+        let out = format_list(&m);
+        assert!(out.starts_with("default\n  (empty)\n"), "{out}");
+        assert!(out.ends_with("full\n  image: img\n  env: A=1\n  env: B=2\n  secrets: a\n  cpus: 2\n  memory: 4 GiB\n  disk size: 20 GB\n"), "{out}");
+    }
+
+    #[test]
     fn list_puts_default_first_and_shows_set_fields_only() {
         let out = format_list(&base());
         assert_eq!(out, "default\n  (empty)\ndev\n  secrets: a, b\n  cpus: 2\n");
@@ -727,7 +739,7 @@ mod tests {
     fn list_shows_env_and_hides_credential_like_values() {
         let p = Profile { secrets: v(&["a"]), image: Some("i".into()), env: v(&["GIT_AUTHOR_NAME=Avri Chen-Roth", "MY_API_TOKEN=sk-DUMMY-VALUE-123", "bad", "sk-x=LEAK", "a.b=LEAK", "1A=LEAK"]), ..Default::default() };
         let out = format_list(&Profiles([("dev".to_string(), p)].into()));
-        assert_eq!(out, "dev\n  secrets: a\n  env: GIT_AUTHOR_NAME=Avri Chen-Roth\n  env: MY_API_TOKEN=<hidden>\n  env: (invalid entry 3)\n  env: (invalid entry 4)\n  env: (invalid entry 5)\n  env: (invalid entry 6)\n  image: i\n");
+        assert_eq!(out, "dev\n  image: i\n  env: GIT_AUTHOR_NAME=Avri Chen-Roth\n  env: MY_API_TOKEN=<hidden>\n  env: (invalid entry 3)\n  env: (invalid entry 4)\n  env: (invalid entry 5)\n  env: (invalid entry 6)\n  secrets: a\n");
         assert!(!out.contains("DUMMY") && !out.contains("LEAK"));
     }
 
