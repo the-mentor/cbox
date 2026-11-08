@@ -107,6 +107,7 @@ cbox profile create NAME [--secrets a,b] [--image IMG] [--memory GB] [--cpus N] 
 cbox profile list
 cbox profile edit NAME [--secrets a,b | --add-secrets a,b | --remove-secrets a,b]
                        [--image IMG] [--memory GB] [--cpus N] [--disk-size GB]
+                       [--reset secrets,image,cpus,memory,disk-size]
 cbox profile delete NAME [-y]
 cbox profile validate [NAME]
 ```
@@ -115,6 +116,10 @@ cbox profile validate [NAME]
 - On `edit`, `--secrets` replaces the list, `--add-secrets` / `--remove-secrets` change it
   in place (mirrors `secret edit --host/--add-host/--remove-host`). `--secrets` cannot be
   combined with the other two.
+- `--reset FIELDS` (comma-separated: `secrets`, `image`, `cpus`, `memory`, `disk-size`) stops
+  setting those fields, so cbox's built-ins apply (`secrets` empties the list). Resetting a
+  field that is not set is fine. Combining `--reset X` with the flag that sets X is an error
+  (`--reset secrets` conflicts with all three secrets flags); `--reset image --cpus 4` is fine.
 - `create` refuses a name that exists. `edit` and `delete` fail on a missing name.
 - `delete` confirms first, like `secret delete`. `delete default` is refused.
 - `list` prints every profile with its contents.
