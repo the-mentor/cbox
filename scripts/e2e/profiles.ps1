@@ -210,6 +210,10 @@ try {
     Check '  ...and the rejected edit changed nothing' { $blk -match [regex]::Escape($secA) -and $blk -match 'image: other/image:1' } $blk
     $r = Cbox @('profile', 'edit', 'po', '--reset', 'secrets')
     Check '--reset secrets alone empties the list and keeps the other fields' { $r.Code -eq 0 -and (ProfileBlock (Cbox @('profile', 'list')).Out 'po') -notmatch [regex]::Escape($secA) -and (ProfileBlock (Cbox @('profile', 'list')).Out 'po') -match 'image: other/image:1' } $r.Out
+    $r = Cbox @('profile', 'edit', 'po', '--reset', 'image', '--cpus', '4')
+    Check '--reset image together with --cpus 4 succeeds (different fields do not conflict)' { $r.Code -eq 0 } $r.Out
+    $blk = ProfileBlock (Cbox @('profile', 'list')).Out 'po'
+    Check '  ...the image is gone, cpus is 4, disk size is kept' { $blk -notmatch 'image:' -and $blk -match 'cpus: 4' -and $blk -match 'disk size: 15' } $blk
     [void](Cbox @('profile', 'delete', 'po', '-y'))
     $r = Cbox @('profile', 'delete', 'default', '-y')
     Check 'deleting default is refused' { $r.Code -ne 0 } $r.Out
