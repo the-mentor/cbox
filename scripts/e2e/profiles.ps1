@@ -189,6 +189,28 @@ try {
     Check '--reset clears every field' { $r.Code -eq 0 } $r.Out
     $r = Cbox @('profile', 'list')
     Check '  ...pr is empty afterwards' { ($r.Out -split "`n" | Select-String -Pattern '^pr' -Context 0, 1).Context.PostContext -match '\(empty\)' } $r.Out
+    # Reset ONE field: the others must stay. (A bug that clears too much would pass the all-fields check above.)
+    function ProfileBlock([string]$Out, [string]$Name) {
+        [regex]::Match($Out, "(?m)^$Name\r?\n((?:[ ]{2}.*(?:\r?\n|$))*)").Groups[1].Value
+    }
+    [void](Cbox @('profile', 'create', 'po', '--secrets', $secA, '--cpus', '2', '--memory', '3', '--disk-size', '12', '--image', 'some/image:tag'))
+    $r = Cbox @('profile', 'edit', 'po', '--reset', 'image')
+    Check '--reset image succeeds' { $r.Code -eq 0 } $r.Out
+    $blk = ProfileBlock (Cbox @('profile', 'list')).Out 'po'
+    Check '  ...image is gone' { $blk -notmatch 'image:' } $blk
+    Check '  ...secret, cpus, memory and disk size are kept' { $blk -match [regex]::Escape($secA) -and $blk -match 'cpus: 2' -and $blk -match 'memory: 3' -and $blk -match 'disk size: 12' } $blk
+    $r = Cbox @('profile', 'edit', 'po', '--reset', 'cpus,memory', '--image', 'other/image:1', '--disk-size', '15')
+    Check '--reset two fields while setting two others succeeds' { $r.Code -eq 0 } $r.Out
+    $blk = ProfileBlock (Cbox @('profile', 'list')).Out 'po'
+    Check '  ...cpus and memory are gone' { $blk -notmatch 'cpus:' -and $blk -notmatch 'memory:' } $blk
+    Check '  ...the new image and disk size are set, the secret is kept' { $blk -match 'image: other/image:1' -and $blk -match 'disk size: 15' -and $blk -match [regex]::Escape($secA) } $blk
+    $r = Cbox @('profile', 'edit', 'po', '--reset', 'secrets', '--add-secrets', $secB)
+    Check '--reset secrets together with --add-secrets is rejected' { $r.Code -ne 0 } $r.Out
+    $blk = ProfileBlock (Cbox @('profile', 'list')).Out 'po'
+    Check '  ...and the rejected edit changed nothing' { $blk -match [regex]::Escape($secA) -and $blk -match 'image: other/image:1' } $blk
+    $r = Cbox @('profile', 'edit', 'po', '--reset', 'secrets')
+    Check '--reset secrets alone empties the list and keeps the other fields' { $r.Code -eq 0 -and (ProfileBlock (Cbox @('profile', 'list')).Out 'po') -notmatch [regex]::Escape($secA) -and (ProfileBlock (Cbox @('profile', 'list')).Out 'po') -match 'image: other/image:1' } $r.Out
+    [void](Cbox @('profile', 'delete', 'po', '-y'))
     $r = Cbox @('profile', 'delete', 'default', '-y')
     Check 'deleting default is refused' { $r.Code -ne 0 } $r.Out
     $r = Cbox @('profile', 'delete', 'pr', '-y')
