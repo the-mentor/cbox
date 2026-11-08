@@ -77,7 +77,7 @@ Profiles are named bundles of `cbox up` choices (secret names, image, memory, cp
 `cbox profile create|list|edit|delete|validate` and applied with `cbox up --profile NAME`. There is no
 inheritance: a profile is just its own fields, and `up` flags override its image/memory/cpus/disk size and `--secret` adds to its secrets. The file is created on first
 run with an empty `default` profile; `cbox profile validate [NAME]` checks it. A resumed box warns when its
-profile has changed since creation or no longer validates (a new box fails on an invalid profile). Profiles hold secret names only, never values or hosts. See `docs/design/profiles.md`.
+profile has changed since creation or no longer validates (a new box fails on an invalid profile). Profiles hold secret names only, never values or hosts. A profile can also set plain environment variables (`--env NAME=VALUE`, repeatable; `edit` has `--unset-env NAME` and `--reset env`); they are not secrets, so `profile list` shows them, except a credential-looking one (e.g. `*_TOKEN`), which is only warned about at create/edit/validate and shown as `<hidden>`. See `docs/design/profiles.md`.
 
 `build`, `build-image`, `build-base`, and `build-local` are variadic: everything after the recipe name is
 forwarded verbatim to `docker build` (`--pull`, `--progress=plain` and friends all work). `build`
