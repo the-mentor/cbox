@@ -30,11 +30,12 @@ fn a_command_without_its_arguments_prints_help_and_exits_zero() {
             .output()
             .unwrap()
     };
-    for args in [&["profile"][..], &["profile", "create"], &["profile", "edit"], &["profile", "delete"]] {
+    for args in [&["profile"][..], &["profile", "create"], &["profile", "edit"], &["profile", "delete"], &["secret"], &["secret", "create"], &["secret", "edit"], &["secret", "delete"]] {
         let out = run(args);
         let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
         assert!(out.status.success() && text.contains("Usage:"), "{args:?}: {out:?}");
     }
     assert_eq!(run(&["profile", "bogus"]).status.code(), Some(2), "real usage errors keep exit 2");
+    assert_eq!(run(&["secret", "create", "n"]).status.code(), Some(2));
     std::fs::remove_dir_all(&d).ok();
 }
