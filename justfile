@@ -201,7 +201,14 @@ ci-local *args:
 
 # Build images and the cbox binary, then boot the box and launch Claude Code.
 # Usage: just up-dev [box-name] [-f] [-c] [-v host:box ...] [-e KEY[=VALUE] ...] [-i image] [--profile NAME] [--secret NAME ...] [-d] [-- cmd...]
-up-dev *args: build build-cbox (up args)
+# Positional arguments keep every argument whole (`-e "A=b c"`, `-- sh -c 'a; b'`). A dependency
+# `(up args)` would hand `up` one space-joined string, so re-invoke just from the caller's directory.
+[positional-arguments]
+up-dev *args: build build-cbox
+    #!/usr/bin/env sh
+    set -eu
+    cd "{{invocation_directory()}}"
+    exec just --justfile "{{justfile()}}" up "$@"
 
 cbox_bin := justfile_directory() + "/cbox/target/release/cbox"
 
@@ -213,6 +220,8 @@ cbox_bin := justfile_directory() + "/cbox/target/release/cbox"
 # and every derived box name would resolve to "cbox" no matter where
 # the user was standing. Because the cd makes the path relative to the user
 # instead, --config has to be passed explicitly.
+# Positional arguments keep every argument whole (`-e "A=b c"`, `-- sh -c 'a; b'`).
+[positional-arguments]
 up *args:
     #!/usr/bin/env sh
     set -eu
@@ -225,37 +234,40 @@ up *args:
          "{{justfile_directory()}}/registries.local.json"
     cd "{{invocation_directory()}}"
     exec "{{cbox_bin}}" up \
-      --config "{{justfile_directory()}}/registries.local.json" {{args}}
+      --config "{{justfile_directory()}}/registries.local.json" "$@"
 
 # Open a session in the running box.
 # Usage: just exec [box-name] [-- cmd...]
 # Usage: just shell [box-name] [-- cmd...]
 alias shell := exec
+[positional-arguments]
 exec *args:
     #!/usr/bin/env sh
     set -eu
     [ -x "{{cbox_bin}}" ] || { echo "cbox binary not found at {{cbox_bin}} - run 'just build-cbox' or 'just install-cbox' first" >&2; exit 1; }
     cd "{{invocation_directory()}}"
     exec "{{cbox_bin}}" exec \
-      --config "{{justfile_directory()}}/registries.local.json" {{args}}
+      --config "{{justfile_directory()}}/registries.local.json" "$@"
 
 # Stop and remove the box.
 # Usage: just down [box-name]
+[positional-arguments]
 down *args:
     #!/usr/bin/env sh
     set -eu
     [ -x "{{cbox_bin}}" ] || { echo "cbox binary not found at {{cbox_bin}} - run 'just build-cbox' or 'just install-cbox' first" >&2; exit 1; }
     cd "{{invocation_directory()}}"
-    exec "{{cbox_bin}}" down {{args}}
+    exec "{{cbox_bin}}" down "$@"
 
 # List boxes across every per-name home.
 # Usage: just list [-a]
+[positional-arguments]
 list *args:
     #!/usr/bin/env sh
     set -eu
     [ -x "{{cbox_bin}}" ] || { echo "cbox binary not found at {{cbox_bin}} - run 'just build-cbox' or 'just install-cbox' first" >&2; exit 1; }
     cd "{{invocation_directory()}}"
-    exec "{{cbox_bin}}" list {{args}}
+    exec "{{cbox_bin}}" list "$@"
 
 # Manage secrets kept in the OS credential store. Values come from a hidden
 # prompt or stdin, never from arguments.
