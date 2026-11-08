@@ -120,8 +120,12 @@ env = [
 - `env` is an array of `"KEY=VALUE"` strings, split at the first `=` (a value may contain
   more `=`). Order is kept. The variables reach the box the way `up -e` ones do.
 - Checks (`validate`, `create`, `edit`, `up`): an entry without `=`, a name that `up -e`
-  would reject, or the same name twice is an error. Errors name the entry by position
-  (`env entry 2 ...`), never by its text, so a value pasted without a name is not echoed.
+  would reject, or the same name twice is an error. A well-formed variable (the part
+  before the first `=` is a valid name) is named in the error, since a name is not secret
+  (`env GIT_AUTHOR_NAME is set twice`). A malformed entry (no `=`, or an invalid name) is
+  reported by position (`env entry 2 ...`) and never by its text: a token pasted into the
+  list can end in `=` (base64 padding) and its first part would otherwise be echoed as
+  the "name".
 - **Credential warning (warn, never refuse).** A variable is flagged when its name has
   `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD` or `CREDENTIAL` as a whole word (split on
   `_`, any case), or when its value starts with `sk-`, `ghp_`, `github_pat_`, `AKIA` or
