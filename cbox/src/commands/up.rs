@@ -47,44 +47,29 @@ pub async fn run(args: UpArgs) -> Result<()> {
     // Profile first: a bad profiles.toml or profile aborts before any box work.
     // No config dir (HOME and XDG_CONFIG_HOME unset) is an empty `default`, not an error.
     let profiles_file = config::profiles_path();
-    let all_profiles = profiles::load_or_empty(profiles_file.as_deref())?;
     let old_sidecar = sidecar::read(&config::box_home(&name));
-    let profile_name = profiles::choose(
+    let prepared = profiles::prepare_up(
+        profiles_file.as_deref(),
         args.profile.as_deref(),
         old_sidecar.as_ref().and_then(|s| s.profile.as_ref()).map(|s| s.name.as_str()),
-        &all_profiles,
+        // A sidecar means a box to resume (the safety net after get_or_create covers a stale one).
+        old_sidecar.is_some() && !args.force,
+        &profiles::Profile {
+            secrets: args.secret_flags.clone(),
+            image: args.image.clone(),
+            cpus: args.cpus,
+            memory: args.memory_gb,
+            disk_size: args.disk_size_gb,
+        },
+        || {
+            let index = config::secrets_index_path().context("cannot locate config directory for the secrets index")?;
+            Ok(crate::secretstore::Index::load(&index)?.names)
+        },
     )?;
-    let mut resolved_profile = profiles::resolve(
-        &all_profiles, &profile_name, &args.secret_flags,
-        args.image.as_deref(), args.cpus, args.memory_gb, args.disk_size_gb,
-    )?;
-    let p = all_profiles.get(&profile_name).expect("resolve found it");
-    let known = profiles::known_for_up(p, || {
-        let index = config::secrets_index_path().context("cannot locate config directory for the secrets index")?;
-        Ok(crate::secretstore::Index::load(&index)?.names)
-    })?;
-    // A sidecar means a box to resume (the safety net after get_or_create covers a stale one).
-    let resuming = old_sidecar.is_some() && !args.force;
-    let file_label = profiles_file.as_deref().map_or("profiles.toml".into(), |p| p.display().to_string());
-    let check = profiles::up_check(profiles::validate(&profile_name, p, &known), resuming, &p.secrets, &known, &file_label)?;
-    for w in &check.warnings {
+    for w in &prepared.check.warnings {
         eprintln!("{w}");
     }
-    resolved_profile.drop_profile_secrets(p.secrets.len(), &check.drop_secrets);
-    if check.downgraded.is_some() {
-        // A resumed box ignores options, but boxopts::build still checks them: fall back to
-        // built-ins for a bad profile value so the resume is not refused. Bad flags still fail.
-        let bad = |r: Result<()>| r.is_err();
-        if args.cpus.is_none() && bad(boxopts::check_resources(None, None, p.cpus)) {
-            resolved_profile.cpus = None;
-        }
-        if args.memory_gb.is_none() && bad(boxopts::check_resources(None, p.memory, None)) {
-            resolved_profile.memory_gb = None;
-        }
-        if args.disk_size_gb.is_none() && bad(boxopts::check_resources(p.disk_size, None, None)) {
-            resolved_profile.disk_size_gb = None;
-        }
-    }
+    let (resolved_profile, check) = (&prepared.resolved, &prepared.check);
 
     // Secrets first: their source variables must be withheld from passthrough.
     let mut specs = Vec::new();
@@ -185,7 +170,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
         // Best-effort, like the git bootstrap below: `cbox list` losing the
         // origin column for this one box is far better than `cbox up`
         // failing over a metadata write.
-        if let Err(e) = sidecar::write(&home, &flags.invocation_dir, &secret_hashes, Some(resolved_profile.snapshot())) {
+        if let Err(e) = sidecar::write(&home, &flags.invocation_dir, &secret_hashes, Some(prepared.snapshot.clone())) {
             eprintln!(
                 "cbox: warning: could not record this box's origin ({e}); \
                  `cbox list` won't show a directory for it."
@@ -217,8 +202,8 @@ pub async fn run(args: UpArgs) -> Result<()> {
                     changed.join(", ")
                 );
             }
-            let new = resolved_profile.snapshot();
-            if let Some(w) = profiles::resume_warning(existing.profile.as_ref(), &new, args.profile.as_deref()) {
+            let new = &prepared.snapshot;
+            if let Some(w) = profiles::resume_warning(existing.profile.as_ref(), new, args.profile.as_deref()) {
                 eprintln!("{w}");
             }
         }

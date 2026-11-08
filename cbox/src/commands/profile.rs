@@ -183,10 +183,18 @@ fn check(name: &str, p: &Profile, index: &Path) -> Result<()> {
 pub fn run(cmd: ProfileCmd) -> Result<()> {
     let path = profiles_path().context("cannot locate config directory for profiles.toml")?;
     let index = secrets_index_path().context("cannot locate config directory for the secrets index")?;
-    run_at(cmd, &path, &index)
+    let mut ask = |q: &str| {
+        print!("{q}");
+        io::stdout().flush()?;
+        let mut s = String::new();
+        io::stdin().read_line(&mut s)?;
+        Ok(s)
+    };
+    run_at(cmd, &path, &index, &mut ask, &mut io::stdout())
 }
 
-fn run_at(cmd: ProfileCmd, path: &Path, index: &Path) -> Result<()> {
+/// `ask` answers the delete prompt; `out` is stdout (both injected for tests).
+fn run_at(cmd: ProfileCmd, path: &Path, index: &Path, ask: &mut dyn FnMut(&str) -> io::Result<String>, out: &mut dyn Write) -> Result<()> {
     match cmd {
         ProfileCmd::Create { name, secrets, image, memory, cpus, disk_size } => {
             let p = Profile {
@@ -195,9 +203,9 @@ fn run_at(cmd: ProfileCmd, path: &Path, index: &Path) -> Result<()> {
             };
             check(&name, &p, index)?;
             apply_create(&Profiles::load(path)?, &name, p)?.save(path)?;
-            println!("Created profile \"{name}\".");
+            writeln!(out, "Created profile \"{name}\".")?;
         }
-        ProfileCmd::List => print!("{}", format_list(&Profiles::load(path)?)),
+        ProfileCmd::List => write!(out, "{}", format_list(&Profiles::load(path)?))?,
         ProfileCmd::Edit { name, secrets, add_secrets, remove_secrets, image, memory, cpus, disk_size } => {
             let names = |s: Option<String>| s.as_deref().map(parse_names).transpose();
             let a = EditArgs {
@@ -209,31 +217,25 @@ fn run_at(cmd: ProfileCmd, path: &Path, index: &Path) -> Result<()> {
             let next = apply_edit(&Profiles::load(path)?, &name, a)?;
             check(&name, next.get(&name).expect("just edited"), index)?;
             next.save(path)?;
-            println!("Updated profile \"{name}\".");
+            writeln!(out, "Updated profile \"{name}\".")?;
         }
         ProfileCmd::Delete { name, yes } => {
             let next = apply_delete(&Profiles::load(path)?, &name)?;
-            let ok = confirm_delete("profile", &name, yes, &mut |q| {
-                print!("{q}");
-                io::stdout().flush()?;
-                let mut s = String::new();
-                io::stdin().read_line(&mut s)?;
-                Ok(s)
-            })?;
+            let ok = confirm_delete("profile", &name, yes, ask)?;
             if !ok {
-                println!("Cancelled.");
+                writeln!(out, "Cancelled.")?;
                 return Ok(());
             }
             next.save(path)?;
-            println!("Deleted \"{name}\".");
+            writeln!(out, "Deleted \"{name}\".")?;
         }
         ProfileCmd::Validate { name } => {
             let problems = validate_file(path, index, name.as_deref())?;
             if problems.is_empty() {
-                println!("profiles.toml is valid");
+                writeln!(out, "profiles.toml is valid")?;
             } else {
                 for p in &problems {
-                    println!("{p}");
+                    writeln!(out, "{p}")?;
                 }
                 bail!("{} problem(s) in {}", problems.len(), path.display());
             }
@@ -287,6 +289,10 @@ mod tests {
         m.insert(DEFAULT.to_string(), Profile::default());
         m.insert("dev".to_string(), Profile { secrets: vec!["a".into(), "b".into()], cpus: Some(2), ..Default::default() });
         Profiles(m)
+    }
+
+    fn no_ask(_: &str) -> io::Result<String> {
+        panic!("must not prompt")
     }
 
     fn v(s: &[&str]) -> Vec<String> {
@@ -351,7 +357,7 @@ mod tests {
         let problems = validate_file(&p, &idx, None).unwrap();
         assert!(problems.iter().any(|m| m.contains("profile Bad")), "{problems:?}");
         assert!(problems.iter().any(|m| m.contains("no secret named ghost")), "{problems:?}");
-        assert!(run_at(ProfileCmd::Validate { name: None }, &p, &idx).is_err());
+        assert!(run_at(ProfileCmd::Validate { name: None }, &p, &idx, &mut no_ask, &mut Vec::new()).is_err());
         assert!(validate_file(&p, &idx, Some("nope")).is_err());
         assert_eq!(std::fs::read_to_string(&p).unwrap(), body);
         std::fs::write(&p, "not toml [").unwrap();
@@ -364,12 +370,95 @@ mod tests {
         let (p, idx) = (d.join("profiles.toml"), d.join("secrets.json"));
         std::fs::write(&idx, r#"{"names":["a"]}"#).unwrap();
         let create = |n: &str, s: &str| ProfileCmd::Create { name: n.into(), secrets: Some(s.into()), image: None, memory: None, cpus: None, disk_size: None };
-        assert!(run_at(create("dev", "ghost"), &p, &idx).is_err());
+        assert!(run_at(create("dev", "ghost"), &p, &idx, &mut no_ask, &mut Vec::new()).is_err());
         assert!(!p.exists());
-        run_at(create("dev", "a"), &p, &idx).unwrap();
+        run_at(create("dev", "a"), &p, &idx, &mut no_ask, &mut Vec::new()).unwrap();
         assert_eq!(Profiles::load(&p).unwrap().get("dev").unwrap().secrets, v(&["a"]));
-        run_at(ProfileCmd::Delete { name: "dev".into(), yes: true }, &p, &idx).unwrap();
+        run_at(ProfileCmd::Delete { name: "dev".into(), yes: true }, &p, &idx, &mut no_ask, &mut Vec::new()).unwrap();
         assert!(Profiles::load(&p).unwrap().get("dev").is_none());
+    }
+
+    fn edit(name: &str, add: Option<&str>, remove: Option<&str>, cpus: Option<u8>) -> ProfileCmd {
+        let s = |x: Option<&str>| x.map(String::from);
+        ProfileCmd::Edit { name: name.into(), secrets: None, add_secrets: s(add), remove_secrets: s(remove), image: None, memory: None, cpus, disk_size: None }
+    }
+
+    /// A dir with `body` as profiles.toml and an index naming `a`.
+    fn files(tag: &str, body: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let d = tmp(tag);
+        let (p, idx) = (d.join("profiles.toml"), d.join("secrets.json"));
+        std::fs::write(&p, body).unwrap();
+        std::fs::write(&idx, r#"{"names":["a"]}"#).unwrap();
+        (p, idx)
+    }
+
+    #[test]
+    fn a_failed_edit_leaves_the_file_byte_for_byte_unchanged() {
+        let body = "# a comment that a save would drop\n[default]\n\n[dev]\nsecrets = [\"a\"]\n";
+        let (p, idx) = files("edit-fail", body);
+        let cmd = edit("dev", Some("ghost"), None, None);
+        let e = run_at(cmd, &p, &idx, &mut no_ask, &mut Vec::new()).unwrap_err().to_string();
+        assert!(e.contains("no secret named ghost"), "{e}");
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), body);
+        let e = run_at(edit("nope", None, None, None), &p, &idx, &mut no_ask, &mut Vec::new()).unwrap_err().to_string();
+        assert_eq!(e, "profile \"nope\" not found");
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), body);
+    }
+
+    #[test]
+    fn editing_only_cpus_still_fails_while_the_profile_names_a_deleted_secret() {
+        // Pinned: edit validates the whole profile, so the deleted secret must be removed first.
+        let body = "[default]\n[dev]\nsecrets = [\"deleted\"]\n";
+        let (p, idx) = files("edit-cpus", body);
+        let cmd = edit("dev", None, None, Some(4));
+        let e = run_at(cmd, &p, &idx, &mut no_ask, &mut Vec::new()).unwrap_err().to_string();
+        assert!(e.contains("no secret named deleted"), "{e}");
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), body);
+        let fix = edit("dev", None, Some("deleted"), Some(4));
+        run_at(fix, &p, &idx, &mut no_ask, &mut Vec::new()).unwrap();
+        assert_eq!(Profiles::load(&p).unwrap().get("dev").unwrap().cpus, Some(4));
+    }
+
+    #[test]
+    fn validate_name_checks_only_that_profile() {
+        let (p, idx) = files("validate-one", "[default]\n[bad]\ncpus = 0\n[good]\nsecrets = [\"a\"]\n");
+        assert!(validate_file(&p, &idx, Some("good")).unwrap().is_empty());
+        let mut out = Vec::new();
+        run_at(ProfileCmd::Validate { name: Some("good".into()) }, &p, &idx, &mut no_ask, &mut out).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "profiles.toml is valid\n");
+        assert_eq!(validate_file(&p, &idx, Some("bad")).unwrap(), ["profile bad: cpus must be greater than 0"]);
+        assert!(run_at(ProfileCmd::Validate { name: Some("bad".into()) }, &p, &idx, &mut no_ask, &mut Vec::new()).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_gh_basic_in_a_profile() {
+        let (p, idx) = files("gh-basic", "[default]\nsecrets = [\"gh_basic\"]\n");
+        let problems = validate_file(&p, &idx, None).unwrap();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].starts_with("profile default: secrets:") && problems[0].contains("reserved"), "{problems:?}");
+    }
+
+    #[test]
+    fn a_zero_byte_secrets_index_is_an_error_not_an_empty_one() {
+        let (p, idx) = files("empty-index", "[default]\n");
+        std::fs::write(&idx, "").unwrap();
+        let create = ProfileCmd::Create { name: "dev".into(), secrets: Some("a".into()), image: None, memory: None, cpus: None, disk_size: None };
+        let e = format!("{:#}", run_at(create, &p, &idx, &mut no_ask, &mut Vec::new()).unwrap_err());
+        assert!(e.starts_with(&format!("invalid index {}", idx.display())), "{e}");
+        assert!(validate_file(&p, &idx, None).is_err());
+    }
+
+    #[test]
+    fn declining_profile_delete_leaves_the_file_and_says_cancelled() {
+        let body = "[default]\n\n[dev]\ncpus = 2\n";
+        let (p, idx) = files("delete-no", body);
+        let mut asked = String::new();
+        let mut out = Vec::new();
+        let cmd = ProfileCmd::Delete { name: "dev".into(), yes: false };
+        run_at(cmd, &p, &idx, &mut |q| { asked = q.to_string(); Ok("n\n".into()) }, &mut out).unwrap();
+        assert_eq!(asked, "Delete profile \"dev\"? [y/N] ");
+        assert_eq!(String::from_utf8(out).unwrap(), "Cancelled.\n");
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), body);
     }
 
     #[test]

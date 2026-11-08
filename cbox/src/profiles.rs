@@ -165,6 +165,51 @@ pub fn up_check(problems: Vec<String>, resuming: bool, profile_secrets: &[String
     Ok(UpCheck { downgraded: Some(error), warnings, drop_secrets })
 }
 
+/// Everything `up` decides from profiles before any box work.
+#[derive(Debug)]
+pub struct Prepared {
+    /// Fed to `specs_from_flags` and `boxopts::build`.
+    pub resolved: Resolved,
+    /// What `sidecar::write` records and what a resume diffs against.
+    pub snapshot: ProfileSnapshot,
+    pub check: UpCheck,
+}
+
+/// load -> choose -> resolve -> validate (downgraded on resume). `flags` is this run's flag
+/// layer (`--secret`, `-i`, `--cpus`, `--memory`, `--disk-size`); `recorded` the sidecar's profile.
+pub fn prepare_up(
+    file: Option<&Path>,
+    asked: Option<&str>,
+    recorded: Option<&str>,
+    resuming: bool,
+    flags: &Profile,
+    known: impl FnOnce() -> Result<BTreeSet<String>>,
+) -> Result<Prepared> {
+    let all = load_or_empty(file)?;
+    let name = choose(asked, recorded, &all)?;
+    let mut resolved = resolve(&all, &name, &flags.secrets, flags.image.as_deref(), flags.cpus, flags.memory, flags.disk_size)?;
+    let p = all.get(&name).expect("resolve found it");
+    let known = known_for_up(p, known)?;
+    let label = file.map_or("profiles.toml".into(), |f| f.display().to_string());
+    let check = up_check(validate(&name, p, &known), resuming, &p.secrets, &known, &label)?;
+    resolved.drop_profile_secrets(p.secrets.len(), &check.drop_secrets);
+    if check.downgraded.is_some() {
+        // A resumed box ignores options, but boxopts::build still checks them: fall back to
+        // built-ins for a bad profile value so the resume is not refused. Bad flags still fail.
+        use crate::boxopts::check_resources as ok;
+        if flags.cpus.is_none() && ok(None, None, p.cpus).is_err() {
+            resolved.cpus = None;
+        }
+        if flags.memory.is_none() && ok(None, p.memory, None).is_err() {
+            resolved.memory_gb = None;
+        }
+        if flags.disk_size.is_none() && ok(p.disk_size, None, None).is_err() {
+            resolved.disk_size_gb = None;
+        }
+    }
+    Ok(Prepared { snapshot: resolved.snapshot(), resolved, check })
+}
+
 impl Resolved {
     /// Remove `drop` (and repeats) from the first `n_profile` secrets, the profile's; flag secrets stay.
     pub fn drop_profile_secrets(&mut self, n_profile: usize, drop: &[String]) {
@@ -432,6 +477,60 @@ mod tests {
         let c = up_check(validate("foo", &p, &BTreeSet::new()), true, &p.secrets, &BTreeSet::new(), "f").unwrap();
         assert!(c.warnings[0].contains("cpus must be greater than 0"), "{:?}", c.warnings);
         assert!(c.drop_secrets.is_empty());
+    }
+
+    fn prep_file(tag: &str, body: &str) -> std::path::PathBuf {
+        let d = tmp(tag);
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("profiles.toml");
+        std::fs::write(&f, body).unwrap();
+        f
+    }
+
+    fn known_ab() -> Result<BTreeSet<String>> {
+        Ok(["a".to_string(), "b".to_string()].into())
+    }
+
+    #[test]
+    fn prepare_up_aborts_on_a_bad_file_naming_the_path() {
+        let f = prep_file("prep-bad", "[default]\nmemroy = 1\n");
+        let e = prepare_up(Some(&f), None, None, true, &Profile::default(), known_ab).unwrap_err().to_string();
+        assert!(e.contains(&f.display().to_string()), "{e}");
+    }
+
+    #[test]
+    fn prepare_up_refuses_a_recorded_profile_that_is_gone() {
+        let f = prep_file("prep-gone", "[default]\n");
+        let e = prepare_up(Some(&f), None, Some("gone"), true, &Profile::default(), known_ab).unwrap_err().to_string();
+        assert!(e.contains("profile gone") && e.contains("pass --profile NAME"), "{e}");
+    }
+
+    #[test]
+    fn prepare_up_resumes_the_recorded_profile_with_its_secrets_and_flags() {
+        let f = prep_file("prep-rec", "[default]\n[foo]\nsecrets = [\"a\"]\ncpus = 3\n");
+        let flags = Profile { secrets: strs(&["b"]), memory: Some(6), ..Default::default() };
+        let p = prepare_up(Some(&f), None, Some("foo"), true, &flags, known_ab).unwrap();
+        assert_eq!(p.resolved.profile_name, "foo");
+        assert_eq!(p.resolved.secrets, strs(&["a", "b"]));
+        assert_eq!((p.resolved.cpus, p.resolved.memory_gb), (Some(3), Some(6)));
+        assert_eq!(p.snapshot, p.resolved.snapshot());
+        assert_eq!(p.check, UpCheck::default());
+    }
+
+    #[test]
+    fn prepare_up_fails_a_new_box_and_strips_a_resume() {
+        let f = prep_file("prep-strip", "[default]\nsecrets = [\"a\", \"ghost\"]\ncpus = 0\n");
+        let flags = Profile { secrets: strs(&["b"]), ..Default::default() };
+        let e = prepare_up(Some(&f), None, None, false, &flags, known_ab).unwrap_err().to_string();
+        assert!(e.contains("no secret named ghost") && e.contains("cpus must be greater than 0"), "{e}");
+        let p = prepare_up(Some(&f), None, None, true, &flags, known_ab).unwrap();
+        assert_eq!(p.resolved.secrets, strs(&["a", "b"]));
+        assert_eq!(p.snapshot.secrets, strs(&["a", "b"]));
+        assert_eq!(p.resolved.cpus, None, "bad profile cpus falls back to the built-in");
+        assert_eq!(p.check.downgraded.as_deref(), Some(e.as_str()));
+        // A --cpus flag is kept as given, so a bad one still fails in boxopts::build.
+        let flags = Profile { cpus: Some(0), ..flags };
+        assert_eq!(prepare_up(Some(&f), None, None, true, &flags, known_ab).unwrap().resolved.cpus, Some(0));
     }
 
     #[test]
