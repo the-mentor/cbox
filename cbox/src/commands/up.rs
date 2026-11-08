@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use boxlite::{BoxCommand, BoxliteOptions, BoxliteRuntime, LiteBox};
 
-use crate::{attach, boxopts, config, env, envfile, naming, secrets, secretstore, sidecar};
+use crate::{attach, boxopts, config, env, envfile, naming, profiles, secrets, secretstore, sidecar};
 
 pub struct UpArgs {
     pub name: Option<String>,
@@ -15,7 +15,8 @@ pub struct UpArgs {
     pub cwd_mount: bool,
     pub volumes: Vec<String>,
     pub env_flags: Vec<String>,
-    pub image: String,
+    pub image: Option<String>,
+    pub profile: Option<String>,
     pub config: Option<PathBuf>,
     pub secret_flags: Vec<String>,
     pub env_file: Option<PathBuf>,
@@ -43,13 +44,48 @@ pub async fn run(args: UpArgs) -> Result<()> {
         envfile::apply(path);
     }
 
+    // Profile first: a bad profiles.toml or profile aborts before any box work.
+    let profiles_file = config::profiles_path().context("cannot locate config directory for profiles.toml")?;
+    let all_profiles = profiles::Profiles::load(&profiles_file)?;
+    // With -f the old box is discarded, so its recorded profile no longer applies.
+    let old_sidecar = if args.force { None } else { sidecar::read(&config::box_home(&name)) };
+    let profile_name = match (&args.profile, old_sidecar.as_ref().and_then(|s| s.profile.as_ref())) {
+        (Some(p), _) => p.clone(),
+        (None, Some(snap)) => {
+            anyhow::ensure!(
+                all_profiles.get(&snap.name).is_some(),
+                "profile {} (used to create this box) no longer exists in profiles.toml; \
+                 pass --profile NAME or recreate the box with -f",
+                snap.name
+            );
+            snap.name.clone()
+        }
+        (None, None) => profiles::DEFAULT.to_string(),
+    };
+    let resolved_profile = profiles::resolve(
+        &all_profiles, &profile_name, &args.secret_flags,
+        args.image.as_deref(), args.cpus, args.memory_gb, args.disk_size_gb,
+    )?;
+    let index = config::secrets_index_path().context("cannot locate config directory for the secrets index")?;
+    let problems = profiles::validate(
+        &profile_name,
+        all_profiles.get(&profile_name).expect("resolve found it"),
+        &crate::secretstore::Index::load(&index)?.names,
+    );
+    anyhow::ensure!(
+        problems.is_empty(),
+        "{} ({})",
+        problems.join("\n"),
+        profiles_file.display()
+    );
+
     // Secrets first: their source variables must be withheld from passthrough.
     let mut specs = Vec::new();
     if secrets::has_github_token() {
         specs.push(secrets::github_spec());
     }
     // The store opens only when a bare name exists; all bare names are read in one call.
-    specs.extend(secrets::specs_from_flags(&args.secret_flags, secretstore::open_default)?);
+    specs.extend(secrets::specs_from_flags(&resolved_profile.secrets, secretstore::open_default)?);
     secrets::check_unique_env(&specs)?;
     let built = secrets::build(&specs)?;
     let has_github = specs.iter().any(|s| s.name == "gh");
@@ -107,14 +143,14 @@ pub async fn run(args: UpArgs) -> Result<()> {
     }
 
     let flags = boxopts::UpFlags {
-        image: args.image,
+        image: resolved_profile.image.clone(),
         cwd_mount: args.cwd_mount,
         volumes: args.volumes,
         cmd,
         invocation_dir: cwd,
-        disk_size_gb: args.disk_size_gb,
-        memory_gb: args.memory_gb,
-        cpus: args.cpus,
+        disk_size_gb: resolved_profile.disk_size_gb,
+        memory_gb: resolved_profile.memory_gb,
+        cpus: resolved_profile.cpus,
         detach: args.detach,
     };
     let options = boxopts::build(&flags, built.secrets, plain)?;
@@ -134,7 +170,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
         // Best-effort, like the git bootstrap below: `cbox list` losing the
         // origin column for this one box is far better than `cbox up`
         // failing over a metadata write.
-        if let Err(e) = sidecar::write(&home, &flags.invocation_dir, &secret_hashes) {
+        if let Err(e) = sidecar::write(&home, &flags.invocation_dir, &secret_hashes, Some(resolved_profile.snapshot())) {
             eprintln!(
                 "cbox: warning: could not record this box's origin ({e}); \
                  `cbox list` won't show a directory for it."
@@ -165,6 +201,10 @@ pub async fn run(args: UpArgs) -> Result<()> {
                      the box keeps the OLD setting(s) until you run with -f/--force to recreate it.",
                     changed.join(", ")
                 );
+            }
+            let new = resolved_profile.snapshot();
+            if let Some(w) = existing.profile.as_ref().and_then(|old| profiles::resume_warning(old, &new, args.profile.as_deref())) {
+                eprintln!("{w}");
             }
         }
     }

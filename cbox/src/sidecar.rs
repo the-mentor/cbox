@@ -29,6 +29,19 @@ pub struct Sidecar {
     /// still parse, just with nothing to compare.
     #[serde(default)]
     pub secret_hashes: BTreeMap<String, u64>,
+    /// The resolved profile at creation. Absent on boxes made before profiles.
+    #[serde(default)]
+    pub profile: Option<ProfileSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProfileSnapshot {
+    pub name: String,
+    pub secrets: Vec<String>,
+    pub image: String,
+    pub cpus: Option<u8>,
+    pub memory_gb: Option<u32>,
+    pub disk_size_gb: Option<u64>,
 }
 
 /// Hash a secret's value for drift detection. Never store or log the value
@@ -85,10 +98,16 @@ pub fn changed_secrets(old: &BTreeMap<String, u64>, current: &BTreeMap<String, u
 ///
 /// Failure here is never fatal to `cbox up` — the caller is expected to warn
 /// and continue, the same way the GitHub credential bootstrap does.
-pub fn write(home: &Path, origin: &Path, secret_hashes: &BTreeMap<String, u64>) -> Result<()> {
+pub fn write(
+    home: &Path,
+    origin: &Path,
+    secret_hashes: &BTreeMap<String, u64>,
+    profile: Option<ProfileSnapshot>,
+) -> Result<()> {
     let sidecar = Sidecar {
         origin: origin.to_string_lossy().into_owned(),
         secret_hashes: secret_hashes.clone(),
+        profile,
     };
     let body = serde_json::to_string_pretty(&sidecar).context("failed to encode box metadata")?;
     let path = home.join(FILE_NAME);
@@ -127,7 +146,7 @@ mod tests {
     #[test]
     fn write_then_read_round_trips_the_origin() {
         let home = tmp_home("roundtrip");
-        write(&home, Path::new("/repo/checkout"), &BTreeMap::new()).expect("write should succeed");
+        write(&home, Path::new("/repo/checkout"), &BTreeMap::new(), None).expect("write should succeed");
         let sidecar = read(&home).expect("sidecar should parse");
         assert_eq!(sidecar.origin, "/repo/checkout");
         std::fs::remove_dir_all(&home).ok();
@@ -140,7 +159,7 @@ mod tests {
         hashes.insert("gh".to_string(), hash_secret_value("ghp_example"));
         hashes.insert("openai".to_string(), hash_secret_value("sk-example"));
 
-        write(&home, Path::new("/repo"), &hashes).expect("write should succeed");
+        write(&home, Path::new("/repo"), &hashes, None).expect("write should succeed");
         let sidecar = read(&home).expect("sidecar should parse");
         assert_eq!(sidecar.secret_hashes, hashes);
         std::fs::remove_dir_all(&home).ok();
@@ -243,8 +262,8 @@ mod tests {
     #[test]
     fn write_overwrites_a_previous_sidecar() {
         let home = tmp_home("overwrite");
-        write(&home, Path::new("/first"), &BTreeMap::new()).unwrap();
-        write(&home, Path::new("/second"), &BTreeMap::new()).unwrap();
+        write(&home, Path::new("/first"), &BTreeMap::new(), None).unwrap();
+        write(&home, Path::new("/second"), &BTreeMap::new(), None).unwrap();
         assert_eq!(read(&home).unwrap().origin, "/second");
         std::fs::remove_dir_all(&home).ok();
     }
@@ -252,7 +271,7 @@ mod tests {
     #[test]
     fn a_write_that_cannot_complete_leaves_no_stale_value_behind() {
         let home = tmp_home("write-fails");
-        write(&home, Path::new("/first"), &BTreeMap::new()).unwrap();
+        write(&home, Path::new("/first"), &BTreeMap::new(), None).unwrap();
         assert_eq!(read(&home).unwrap().origin, "/first");
 
         // Force the next write to fail outright: replace the sidecar path
@@ -262,7 +281,7 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
         std::fs::create_dir(&path).unwrap();
 
-        assert!(write(&home, Path::new("/second"), &BTreeMap::new()).is_err());
+        assert!(write(&home, Path::new("/second"), &BTreeMap::new(), None).is_err());
 
         // Whatever happened, `list` must never render this box as
         // "/first" again -- blank (None) is acceptable, the stale old
@@ -287,7 +306,7 @@ mod tests {
         std::fs::write(&elsewhere, r#"{"origin":"/stale-elsewhere"}"#).unwrap();
         std::os::unix::fs::symlink(&elsewhere, &path).unwrap();
 
-        write(&home, Path::new("/second"), &BTreeMap::new()).expect("write should succeed");
+        write(&home, Path::new("/second"), &BTreeMap::new(), None).expect("write should succeed");
 
         let metadata = std::fs::symlink_metadata(&path).unwrap();
         assert!(
@@ -301,6 +320,30 @@ mod tests {
             "the file the old symlink pointed at must be untouched: {elsewhere_contents:?}"
         );
 
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn old_sidecar_without_profile_parses_with_none() {
+        let home = tmp_home("old-no-profile");
+        std::fs::write(home.join(FILE_NAME), r#"{"origin":"/repo","secret_hashes":{}}"#).unwrap();
+        assert_eq!(read(&home).unwrap().profile, None);
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn sidecar_round_trips_a_profile_snapshot() {
+        let home = tmp_home("profile-snapshot");
+        let snap = ProfileSnapshot {
+            name: "foo".into(),
+            secrets: vec!["a".into()],
+            image: "img".into(),
+            cpus: None,
+            memory_gb: Some(8),
+            disk_size_gb: None,
+        };
+        write(&home, Path::new("/repo"), &BTreeMap::new(), Some(snap.clone())).unwrap();
+        assert_eq!(read(&home).unwrap().profile, Some(snap));
         std::fs::remove_dir_all(&home).ok();
     }
 }

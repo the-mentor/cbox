@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use crate::sidecar::ProfileSnapshot;
+
 pub const DEFAULT: &str = "default";
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -44,6 +46,103 @@ impl Profiles {
     pub fn get(&self, name: &str) -> Option<&Profile> {
         self.0.get(name)
     }
+}
+
+/// A profile with the flags of one `up` applied. `None` resources mean the built-in default.
+#[derive(Debug)]
+pub struct Resolved {
+    pub profile_name: String,
+    /// Profile secrets in file order, then flag secrets as typed.
+    pub secrets: Vec<String>,
+    pub image: String,
+    pub cpus: Option<u8>,
+    pub memory_gb: Option<u32>,
+    pub disk_size_gb: Option<u64>,
+}
+
+impl Resolved {
+    pub fn snapshot(&self) -> ProfileSnapshot {
+        ProfileSnapshot {
+            name: self.profile_name.clone(),
+            secrets: self.secrets.clone(),
+            image: self.image.clone(),
+            cpus: self.cpus,
+            memory_gb: self.memory_gb,
+            disk_size_gb: self.disk_size_gb,
+        }
+    }
+}
+
+pub fn resolve(
+    profiles: &Profiles,
+    name: &str,
+    flag_secrets: &[String],
+    image: Option<&str>,
+    cpus: Option<u8>,
+    memory_gb: Option<u32>,
+    disk_size_gb: Option<u64>,
+) -> Result<Resolved> {
+    let p = profiles.get(name).with_context(|| format!("no profile named {name}"))?;
+    for f in flag_secrets {
+        let flag_name = f.split('=').next().unwrap_or(f);
+        if p.secrets.iter().any(|s| s == flag_name) {
+            anyhow::bail!("secret {flag_name} is already in profile {name}");
+        }
+    }
+    Ok(Resolved {
+        profile_name: name.to_string(),
+        secrets: p.secrets.iter().chain(flag_secrets).cloned().collect(),
+        image: image.map(String::from).or_else(|| p.image.clone()).unwrap_or_else(|| "cbox-custom".into()),
+        cpus: cpus.or(p.cpus),
+        memory_gb: memory_gb.or(p.memory),
+        disk_size_gb: disk_size_gb.or(p.disk_size),
+    })
+}
+
+/// Human-readable differences, empty when the snapshots match.
+pub fn diff(old: &ProfileSnapshot, new: &ProfileSnapshot) -> Vec<String> {
+    let mut out = Vec::new();
+    let list = |a: &[String], b: &[String]| a.iter().filter(|s| !b.contains(s)).cloned().collect::<Vec<_>>().join(", ");
+    let (added, removed) = (list(&new.secrets, &old.secrets), list(&old.secrets, &new.secrets));
+    if !added.is_empty() {
+        out.push(format!("secrets added: {added}"));
+    }
+    if !removed.is_empty() {
+        out.push(format!("secrets removed: {removed}"));
+    }
+    if old.image != new.image {
+        out.push(format!("image: {} -> {}", old.image, new.image));
+    }
+    fn num<T: std::fmt::Display + PartialEq>(out: &mut Vec<String>, label: &str, unit: &str, a: Option<T>, b: Option<T>) {
+        if a != b {
+            let show = |v: &Option<T>| v.as_ref().map_or("default".to_string(), |v| v.to_string());
+            let unit = if b.is_some() { unit } else { "" };
+            out.push(format!("{label}: {} -> {}{unit}", show(&a), show(&b)));
+        }
+    }
+    num(&mut out, "cpus", "", old.cpus, new.cpus);
+    num(&mut out, "memory", " GiB", old.memory_gb, new.memory_gb);
+    num(&mut out, "disk size", " GB", old.disk_size_gb, new.disk_size_gb);
+    out
+}
+
+/// The stderr warning for a resumed box whose profile now resolves differently.
+/// `asked` is the `--profile` passed on this run, if any.
+pub fn resume_warning(old: &ProfileSnapshot, new: &ProfileSnapshot, asked: Option<&str>) -> Option<String> {
+    let lines = diff(old, new);
+    if lines.is_empty() {
+        return None;
+    }
+    let head = match asked {
+        Some(x) if x != old.name => {
+            format!("you asked for profile {x}; this box was created with profile {}", old.name)
+        }
+        _ => format!("profile {} differs from this box (created with {})", new.name, old.name),
+    };
+    let body: String = lines.iter().map(|l| format!("  {l}\n")).collect();
+    Some(format!(
+        "cbox: warning: {head}:\n{body}the box keeps its OLD settings until you run with -f/--force to recreate it."
+    ))
 }
 
 /// Write `body` to a temp file next to `path` (unique per process, 0600, dir 0700).
@@ -148,6 +247,81 @@ pub fn validate(name: &str, p: &Profile, known_secrets: &BTreeSet<String>) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn two() -> Profiles {
+        let mut m = BTreeMap::new();
+        m.insert("default".into(), Profile { memory: Some(8), ..Default::default() });
+        m.insert("foo".into(), Profile { secrets: vec!["a".into(), "b".into()], ..Default::default() });
+        Profiles(m)
+    }
+
+    fn strs(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn resolve_uses_only_the_chosen_profile_and_builtin_image() {
+        let r = resolve(&two(), "default", &[], None, None, None, None).unwrap();
+        assert_eq!((r.memory_gb, r.image.as_str()), (Some(8), "cbox-custom"));
+        let r = resolve(&Profiles(BTreeMap::from([("foo".into(), Profile::default())])), "foo", &[], None, None, None, None).unwrap();
+        assert_eq!(r.memory_gb, None);
+    }
+
+    #[test]
+    fn resolve_merges_flag_secrets_after_profile_secrets() {
+        let r = resolve(&two(), "foo", &strs(&["z", "Q=ENV@h"]), None, None, None, None).unwrap();
+        assert_eq!(r.secrets, strs(&["a", "b", "z", "Q=ENV@h"]));
+    }
+
+    #[test]
+    fn resolve_rejects_a_flag_secret_already_in_the_profile() {
+        for f in ["b", "b=ENV@h"] {
+            let e = resolve(&two(), "foo", &strs(&[f]), None, None, None, None).unwrap_err().to_string();
+            assert_eq!(e, "secret b is already in profile foo");
+        }
+    }
+
+    #[test]
+    fn resolve_flags_override_single_values() {
+        let r = resolve(&two(), "default", &[], Some("img"), Some(3), Some(16), Some(20)).unwrap();
+        assert_eq!((r.image.as_str(), r.cpus, r.memory_gb, r.disk_size_gb), ("img", Some(3), Some(16), Some(20)));
+    }
+
+    #[test]
+    fn resolve_unknown_profile_errors() {
+        let e = resolve(&two(), "nope", &[], None, None, None, None).unwrap_err().to_string();
+        assert_eq!(e, "no profile named nope");
+    }
+
+    #[test]
+    fn diff_reports_added_removed_and_changed_and_is_empty_when_equal() {
+        let a = resolve(&two(), "foo", &[], None, None, None, None).unwrap().snapshot();
+        assert!(diff(&a, &a).is_empty());
+        let mut b = a.clone();
+        b.secrets = strs(&["b", "c"]);
+        b.image = "other".into();
+        b.memory_gb = Some(8);
+        b.cpus = Some(4);
+        b.disk_size_gb = Some(20);
+        assert_eq!(
+            diff(&a, &b),
+            strs(&["secrets added: c", "secrets removed: a", "image: cbox-custom -> other", "cpus: default -> 4", "memory: default -> 8 GiB", "disk size: default -> 20 GB"])
+        );
+    }
+
+    #[test]
+    fn resume_warning_names_old_profile_and_flag_mismatch() {
+        let a = resolve(&two(), "foo", &[], None, None, None, None).unwrap().snapshot();
+        let mut b = a.clone();
+        b.memory_gb = Some(8);
+        let w = resume_warning(&a, &b, None).unwrap();
+        assert!(w.starts_with("cbox: warning: profile foo differs from this box (created with foo):\n  memory: default -> 8 GiB\n"), "{w}");
+        assert!(w.ends_with("the box keeps its OLD settings until you run with -f/--force to recreate it."), "{w}");
+        b.name = "bar".into();
+        let w = resume_warning(&a, &b, Some("bar")).unwrap();
+        assert!(w.starts_with("cbox: warning: you asked for profile bar; this box was created with profile foo:\n"), "{w}");
+        assert_eq!(resume_warning(&a, &a, None), None);
+    }
 
     fn tmp(tag: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("cbox-prof-{}-{tag}", std::process::id()));

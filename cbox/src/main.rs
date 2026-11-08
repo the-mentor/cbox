@@ -49,8 +49,13 @@ enum Commands {
         volumes: Vec<String>,
         #[arg(short = 'e', long = "env")]
         env_flags: Vec<String>,
-        #[arg(short = 'i', long, default_value = "cbox-custom")]
-        image: String,
+        /// Image to run. Defaults to the profile's image, then cbox-custom.
+        #[arg(short = 'i', long)]
+        image: Option<String>,
+        /// Profile to apply (see `cbox profile`). Defaults to the profile the
+        /// box was created with, else `default`.
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         config: Option<PathBuf>,
         /// NAME (stored with `cbox secret create`) or NAME=ENV_VAR@host[,host...]
@@ -125,11 +130,11 @@ async fn main() -> Result<()> {
             println!("{}  (derived: {})", resolved.name, resolved.source.describe());
         }
         Commands::Up {
-            name, force, cwd_mount, volumes, env_flags, image, config, secret_flags, env_file, cmd,
+            name, force, cwd_mount, volumes, env_flags, image, profile, config, secret_flags, env_file, cmd,
             disk_size, memory, cpus, detach,
         } => {
             commands::up::run(commands::up::UpArgs {
-                name, force, cwd_mount, volumes, env_flags, image, config, secret_flags, env_file,
+                name, force, cwd_mount, volumes, env_flags, image, profile, config, secret_flags, env_file,
                 cmd, disk_size_gb: disk_size, memory_gb: memory, cpus, detach,
             })
             .await?;
@@ -153,6 +158,16 @@ mod tests {
             Commands::Up { memory, cpus, .. } => Ok((memory, cpus)),
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn up_image_and_profile_are_optional() {
+        let up = |a: &[&str]| match Cli::try_parse_from(["cbox", "up"].iter().chain(a)).unwrap().command {
+            Commands::Up { image, profile, .. } => (image, profile),
+            _ => unreachable!(),
+        };
+        assert_eq!(up(&[]), (None, None));
+        assert_eq!(up(&["-i", "x", "--profile", "foo"]), (Some("x".into()), Some("foo".into())));
     }
 
     #[test]
