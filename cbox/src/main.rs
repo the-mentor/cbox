@@ -122,7 +122,15 @@ enum Commands {
 async fn main() -> Result<()> {
     // Before parse: clap exits on --help, which must still create the file.
     commands::profile::startup_ensure();
-    let cli = Cli::parse();
+    let cli = Cli::try_parse().unwrap_or_else(|e| {
+        // Asking for help by leaving arguments out is not a failure: clap exits 2 for it, which
+        // makes `just` print "Recipe failed". Real usage errors keep their exit code.
+        if e.kind() == clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand {
+            e.print().ok();
+            std::process::exit(0);
+        }
+        e.exit()
+    });
     match cli.command {
         Commands::Name { name } => {
             let cwd = std::env::current_dir().context("cannot read current directory")?;
