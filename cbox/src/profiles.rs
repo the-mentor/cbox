@@ -88,7 +88,7 @@ impl Resolved {
         ProfileSnapshot {
             name: self.profile_name.clone(),
             // Name -> value hash; the value itself is never recorded. First entry of a name wins.
-            env: Some(self.env.iter().filter_map(|e| split_env(e)).filter(|(n, _)| valid_env_name(n)).fold(BTreeMap::new(), |mut m, (n, v)| {
+            env: Some(self.env.iter().filter_map(|e| env_pair(e)).fold(BTreeMap::new(), |mut m, (n, v)| {
                 m.entry(n.to_string()).or_insert_with(|| crate::sidecar::hash_secret_value(v));
                 m
             })),
@@ -207,7 +207,7 @@ pub fn prepare_up(
     if check.downgraded.is_some() {
         // Keep compose from failing on a bare KEY (host lookup) or a bad name; first of a duplicate stays.
         let mut seen = BTreeSet::new();
-        resolved.env.retain(|e| split_env(e).is_some_and(|(n, _)| valid_env_name(n) && seen.insert(n.to_string())));
+        resolved.env.retain(|e| env_pair(e).is_some_and(|(n, _)| seen.insert(n.to_string())));
         // A resumed box ignores options, but boxopts::build still checks them: fall back to
         // built-ins for a bad profile value so the resume is not refused. Bad flags still fail.
         use crate::boxopts::check_resources as ok;
@@ -386,6 +386,16 @@ pub fn split_env(entry: &str) -> Option<(&str, &str)> {
     entry.split_once('=')
 }
 
+/// The one rule for a usable env entry: split at the first `=`, valid name, and not the shape of a
+/// bare token pasted without `NAME=` (value empty or only `=`, name 16+ chars with no `_`, e.g. padded base64).
+pub fn env_pair(entry: &str) -> Option<(&str, &str)> {
+    split_env(entry).filter(|(n, v)| valid_env_name(n) && !looks_like_bare_token(n, v))
+}
+
+fn looks_like_bare_token(n: &str, v: &str) -> bool {
+    v.bytes().all(|b| b == b'=') && n.len() >= 16 && !n.contains('_')
+}
+
 /// `[A-Za-z_][A-Za-z0-9_]*`
 pub fn valid_env_name(name: &str) -> bool {
     let mut c = name.chars();
@@ -403,8 +413,8 @@ pub fn is_credential_like(name: &str, value: &str) -> bool {
 pub fn credential_warnings(profile_name: &str, p: &Profile) -> Vec<String> {
     p.env
         .iter()
-        .filter_map(|e| split_env(e))
-        .filter(|(n, v)| valid_env_name(n) && is_credential_like(n, v))
+        .filter_map(|e| env_pair(e))
+        .filter(|(n, v)| is_credential_like(n, v))
         .map(|(n, _)| format!("cbox: warning: profile {profile_name}: env {n} looks like a credential; tokens and secrets should not go in environment variables, use `cbox secret create` instead"))
         .collect()
 }
@@ -434,7 +444,8 @@ pub fn validate(name: &str, p: &Profile, known_secrets: &BTreeSet<String>) -> Ve
     // Malformed entries are reported by position only: a pasted token must not be echoed.
     let mut seen = BTreeSet::new();
     for (i, e) in p.env.iter().enumerate() {
-        match split_env(e).filter(|(n, _)| valid_env_name(n)) {
+        match env_pair(e) {
+            None if split_env(e).is_some_and(|(n, _)| valid_env_name(n)) => bad(format!("env entry {} looks like a token pasted without a NAME= prefix", i + 1)),
             None => bad(format!("env entry {} is not KEY=VALUE with a name of letters, digits and '_' (not starting with a digit)", i + 1)),
             Some((n, _)) if !seen.insert(n) => bad(format!("env {n} is set twice")),
             Some(_) => {}
@@ -851,6 +862,32 @@ mod tests {
         assert_eq!(split_env("A=b=c"), Some(("A", "b=c")));
         assert_eq!(split_env("A="), Some(("A", "")));
         assert_eq!(split_env("A"), None);
+    }
+
+    #[test]
+    fn env_pair_rules() {
+        for ok in ["FOO=", "GIT_AUTHOR_NAME=Avri Chen-Roth", "A_VERY_LONG_VARIABLE_NAME=", "SHORT=", "LONGNAMEWITHOUTUNDERSCORE=x", "A=b=c"] {
+            assert!(env_pair(ok).is_some(), "{ok}");
+        }
+        for bad in ["dGhpc2lzYXRva2Vu==", "dGhpc2lzYXRva2Vu=", "dGhpc2lzYXRva2Vu", "1a=b", "=x"] {
+            assert!(env_pair(bad).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn bare_token_is_reported_by_position_dropped_and_not_snapshotted() {
+        let tok = "dGhpc2lzYXRva2Vu==";
+        let v = validate("foo", &env_profile(&["A=1", tok]), &BTreeSet::new());
+        assert_eq!(v.len(), 1);
+        assert!(v[0].starts_with("profile foo: env entry 2 looks like a token pasted") && !v[0].contains("dGhpc2"), "{v:?}");
+        assert!(credential_warnings("foo", &env_profile(&[tok])).is_empty());
+        let pf = Profile { env: strs(&["A=1", tok, "dGhpc2lzYXRva2Vu="]), ..Default::default() };
+        let r = resolve(&Profiles(BTreeMap::from([("foo".into(), pf)])), "foo", &[], None, None, None, None).unwrap();
+        let env = r.snapshot().env.unwrap();
+        assert_eq!(env.keys().collect::<Vec<_>>(), ["A"]);
+        let mut e = r.env.clone();
+        e.retain(|x| env_pair(x).is_some());
+        assert_eq!(e, ["A=1"]);
     }
 
     #[test]

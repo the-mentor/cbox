@@ -181,13 +181,13 @@ pub fn apply_edit(existing: &Profiles, name: &str, a: EditArgs) -> Result<Profil
     }
     for e in a.env {
         // A malformed entry is kept as-is (appended) so `check` reports it by position.
-        let key = profiles::split_env(&e).filter(|(k, _)| profiles::valid_env_name(k)).map(|(k, _)| k.to_string());
+        let key = profiles::env_pair(&e).map(|(k, _)| k.to_string());
         if let Some(k) = &key {
             if a.unset_env.contains(k) {
                 bail!("--env {k} conflicts with --unset-env {k}");
             }
         }
-        match key.and_then(|k| p.env.iter().position(|x| profiles::split_env(x).is_some_and(|(n, _)| n == k))) {
+        match key.and_then(|k| p.env.iter().position(|x| profiles::env_pair(x).is_some_and(|(n, _)| n == k))) {
             Some(i) => p.env[i] = e,
             None => p.env.push(e),
         }
@@ -196,7 +196,7 @@ pub fn apply_edit(existing: &Profiles, name: &str, a: EditArgs) -> Result<Profil
         if !profiles::valid_env_name(&n) {
             bail!("--unset-env: item {} is not a valid variable name", i + 1);
         }
-        let Some(i) = p.env.iter().position(|x| profiles::split_env(x).is_some_and(|(k, _)| k == n)) else {
+        let Some(i) = p.env.iter().position(|x| profiles::env_pair(x).is_some_and(|(k, _)| k == n)) else {
             bail!("profile {name:?} has no env variable {n:?}");
         };
         p.env.remove(i);
@@ -232,7 +232,7 @@ fn format_list(p: &Profiles) -> String {
             lines.push(format!("secrets: {}", x.secrets.join(", ")));
         }
         for (i, e) in x.env.iter().enumerate() {
-            lines.push(match profiles::split_env(e).filter(|(k, _)| profiles::valid_env_name(k)) {
+            lines.push(match profiles::env_pair(e) {
                 Some((k, v)) if profiles::is_credential_like(k, v) => format!("env: {k}=<hidden>"),
                 Some((k, v)) => format!("env: {k}={v}"),
                 None => format!("env: (invalid entry {})", i + 1),
@@ -405,6 +405,14 @@ mod tests {
 
     fn v(s: &[&str]) -> Vec<String> {
         s.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn format_list_hides_a_bare_token_entry() {
+        let mut m = base();
+        m.0.insert("t".into(), Profile { env: v(&["dGhpc2lzYXRva2Vu==", "FOO="]), ..Default::default() });
+        let out = format_list(&m);
+        assert!(out.contains("env: (invalid entry 1)") && out.contains("env: FOO=") && !out.contains("dGhpc2"), "{out}");
     }
 
     #[test]

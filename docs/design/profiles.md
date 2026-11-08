@@ -126,9 +126,14 @@ env = [
   twice`). A malformed entry (no `=`, or an invalid name) is reported by position
   (`env entry 2 ...`) and never by its text, because a bare token pasted without a
   variable name would otherwise be split at its first `=` and its first part echoed as the
-  "name". A residual risk is accepted: a token of plain letters and digits followed by
-  `=` passes the name rule, and would show only in a duplicate error or the credential
-  warning.
+  "name". An entry whose value is empty
+  or only `=` characters and whose name is 16 or more characters with no `_` (`xxxx...==`,
+  padded base64) is treated as a token pasted without `NAME=` and rejected, also by
+  position (`env entry 2 looks like a token pasted without a NAME= prefix`). One rule
+  (`env_pair`) serves every consumer. A residual risk is accepted: a token of plain
+  letters and digits with a value that is not just `=` characters passes the rule, and
+  would show in `profile list`, the duplicate error, the credential warning and the box
+  environment.
 - **Credential warning (warn, never refuse).** A variable is flagged when its name has
   `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD` or `CREDENTIAL` as a whole word (split on
   `_`, any case), or when its value starts with `sk-`, `ghp_`, `github_pat_`, `AKIA` or

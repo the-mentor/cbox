@@ -50,6 +50,7 @@ $envB = 'CBTEST_KEY_B'
 $valA = "DUMMY-VALUE-A-$rand"
 $valB = "DUMMY-VALUE-B-$rand"
 $valTok = "DUMMY-VALUE-TOK-$rand"
+$valBare = 'ZHVtbXl0b2tlbmR1bW15=='
 $box = "cbtest-$rand"
 $cfg = Join-Path ([IO.Path]::GetTempPath()) "cbox-profile-test-$rand"
 $script:Results = [System.Collections.Generic.List[object]]::new()
@@ -59,7 +60,7 @@ New-Item -ItemType Directory -Path $cfg | Out-Null
 $env:XDG_CONFIG_HOME = $cfg
 $profilesToml = Join-Path $cfg 'cbox/profiles.toml'
 
-function Redact([string]$s) { $s.Replace($valA, '<redacted>').Replace($valB, '<redacted>').Replace($valTok, '<redacted>') }
+function Redact([string]$s) { $s.Replace($valA, '<redacted>').Replace($valB, '<redacted>').Replace($valTok, '<redacted>').Replace($valBare, '<redacted>') }
 
 # In-box checks run the cbox binary directly, not through `cb`: just pastes its arguments unquoted
 # into a shell script, so a guest command like `sh -c 'a; b'` is split on the `;` and the box runs
@@ -309,6 +310,11 @@ try {
     Set-Content $profilesToml ($good + "`n[envbad]`nenv = [`"sk-x=$leakEnv`", `"a.b=$leakEnv`"]`n")
     $r = Cbox @('profile', 'list')
     Check 'list shows a malformed env entry with "=" positionally, never its text' { $r.Code -eq 0 -and $r.Out -match '\(invalid entry 1\)' -and $r.Out -match '\(invalid entry 2\)' -and -not $r.Out.Contains($leakEnv) -and $r.Out -notmatch 'sk-x' } $r.Out
+    Set-Content $profilesToml ($good + "`n[envbare]`nenv = [`"$valBare`"]`n")
+    $r = Cbox @('profile', 'validate')
+    Check 'bare padded token: validate fails by position, never its text' { $r.Code -ne 0 -and $r.Out -match 'env entry 1' -and -not $r.Out.Contains($valBare) } $r.Out
+    $r = Cbox @('profile', 'list')
+    Check 'list shows a bare padded token as (invalid entry 1), never its text' { $r.Code -eq 0 -and $r.Out -match '\(invalid entry' -and -not $r.Out.Contains($valBare) } $r.Out
     Set-Content $profilesToml $good
 
     # ---------------------------------------------------------------- Part B
@@ -391,6 +397,7 @@ try {
     Check 'secret A value never appeared in any output' { -not $all.Contains($valA) }
     Check 'secret B value never appeared in any output' { -not $all.Contains($valB) }
     Check 'credential-looking env value never appeared in any output' { -not $all.Contains($valTok) }
+    Check 'bare padded token never appeared in any output' { -not $all.Contains($valBare) }
 }
 finally {
     Section 'Cleanup'
