@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.28](https://github.com/the-mentor/cbox/compare/v0.1.27...v0.1.28) (2026-11-08)
+
+
+### Bug Fixes
+
+* write profiles.toml in a fixed order: [default] first, then image, env, secrets, sizes ([#156](https://github.com/the-mentor/cbox/issues/156)) ([4e1090f](https://github.com/the-mentor/cbox/commit/4e1090f52dac38119fbc0ce4c68b6cc5ad1c7667))
+
 ## [0.1.27](https://github.com/the-mentor/cbox/compare/v0.1.26...v0.1.27) (2026-11-08)
 
 
