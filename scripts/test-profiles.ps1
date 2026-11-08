@@ -24,18 +24,19 @@
   e.g. ./cbox/target/release/cbox. Note that `cb --help` and `cb --version` are just's own, so
   the script never uses them.
 .PARAMETER Image
-  Optional image for the test profile, e.g. localhost:5551/library/cbox-rust:latest. It must
-  already be pullable. Default: none (the built-in cbox-custom image).
+  Image for the test profile. It must be pullable; the first run pulls it, which can take a while.
+  Default: ghcr.io/the-mentor/cbox-base-rust:latest. Pass -Image '' to skip the image check.
 .PARAMETER SkipUp
   Run Part A only (no VM is started).
 
 .EXAMPLE
   pwsh ./scripts/test-profiles.ps1 -SkipUp
   pwsh ./scripts/test-profiles.ps1 -Image localhost:5551/library/cbox-rust:latest
+  pwsh ./scripts/test-profiles.ps1 -Image ''
 #>
 param(
     [string]$Cbox = 'cb',
-    [string]$Image = '',
+    [string]$Image = 'ghcr.io/the-mentor/cbox-base-rust:latest',
     [switch]$SkipUp
 )
 
@@ -227,7 +228,7 @@ try {
                 $prefix = $Image.Substring(0, [Math]::Min(20, $Image.Length))
                 Check 'B2 the box row shows the profile''s image' { $row -match [regex]::Escape($prefix) } $row
             }
-            else { Skip 'B2 the box row shows the profile''s image' 'pass -Image <pullable image> to test it' }
+            else { Skip 'B2 the box row shows the profile''s image' '-Image was empty' }
 
             $r = InBox 'echo cpus=$(nproc); awk ''/MemTotal/{print "memmb=" int($2/1024)}'' /proc/meminfo; sleep 2'
             if ($r.Code -ne 0) { Skip 'B3/B4 resource and secret checks' "command failed: $($r.Out)" }
