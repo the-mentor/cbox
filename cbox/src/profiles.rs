@@ -25,19 +25,8 @@ pub struct Profile {
     pub disk_size: Option<u64>,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Profiles(pub BTreeMap<String, Profile>);
-
-// Hand-written so tests can compare; the map is the whole state.
-impl PartialEq for Profiles {
-    fn eq(&self, o: &Self) -> bool {
-        self.0 == o.0
-    }
-}
-impl std::fmt::Debug for Profiles {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
 
 impl Profiles {
     pub fn load(path: &Path) -> Result<Profiles> {
@@ -60,7 +49,8 @@ impl Profiles {
     }
 }
 
-fn write_atomic(path: &Path, body: &str) -> Result<()> {
+/// Write `body` to a temp file next to `path` (unique per process, 0600, dir 0700).
+fn write_tmp(path: &Path, body: &str) -> Result<std::path::PathBuf> {
     use std::io::Write;
     use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
     let dir = path.parent().context("profiles path has no parent")?;
@@ -69,32 +59,46 @@ fn write_atomic(path: &Path, body: &str) -> Result<()> {
         .mode(0o700)
         .create(dir)
         .with_context(|| format!("creating {}", dir.display()))?;
-    let tmp = path.with_extension("toml.tmp");
-    // Mode only applies at creation, so drop any stale temp file first.
-    match std::fs::remove_file(&tmp) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-            return Err(e).with_context(|| format!("removing {}", tmp.display()));
-        }
-        _ => {}
-    }
+    let tmp = path.with_extension(format!("toml.tmp.{}", std::process::id()));
+    // Mode only applies at creation, so drop any stale temp file from a reused pid first.
+    std::fs::remove_file(&tmp).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }).with_context(|| format!("removing {}", tmp.display()))?;
     let mut f = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
         .open(&tmp)
         .with_context(|| format!("creating {}", tmp.display()))?;
-    f.write_all(body.as_bytes()).with_context(|| format!("writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, path).with_context(|| format!("renaming {} to {}", tmp.display(), path.display()))
+    if let Err(e) = f.write_all(body.as_bytes()) {
+        std::fs::remove_file(&tmp).ok();
+        return Err(e).with_context(|| format!("writing {}", tmp.display()));
+    }
+    Ok(tmp)
+}
+
+fn write_atomic(path: &Path, body: &str) -> Result<()> {
+    let tmp = write_tmp(path, body)?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        std::fs::remove_file(&tmp).ok();
+        anyhow::anyhow!("renaming {} to {}: {e}", tmp.display(), path.display())
+    })
 }
 
 /// Create the file with an empty `[default]` unless the path exists. Returns whether it did.
 pub fn ensure_file(path: &Path) -> Result<bool> {
-    // shortcut: exists-then-write is racy with another cbox starting at once; the loser's rename just rewrites the same bytes.
-    if path.try_exists().with_context(|| format!("checking {}", path.display()))? {
-        return Ok(false);
+    create_new_with(path, "[default]\n")
+}
+
+/// Create `path` with `body` only if absent. `hard_link` fails if the target exists
+/// (rename would replace it), so a file that appears at any moment is never touched.
+fn create_new_with(path: &Path, body: &str) -> Result<bool> {
+    let tmp = write_tmp(path, body)?;
+    let r = std::fs::hard_link(&tmp, path);
+    std::fs::remove_file(&tmp).ok();
+    match r {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(e).with_context(|| format!("creating {}", path.display())),
     }
-    write_atomic(path, "[default]\n")?;
-    Ok(true)
 }
 
 /// One message per problem, each prefixed `profile NAME:`.
@@ -115,8 +119,15 @@ pub fn validate(name: &str, p: &Profile, known_secrets: &BTreeSet<String>) -> Ve
             bad(format!("secrets: duplicate secret {s}"));
         }
     }
-    if let Err(e) = crate::boxopts::check_resources(p.disk_size, p.memory, p.cpus) {
-        bad(e.to_string());
+    // One field at a time so every bad value is reported; name the field, not the CLI flag.
+    for r in [
+        crate::boxopts::check_resources(p.disk_size, None, None),
+        crate::boxopts::check_resources(None, p.memory, None),
+        crate::boxopts::check_resources(None, None, p.cpus),
+    ] {
+        if let Err(e) = r {
+            bad(e.to_string().trim_start_matches("--").replace("disk-size", "disk_size"));
+        }
     }
     if p.image.as_deref() == Some("") {
         bad("image must not be empty".into());
@@ -192,14 +203,42 @@ mod tests {
         let p = Profile { secrets: vec!["gh".into(), "good".into(), "good".into(), "nope".into()], memory: Some(0), ..Default::default() };
         let v = validate("Bad", &p, &known);
         assert_eq!(v.len(), 5, "{v:?}");
+        assert!(v.iter().any(|m| m.contains("invalid profile name")));
+        assert!(v.iter().any(|m| m.contains("secrets:") && m.contains("gh")));
         assert!(v.iter().all(|m| m.starts_with("profile Bad:")), "{v:?}");
         assert!(v.iter().any(|m| m.contains("name")));
         assert!(v.iter().any(|m| m.contains("gh")));
         assert!(v.iter().any(|m| m.contains("duplicate")));
         assert!(v.iter().any(|m| m.contains("no secret named nope")));
-        assert!(v.iter().any(|m| m.contains("--memory must be greater than 0")));
+        assert!(v.iter().any(|m| m.contains("memory must be greater than 0") && !m.contains("--")));
         let e = Profile { image: Some(String::new()), ..Default::default() };
         assert!(validate("ok", &e, &known)[0].contains("image"));
+    }
+
+    #[test]
+    fn validate_reports_each_bad_resource_by_field() {
+        let p = Profile { disk_size: Some(0), memory: Some(0), cpus: Some(0), ..Default::default() };
+        let v = validate("x", &p, &BTreeSet::new());
+        assert_eq!(v, ["profile x: disk_size must be greater than 0", "profile x: memory must be greater than 0", "profile x: cpus must be greater than 0"]);
+    }
+
+    #[test]
+    fn create_new_with_leaves_an_existing_file_untouched() {
+        let f = tmp("race").join("profiles.toml");
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(&f, "[real]\n").unwrap();
+        assert!(!create_new_with(&f, "[default]\n").unwrap());
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "[real]\n");
+        assert_eq!(std::fs::read_dir(f.parent().unwrap()).unwrap().count(), 1, "tmp file left behind");
+    }
+
+    #[test]
+    fn ensure_file_creates_0600_in_a_0700_dir() {
+        use std::os::unix::fs::PermissionsExt;
+        let f = tmp("perm").join("d/profiles.toml");
+        assert!(ensure_file(&f).unwrap());
+        assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::metadata(f.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
     }
 
     #[test]
