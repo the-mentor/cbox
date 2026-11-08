@@ -60,6 +60,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
             cpus: args.cpus,
             memory: args.memory_gb,
             disk_size: args.disk_size_gb,
+            env: Vec::new(),
         },
         || {
             let index = config::secrets_index_path().context("cannot locate config directory for the secrets index")?;

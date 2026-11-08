@@ -14,6 +14,9 @@ pub const DEFAULT: &str = "default";
 pub struct Profile {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secrets: Vec<String>,
+    /// "KEY=VALUE" entries, split at the first `=`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -356,6 +359,34 @@ fn create_new_via(path: &Path, body: &str, link: impl Fn(&Path, &Path) -> std::i
 }
 
 /// One message per problem, each prefixed `profile NAME:`.
+/// Split "KEY=VALUE" at the first `=`.
+pub fn split_env(entry: &str) -> Option<(&str, &str)> {
+    entry.split_once('=')
+}
+
+/// `[A-Za-z_][A-Za-z0-9_]*`
+pub fn valid_env_name(name: &str) -> bool {
+    let mut c = name.chars();
+    c.next().is_some_and(|f| f.is_ascii_alphabetic() || f == '_') && c.all(|f| f.is_ascii_alphanumeric() || f == '_')
+}
+
+/// Heuristic only (no entropy test): a secret-ish word in the name, or a well-known token prefix in the value.
+pub fn is_credential_like(name: &str, value: &str) -> bool {
+    const WORDS: [&str; 6] = ["KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL"];
+    const PREFIXES: [&str; 5] = ["sk-", "ghp_", "github_pat_", "AKIA", "xox"];
+    name.to_ascii_uppercase().split('_').any(|w| WORDS.contains(&w)) || PREFIXES.iter().any(|p| value.starts_with(p))
+}
+
+/// One warning per flagged well-formed variable; names it, never the value.
+pub fn credential_warnings(profile_name: &str, p: &Profile) -> Vec<String> {
+    p.env
+        .iter()
+        .filter_map(|e| split_env(e))
+        .filter(|(n, v)| valid_env_name(n) && is_credential_like(n, v))
+        .map(|(n, _)| format!("cbox: warning: profile {profile_name}: env {n} looks like a credential; tokens and secrets should not go in environment variables, use `cbox secret create` instead"))
+        .collect()
+}
+
 pub fn validate(name: &str, p: &Profile, known_secrets: &BTreeSet<String>) -> Vec<String> {
     let mut out = Vec::new();
     let mut bad = |m: String| out.push(format!("profile {name}: {m}"));
@@ -375,6 +406,15 @@ pub fn validate(name: &str, p: &Profile, known_secrets: &BTreeSet<String>) -> Ve
         }
         if let Some(first) = p.secrets[..i].iter().position(|o| o == s) {
             bad(format!("secrets entry {n} repeats entry {}", first + 1));
+        }
+    }
+    // Malformed entries are reported by position only: a pasted token must not be echoed.
+    let mut seen = BTreeSet::new();
+    for (i, e) in p.env.iter().enumerate() {
+        match split_env(e).filter(|(n, _)| valid_env_name(n)) {
+            None => bad(format!("env entry {} is not KEY=VALUE with a name of letters, digits and '_' (not starting with a digit)", i + 1)),
+            Some((n, _)) if !seen.insert(n) => bad(format!("env {n} is set twice")),
+            Some(_) => {}
         }
     }
     // One field at a time so every bad value is reported; name the field, not the CLI flag.
@@ -682,7 +722,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let f = tmp("rt").join("sub/profiles.toml");
         let mut p = Profiles::load(&f).unwrap();
-        p.0.insert("a".into(), Profile { secrets: vec!["s1".into(), "s0".into()], image: Some("img".into()), cpus: Some(3), memory: Some(8), disk_size: Some(20) });
+        p.0.insert("a".into(), Profile { env: vec![], secrets: vec!["s1".into(), "s0".into()], image: Some("img".into()), cpus: Some(3), memory: Some(8), disk_size: Some(20) });
         p.save(&f).unwrap();
         assert_eq!(Profiles::load(&f).unwrap(), p);
         assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
@@ -729,6 +769,82 @@ mod tests {
         assert!(v.iter().any(|m| m.contains("memory must be greater than 0") && !m.contains("--")));
         let e = Profile { image: Some(String::new()), ..Default::default() };
         assert!(validate("ok", &e, &known)[0].contains("image"));
+    }
+
+    #[test]
+    fn split_env_splits_at_first_equals() {
+        assert_eq!(split_env("A=b=c"), Some(("A", "b=c")));
+        assert_eq!(split_env("A="), Some(("A", "")));
+        assert_eq!(split_env("A"), None);
+    }
+
+    #[test]
+    fn valid_env_name_rules() {
+        for ok in ["GIT_AUTHOR_NAME", "_x", "a1"] {
+            assert!(valid_env_name(ok), "{ok}");
+        }
+        for bad in ["1a", "sk-abc", "a b", ""] {
+            assert!(!valid_env_name(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn credential_heuristic() {
+        for (n, v) in [
+            ("API_KEY", "x"),
+            ("github_token", "x"),
+            ("DB_PASSWORD", "x"),
+            ("ANYTHING", "sk-DUMMY-VALUE-123"),
+            ("X", "ghp_abc"),
+            ("X", "github_pat_abc"),
+            ("X", "AKIAABCD"),
+            ("X", "xoxb-1"),
+        ] {
+            assert!(is_credential_like(n, v), "{n}");
+        }
+        for (n, v) in [
+            ("GIT_AUTHOR_NAME", "Avri Chen-Roth"),
+            ("GIT_AUTHOR_EMAIL", "11185446+the-mentor@users.noreply.github.com"),
+            ("MONKEY", "x"),
+            ("KEYBOARD", "x"),
+            ("TOKENIZER", "x"),
+        ] {
+            assert!(!is_credential_like(n, v), "{n}");
+        }
+    }
+
+    fn env_profile(e: &[&str]) -> Profile {
+        Profile { env: strs(e), ..Default::default() }
+    }
+
+    #[test]
+    fn validate_env_reports_by_position_or_name_never_text() {
+        let none = BTreeSet::new();
+        let v = validate("foo", &env_profile(&["A=1", "sk-DUMMY-VALUE-123"]), &none);
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(v[0].starts_with("profile foo: env entry 2 "), "{v:?}");
+        assert!(!v[0].contains("DUMMY"), "{v:?}");
+        let v = validate("foo", &env_profile(&["sk-abc=1"]), &none);
+        assert!(v[0].starts_with("profile foo: env entry 1 ") && !v[0].contains("sk-abc"), "{v:?}");
+        let v = validate("foo", &env_profile(&["A=1", "A=2"]), &none);
+        assert_eq!(v, ["profile foo: env A is set twice"]);
+        assert!(validate("foo", &env_profile(&["GIT_AUTHOR_NAME=Avri", "B="]), &none).is_empty());
+    }
+
+    #[test]
+    fn credential_warnings_name_the_variable_not_the_value() {
+        let w = credential_warnings("foo", &env_profile(&["MY_API_TOKEN=sk-DUMMY-VALUE-123", "GIT_AUTHOR_NAME=Avri", "sk-DUMMY-VALUE-123"]));
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].starts_with("cbox: warning: profile foo: env MY_API_TOKEN looks like a credential"), "{w:?}");
+        assert!(w[0].contains("cbox secret") && !w[0].contains("DUMMY"), "{w:?}");
+    }
+
+    #[test]
+    fn env_round_trips_through_toml() {
+        let p = Profile { env: strs(&["A=b=c", "D="]), ..Default::default() };
+        let s = toml::to_string_pretty(&p).unwrap();
+        assert_eq!(toml::from_str::<Profile>(&s).unwrap(), p);
+        assert!(!toml::to_string_pretty(&Profile::default()).unwrap().contains("env"));
     }
 
     #[test]
@@ -792,7 +908,7 @@ mod tests {
     #[test]
     fn validate_accepts_a_clean_profile() {
         let known: BTreeSet<String> = ["good".to_string()].into();
-        let p = Profile { secrets: vec!["good".into()], image: Some("i".into()), cpus: Some(2), memory: Some(4), disk_size: Some(10) };
+        let p = Profile { env: vec![], secrets: vec!["good".into()], image: Some("i".into()), cpus: Some(2), memory: Some(4), disk_size: Some(10) };
         assert!(validate("client-a", &p, &known).is_empty());
     }
 }

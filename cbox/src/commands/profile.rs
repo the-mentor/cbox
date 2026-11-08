@@ -245,7 +245,7 @@ fn run_at(cmd: ProfileCmd, path: &Path, index: &Path, ask: &mut dyn FnMut(&str) 
         ProfileCmd::Create { name, secrets, image, memory, cpus, disk_size } => {
             let p = Profile {
                 secrets: secrets.as_deref().map(parse_names).transpose()?.unwrap_or_default(),
-                image, cpus, memory, disk_size,
+                image, cpus, memory, disk_size, env: Vec::new(),
             };
             check(&name, &p, index)?;
             apply_create(&Profiles::load(path)?, &name, p)?.save(path)?;
@@ -387,7 +387,7 @@ mod tests {
 
     #[test]
     fn reset_clears_the_named_fields_and_only_those() {
-        let full = Profile { image: Some("i".into()), memory: Some(8), cpus: Some(2), disk_size: Some(20), secrets: v(&["a"]) };
+        let full = Profile { image: Some("i".into()), memory: Some(8), cpus: Some(2), disk_size: Some(20), secrets: v(&["a"]), env: Vec::new() };
         let base = Profiles([("dev".to_string(), full)].into());
         let ed = |a: EditArgs| apply_edit(&base, "dev", a);
         let r = ed(EditArgs { reset: rs("image,disk-size"), ..Default::default() }).unwrap();
