@@ -18,6 +18,7 @@ just up-dev            # build custom on the published base (pushed to local reg
 just up                # boot the box without rebuilding (images and the cbox binary must already be built)
 just build              # start the local registry, build custom on the published base, push custom
 just build --no-cache   # same, bypassing the Docker layer cache (see below)
+just profile            # manage profiles: `just profile create NAME [--secrets a,b] [--image I] ...`, `list`, `edit`, `delete`, `validate` (see below)
 just build-local          # build base/ locally too (the published base is the default), for changing base/ itself
 just build-cbox          # build the cbox binary (cbox/target/release/cbox); up/exec/down/list all hard-fail without it
 just install-cbox [tag]  # download a prebuilt cbox binary (latest release, or a pinned tag) instead of compiling it
@@ -70,6 +71,13 @@ but BoxLite keeps a copy of a box's secret values in that box's own database und
 (not encrypted, owner-only file permissions) until the box is removed (`cbox down`/`-f`). `cbox up --secret NAME` uses a
 stored secret (a missing name fails; there is no fallback to a host env var), and `gh`/`gh_basic`
 are reserved names. See `docs/design/secrets.md`.
+
+Profiles are named bundles of `cbox up` choices (secret names, image, memory, cpus, disk size) kept in
+`~/.config/cbox/profiles.toml` (or `$XDG_CONFIG_HOME/cbox/`), managed with
+`cbox profile create|list|edit|delete|validate` and applied with `cbox up --profile NAME`. There is no
+inheritance: a profile is just its own fields, and `up` flags override its image/memory/cpus/disk size and `--secret` adds to its secrets. The file is created on first
+run with an empty `default` profile; `cbox profile validate [NAME]` checks it. A resumed box warns when its
+profile has changed since creation. Profiles hold secret names only, never values or hosts. See `docs/design/profiles.md`.
 
 `build`, `build-image`, `build-base`, and `build-local` are variadic: everything after the recipe name is
 forwarded verbatim to `docker build` (`--pull`, `--progress=plain` and friends all work). `build`

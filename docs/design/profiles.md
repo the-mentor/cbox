@@ -1,6 +1,6 @@
 # Profiles: design
 
-Status: draft for review. Follows `docs/design/secrets.md`, which deferred profiles to
+Status: implemented. Follows `docs/design/secrets.md`, which deferred profiles to
 "their own design pass".
 
 ## Intent

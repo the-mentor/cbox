@@ -49,6 +49,11 @@ impl Profiles {
 }
 
 /// A profile with the flags of one `up` applied. `None` resources mean the built-in default.
+/// Sorted names of the profiles that list `secret`.
+pub fn profiles_using(profiles: &Profiles, secret: &str) -> Vec<String> {
+    profiles.0.iter().filter(|(_, p)| p.secrets.iter().any(|s| s == secret)).map(|(n, _)| n.clone()).collect()
+}
+
 #[derive(Debug)]
 pub struct Resolved {
     pub profile_name: String,
@@ -261,6 +266,14 @@ pub fn validate(name: &str, p: &Profile, known_secrets: &BTreeSet<String>) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profiles_using_lists_sorted_names() {
+        let mut p = two();
+        p.0.insert("aaa".into(), Profile { secrets: vec!["b".into()], ..Default::default() });
+        assert_eq!(profiles_using(&p, "b"), ["aaa", "foo"]);
+        assert!(profiles_using(&p, "zzz").is_empty());
+    }
 
     fn two() -> Profiles {
         let mut m = BTreeMap::new();

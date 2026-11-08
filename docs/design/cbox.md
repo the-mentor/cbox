@@ -158,7 +158,7 @@ design below. The `cd` makes cbox's cwd genuinely the user's, which then require
 ```
 cbox up   [name] [-f] [-c] [-v host:box] [-e KEY[=VALUE]] [-i image]
                  [--disk-size GB] [--memory GB] [--cpus N] [--env-file path] [--config path]
-                 [--secret NAME | NAME=ENV_VAR@hosts]
+                 [--secret NAME | NAME=ENV_VAR@hosts] [--profile NAME]
                  [-u user] [-p [host:]box[/proto]]
                  [--allow-net HOST]... [--network disabled]
                  [-- cmd...]
@@ -174,7 +174,13 @@ cbox secret create <NAME> --host HOSTS --env VAR
 cbox secret list
 cbox secret edit <NAME> [--host HOSTS | --add-host HOSTS --remove-host HOSTS] [--env VAR]
 cbox secret delete <NAME> [-y]
+cbox profile create <NAME> [--secrets a,b] [--image I] [--memory GB] [--cpus N] [--disk-size GB]
+cbox profile list | edit <NAME> [flags] | delete <NAME> [-y] | validate [NAME]
 ```
+
+Profiles (`cbox profile ...`, `cbox up --profile NAME`) are named bundles of secret names, image,
+memory, CPUs and disk size, stored in `~/.config/cbox/profiles.toml`. Design and behavior:
+`docs/design/profiles.md`.
 
 ## Box naming
 

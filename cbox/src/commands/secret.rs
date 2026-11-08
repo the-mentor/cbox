@@ -153,6 +153,19 @@ fn run_edit(
     secretstore::edit(store, index, name, c)
 }
 
+/// Stderr warning for `secret delete`, or `None` when no profile uses the secret.
+fn delete_warning(profiles: &Result<crate::profiles::Profiles>, name: &str) -> Option<String> {
+    match profiles {
+        Ok(p) => {
+            let used = crate::profiles::profiles_using(p, name);
+            (!used.is_empty()).then(|| {
+                format!("cbox: warning: secret \"{name}\" is used by profile(s): {}. They will fail at \"cbox up\" until you remove it from them.", used.join(", "))
+            })
+        }
+        Err(e) => Some(format!("cbox: warning: could not check profiles.toml for uses of this secret ({e}).")),
+    }
+}
+
 pub fn run(cmd: SecretCmd) -> Result<()> {
     let store = open_default()?;
     let index = secrets_index_path().context("cannot locate config directory for the secrets index")?;
@@ -192,6 +205,9 @@ pub fn run(cmd: SecretCmd) -> Result<()> {
         SecretCmd::Delete { name, yes } => {
             if !secretstore::exists(&*store, &index, &name)? {
                 bail!("secret {name:?} not found");
+            }
+            if let Some(w) = crate::config::profiles_path().and_then(|p| delete_warning(&crate::profiles::Profiles::load(&p), &name)) {
+                eprintln!("{w}");
             }
             let ok = confirm_delete("secret", &name, yes, &mut |q| {
                 print!("{q}");
@@ -362,6 +378,21 @@ mod tests {
     #[test]
     fn confirm_delete_does_not_delete_on_eof() {
         assert!(!confirm_delete("secret", "n", false, &mut |_| Ok(String::new())).unwrap());
+    }
+
+    #[test]
+    fn delete_warning_covers_used_unused_and_load_failure() {
+        let mut m = std::collections::BTreeMap::new();
+        m.insert("b".to_string(), crate::profiles::Profile { secrets: vec!["k".into()], ..Default::default() });
+        m.insert("a".to_string(), crate::profiles::Profile { secrets: vec!["k".into()], ..Default::default() });
+        let p = Ok(crate::profiles::Profiles(m));
+        assert_eq!(
+            delete_warning(&p, "k").as_deref(),
+            Some("cbox: warning: secret \"k\" is used by profile(s): a, b. They will fail at \"cbox up\" until you remove it from them.")
+        );
+        assert_eq!(delete_warning(&p, "other"), None);
+        let e = Err(anyhow::anyhow!("boom"));
+        assert_eq!(delete_warning(&e, "k").as_deref(), Some("cbox: warning: could not check profiles.toml for uses of this secret (boom)."));
     }
 
     fn row(name: &str, state: RowState) -> ListRow {

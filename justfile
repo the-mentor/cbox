@@ -269,6 +269,18 @@ secret *args:
     cd "{{invocation_directory()}}"
     exec "{{cbox_bin}}" secret "$@"
 
+# Manage named bundles of `cbox up` choices (secrets, image, memory, cpus,
+# disk size) kept in ~/.config/cbox/profiles.toml.
+# Usage: just profile create NAME [--secrets a,b] ... | list | edit NAME [flags] | delete NAME [-y] | validate [NAME]
+# Positional arguments keep `--secrets "a, b"` as one argument.
+[positional-arguments]
+profile *args:
+    #!/usr/bin/env sh
+    set -eu
+    [ -x "{{cbox_bin}}" ] || { echo "cbox binary not found at {{cbox_bin}} - run 'just build-cbox' or 'just install-cbox' first" >&2; exit 1; }
+    cd "{{invocation_directory()}}"
+    exec "{{cbox_bin}}" profile "$@"
+
 # Print the installed cbox binary's version (from cbox/Cargo.toml at build
 # time), to check what build-cbox or install-cbox left in place.
 # Usage: just version
