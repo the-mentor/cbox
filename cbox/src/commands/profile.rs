@@ -51,9 +51,9 @@ pub enum ProfileCmd {
         cpus: Option<u8>,
         #[arg(long = "disk-size")]
         disk_size: Option<u64>,
-        /// Stop setting these fields so cbox's built-ins apply (comma-separated: secrets, image, cpus, memory, disk-size).
-        #[arg(long, value_name = "FIELDS")]
-        reset: Option<String>,
+        /// Stop setting these fields so cbox's built-ins apply (comma-separated).
+        #[arg(long, value_enum, value_delimiter = ',', value_name = "FIELDS")]
+        reset: Vec<ResetField>,
     },
     /// Delete a profile.
     #[command(arg_required_else_help = true)]
@@ -80,7 +80,7 @@ pub struct EditArgs {
     pub reset: Vec<ResetField>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum ResetField {
     Secrets,
     Image,
@@ -90,30 +90,10 @@ pub enum ResetField {
 }
 
 impl ResetField {
-    fn flag(self) -> &'static str {
-        match self {
-            Self::Secrets => "secrets",
-            Self::Image => "image",
-            Self::Cpus => "cpus",
-            Self::Memory => "memory",
-            Self::DiskSize => "disk-size",
-        }
+    /// The name `--reset` and its sibling flag use (`disk-size`).
+    fn flag(self) -> String {
+        clap::ValueEnum::to_possible_value(&self).expect("no skipped variants").get_name().to_string()
     }
-}
-
-/// `--reset image,cpus`: a comma-separated list of the fields `edit` can clear.
-pub fn parse_reset(s: &str) -> Result<Vec<ResetField>> {
-    const ALL: [ResetField; 5] = [ResetField::Secrets, ResetField::Image, ResetField::Cpus, ResetField::Memory, ResetField::DiskSize];
-    let mut out = Vec::new();
-    for item in s.split(',').map(str::trim) {
-        let Some(f) = ALL.into_iter().find(|f| f.flag() == item) else {
-            bail!("cannot reset {item:?}: use secrets, image, cpus, memory or disk-size");
-        };
-        if !out.contains(&f) {
-            out.push(f);
-        }
-    }
-    Ok(out)
 }
 
 pub fn parse_names(s: &str) -> Result<Vec<String>> {
@@ -279,7 +259,7 @@ fn run_at(cmd: ProfileCmd, path: &Path, index: &Path, ask: &mut dyn FnMut(&str) 
                 add_secrets: names(add_secrets)?.unwrap_or_default(),
                 remove_secrets: names(remove_secrets)?.unwrap_or_default(),
                 image, memory, cpus, disk_size,
-                reset: reset.as_deref().map(parse_reset).transpose()?.unwrap_or_default(),
+                reset,
             };
             let next = apply_edit(&Profiles::load(path)?, &name, a)?;
             check(&name, next.get(&name).expect("just edited"), index)?;
@@ -341,7 +321,7 @@ pub fn startup_ensure() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Cli;
+    use crate::{Cli, Commands};
     use clap::Parser;
 
     fn tmp(tag: &str) -> std::path::PathBuf {
@@ -401,20 +381,24 @@ mod tests {
         assert_eq!(base().get("dev").unwrap().secrets, v(&["a", "b"]), "input untouched");
     }
 
+    fn rs(s: &str) -> Vec<ResetField> {
+        s.split(',').map(|x| <ResetField as clap::ValueEnum>::from_str(x, false).unwrap()).collect()
+    }
+
     #[test]
     fn reset_clears_the_named_fields_and_only_those() {
         let full = Profile { image: Some("i".into()), memory: Some(8), cpus: Some(2), disk_size: Some(20), secrets: v(&["a"]) };
         let base = Profiles([("dev".to_string(), full)].into());
         let ed = |a: EditArgs| apply_edit(&base, "dev", a);
-        let r = ed(EditArgs { reset: parse_reset("image, disk-size").unwrap(), ..Default::default() }).unwrap();
+        let r = ed(EditArgs { reset: rs("image,disk-size"), ..Default::default() }).unwrap();
         let d = r.get("dev").unwrap();
         assert_eq!((d.image.as_deref(), d.memory, d.cpus, d.disk_size, d.secrets.clone()), (None, Some(8), Some(2), None, v(&["a"])));
-        let r = ed(EditArgs { reset: parse_reset("cpus,memory").unwrap(), image: Some("j".into()), ..Default::default() }).unwrap();
+        let r = ed(EditArgs { reset: rs("cpus,memory"), image: Some("j".into()), ..Default::default() }).unwrap();
         let d = r.get("dev").unwrap();
         assert_eq!((d.image.as_deref(), d.memory, d.cpus), (Some("j"), None, None), "reset one field, set another");
-        let e = ed(EditArgs { reset: parse_reset("cpus").unwrap(), cpus: Some(4), ..Default::default() }).unwrap_err().to_string();
+        let e = ed(EditArgs { reset: rs("cpus"), cpus: Some(4), ..Default::default() }).unwrap_err().to_string();
         assert_eq!(e, "--reset cpus conflicts with --cpus");
-        let r = ed(EditArgs { reset: parse_reset("secrets").unwrap(), ..Default::default() }).unwrap();
+        let r = ed(EditArgs { reset: rs("secrets"), ..Default::default() }).unwrap();
         assert_eq!(r.get("dev").unwrap().secrets, Vec::<String>::new());
         assert_eq!(r.get("dev").unwrap().cpus, Some(2), "other fields kept");
         for conflicting in [
@@ -422,18 +406,24 @@ mod tests {
             EditArgs { add_secrets: v(&["x"]), ..Default::default() },
             EditArgs { remove_secrets: v(&["a"]), ..Default::default() },
         ] {
-            let a = EditArgs { reset: parse_reset("secrets").unwrap(), ..conflicting };
+            let a = EditArgs { reset: rs("secrets"), ..conflicting };
             assert!(ed(a).unwrap_err().to_string().contains("--reset secrets conflicts"));
         }
-        assert!(apply_edit(&Profiles([("d".to_string(), Profile::default())].into()), "d", EditArgs { reset: parse_reset("image").unwrap(), ..Default::default() }).is_ok(), "resetting an unset field is fine");
+        assert!(apply_edit(&Profiles([("d".to_string(), Profile::default())].into()), "d", EditArgs { reset: rs("image"), ..Default::default() }).is_ok(), "resetting an unset field is fine");
     }
 
     #[test]
-    fn parse_reset_accepts_the_four_fields_and_rejects_others() {
-        assert_eq!(parse_reset("secrets,image,cpus,memory,disk-size").unwrap().len(), 5);
-        assert_eq!(parse_reset("cpus,cpus").unwrap(), vec![ResetField::Cpus]);
-        for bad in ["secret", "disk_size", "", "image,"] {
-            assert!(parse_reset(bad).is_err(), "{bad:?}");
+    fn clap_parses_reset_lists_and_rejects_unknown_fields() {
+        let reset = |v: &str| match Cli::try_parse_from(["cbox", "profile", "edit", "foo", "--reset", v]).map(|c| c.command) {
+            Ok(Commands::Profile { cmd: ProfileCmd::Edit { reset, .. } }) => Ok(reset),
+            Ok(_) => unreachable!(),
+            Err(e) => Err(e.to_string()),
+        };
+        assert_eq!(reset("secrets,image,cpus,memory,disk-size").unwrap().len(), 5);
+        assert_eq!(reset("disk-size").unwrap(), vec![ResetField::DiskSize]);
+        for bad in ["secret", "disk_size", "image,", "bogus"] {
+            let e = reset(bad).unwrap_err();
+            assert!(e.contains("possible values: secrets, image, cpus, memory, disk-size"), "{bad:?}: {e}");
         }
     }
 
@@ -483,7 +473,7 @@ mod tests {
 
     fn edit(name: &str, add: Option<&str>, remove: Option<&str>, cpus: Option<u8>) -> ProfileCmd {
         let s = |x: Option<&str>| x.map(String::from);
-        ProfileCmd::Edit { name: name.into(), secrets: None, add_secrets: s(add), remove_secrets: s(remove), image: None, memory: None, cpus, disk_size: None, reset: None }
+        ProfileCmd::Edit { name: name.into(), secrets: None, add_secrets: s(add), remove_secrets: s(remove), image: None, memory: None, cpus, disk_size: None, reset: vec![] }
     }
 
     /// A dir with `body` as profiles.toml and an index naming `a`.
