@@ -155,6 +155,22 @@ pub fn parse_names(s: &str) -> Result<Vec<String>> {
     Ok(out)
 }
 
+/// Like `parse_names` for `--unset-env`, but errors cite the item's position, never its text:
+/// a pasted `NAME=value` must not be echoed back.
+pub fn parse_unset_env(s: &str) -> Result<Vec<String>> {
+    let mut out: Vec<String> = Vec::new();
+    for (i, item) in s.split(',').map(str::trim).enumerate() {
+        if item.is_empty() {
+            bail!("--unset-env: item {} is empty", i + 1);
+        }
+        if let Some(j) = out.iter().position(|o| o == item) {
+            bail!("--unset-env: item {} repeats item {}", i + 1, j + 1);
+        }
+        out.push(item.to_string());
+    }
+    Ok(out)
+}
+
 fn with(existing: &Profiles, name: &str, p: Profile) -> Profiles {
     let mut m = existing.0.clone();
     m.insert(name.to_string(), p);
@@ -342,7 +358,7 @@ fn run_at(cmd: ProfileCmd, path: &Path, index: &Path, ask: &mut dyn FnMut(&str) 
                 image, memory, cpus, disk_size,
                 reset,
                 env,
-                unset_env: names(unset_env)?.unwrap_or_default(),
+                unset_env: unset_env.as_deref().map(parse_unset_env).transpose()?.unwrap_or_default(),
             };
             let next = apply_edit(&Profiles::load(path)?, &name, a)?;
             check(&name, next.get(&name).expect("just edited"), index)?;
@@ -454,6 +470,19 @@ mod tests {
         assert!(parse_names("a,,b").is_err());
         assert!(parse_names("").is_err());
         assert!(parse_names("a,b,a").is_err());
+    }
+
+    #[test]
+    fn unset_env_errors_cite_position_never_text() {
+        assert_eq!(parse_unset_env(" B , A").unwrap(), v(&["B", "A"]));
+        let e = parse_unset_env("MY_TOKEN=sk-DUMMY-VALUE-123,").unwrap_err().to_string();
+        assert_eq!(e, "--unset-env: item 2 is empty");
+        let e = parse_unset_env("MY_TOKEN=sk-DUMMY-VALUE-123,x,MY_TOKEN=sk-DUMMY-VALUE-123").unwrap_err().to_string();
+        assert_eq!(e, "--unset-env: item 3 repeats item 1");
+        let (p, idx) = files("unset-run", "[default]\n");
+        let edit = |u: &str| ProfileCmd::Edit { name: "default".into(), secrets: None, add_secrets: None, remove_secrets: None, image: None, memory: None, cpus: None, disk_size: None, reset: vec![], env: vec![], unset_env: Some(u.into()) };
+        let e = format!("{:#}", run_at(edit("MY_TOKEN=sk-DUMMY-VALUE-123,"), &p, &idx, &mut |_| Ok(String::new()), &mut Vec::new()).unwrap_err());
+        assert!(e.contains("item 2 is empty") && !e.contains("DUMMY"), "{e}");
     }
 
     #[test]
