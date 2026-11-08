@@ -10,8 +10,8 @@
   duplicate entries), and a check that no dummy value is ever printed.
   Part B boots one real box (skip it with -SkipUp; each `up` runs `sleep 2` and the in-box
   checks start the cbox binary directly through .NET: build it first with `cb build-cbox`):
-  the profile's cpus, memory, image, secret and env variables (B4: exact values reach the
-  box) reach the box, the "already in profile" check, and the resume cases (diff warning,
+  the profile's cpus, memory, image, secret and env variables (B4: exact values) reach the
+  box, the "already in profile" check, and the resume cases (diff warning,
   including an env change that names the variable but not the value (B5b), deleted secret,
   deleted profile, -f).
 

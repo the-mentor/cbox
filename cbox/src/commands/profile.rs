@@ -91,6 +91,16 @@ pub struct EditArgs {
     pub reset: Vec<ResetField>,
 }
 
+/// Debug view of `--unset-env` items: valid variable names as typed, anything else by position.
+struct UnsetNames<'a>(Vec<&'a str>);
+
+impl std::fmt::Debug for UnsetNames<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let shown: Vec<String> = self.0.iter().enumerate().map(|(i, n)| if profiles::valid_env_name(n.trim()) { n.trim().to_string() } else { format!("<invalid item {}>", i + 1) }).collect();
+        f.write_str(&format!("[{}]", shown.join(", ")))
+    }
+}
+
 // Hand-written so an env value never reaches Debug output.
 impl std::fmt::Debug for EditArgs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -103,7 +113,7 @@ impl std::fmt::Debug for EditArgs {
             .field("cpus", &self.cpus)
             .field("disk_size", &self.disk_size)
             .field("env", &profiles::RedactedEnv(&self.env))
-            .field("unset_env", &self.unset_env)
+            .field("unset_env", &UnsetNames(self.unset_env.iter().map(String::as_str).collect()))
             .field("reset", &self.reset)
             .finish()
     }
@@ -115,7 +125,7 @@ impl std::fmt::Debug for ProfileCmd {
         match self {
             ProfileCmd::Create { name, env, .. } => f.debug_struct("Create").field("name", name).field("env", &profiles::RedactedEnv(env)).finish_non_exhaustive(),
             ProfileCmd::Edit { name, env, unset_env, .. } => {
-                f.debug_struct("Edit").field("name", name).field("env", &profiles::RedactedEnv(env)).field("unset_env", unset_env).finish_non_exhaustive()
+                f.debug_struct("Edit").field("name", name).field("env", &profiles::RedactedEnv(env)).field("unset_env", &UnsetNames(unset_env.iter().flat_map(|u| u.split(',')).collect())).finish_non_exhaustive()
             }
             ProfileCmd::List => f.write_str("List"),
             ProfileCmd::Delete { name, yes } => f.debug_struct("Delete").field("name", name).field("yes", yes).finish(),
@@ -783,10 +793,13 @@ mod tests {
     fn debug_output_never_shows_env_values() {
         let envs = v(&["MY_API_TOKEN=sk-DUMMY-VALUE-123", "GIT_AUTHOR_NAME=Avri Chen-Roth", "bad-sk-DUMMY-VALUE-123"]);
         let create = ProfileCmd::Create { name: "w".into(), secrets: None, image: None, memory: None, cpus: None, disk_size: None, env: envs.clone() };
-        let edit = ProfileCmd::Edit { name: "w".into(), secrets: None, add_secrets: None, remove_secrets: None, image: None, memory: None, cpus: None, disk_size: None, reset: vec![], env: envs.clone(), unset_env: None };
-        let args = EditArgs { env: envs.clone(), ..Default::default() };
+        let edit = ProfileCmd::Edit { name: "w".into(), secrets: None, add_secrets: None, remove_secrets: None, image: None, memory: None, cpus: None, disk_size: None, reset: vec![], env: envs.clone(), unset_env: Some("OK_NAME,MY_TOKEN=sk-DUMMY-VALUE-123".into()) };
+        let args = EditArgs { env: envs.clone(), unset_env: v(&["OK_NAME", "MY_TOKEN=sk-DUMMY-VALUE-123"]), ..Default::default() };
         let profile = Profile { env: envs.clone(), ..Default::default() };
         let resolved = profiles::resolve(&Profiles([("w".to_string(), profile.clone())].into()), "w", &[], None, None, None, None).unwrap();
+        for d in [format!("{edit:?}"), format!("{args:?}")] {
+            assert!(d.contains("OK_NAME") && d.contains("<invalid item 2>") && !d.contains("MY_TOKEN"), "{d}");
+        }
         for d in [format!("{create:?}"), format!("{edit:?}"), format!("{args:?}"), format!("{profile:?}"), format!("{resolved:?}")] {
             assert!(!d.contains("sk-DUMMY") && !d.contains("Avri") && !d.contains("Chen-Roth"), "{d}");
             assert!(d.contains("MY_API_TOKEN=<redacted>") && d.contains("GIT_AUTHOR_NAME=<redacted>") && d.contains("<invalid entry 3>"), "{d}");
