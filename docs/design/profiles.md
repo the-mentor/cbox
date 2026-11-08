@@ -60,7 +60,7 @@ cpus = 4
 
 ### The default profile
 
-- `default` always exists. cbox creates it, empty, when it first needs `profiles.toml` and the file is missing (see Calls made by the author).
+- `default` always exists. cbox creates it, empty, when it first runs and the file is missing (see Calls made by the author).
 - `cbox up` with no `--profile` uses `default`.
 - `default` can be edited like any profile. `cbox profile delete default` is refused.
 
@@ -173,12 +173,13 @@ works and never refuses, and `up` prints a warning showing what differs.
 - Profile names use the secret name charset: `[a-z][a-z0-9_-]*`.
 - The file location follows `secrets.json` (XDG then `~/.config`).
 - If `profiles.toml` is missing, cbox creates it with an empty `[default]` the first time
-  it runs `cbox up` or any `cbox profile` command (including `list` and `validate`).
-  Commands that do not touch profiles (`--help`, `secret`, `down`, `exec`, `list`) do not
-  create it. If the file exists but has no `[default]`, it is treated as an empty
-  `default` and `[default]` is added on the next write. If the file cannot be written
-  (read-only home, no permission), `up` prints a warning and carries on with an empty
-  `default`; it does not fail.
+  it runs, with or without a subcommand (`cbox`, `cbox --help`, `cbox secret list`,
+  `cbox up`, all of them). It happens at startup, before the command runs. If the file
+  exists but has no `[default]`, it is treated as an empty `default` and `[default]` is
+  added on the next profile write. Startup creation is best-effort: if the file cannot be
+  written (read-only home, no permission), cbox prints one warning and carries on with an
+  empty `default`; no command fails because of it. Startup never overwrites or edits an
+  existing file.
 - A `profiles.toml` that does not parse (syntax error, unknown key, wrong type) is an
   error naming the file and line. `up` fails on it; there is no fallback to built-ins.
   `secret delete` warns that it could not check the profiles and still deletes.
