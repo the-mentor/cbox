@@ -165,6 +165,8 @@ try {
     Section 'A4. profile create / validation'
     $r = Cbox @('profile', 'create', 'pa', '--secrets', "$secA,$secB", '--cpus', '1', '--memory', '2')
     Check 'create pa with two secrets, cpus 1, memory 2' { $r.Code -eq 0 } $r.Out
+    [void](Cbox @('profile', 'create', 'aa'))
+    Check '[default] is the first table even with a profile named aa' { ((Get-Content $profilesToml | Where-Object { $_ -like '[[]*' }) | Select-Object -First 1) -eq '[default]' } (Get-Content $profilesToml -Raw)
     $r = Cbox @('profile', 'create', 'pa')
     Check 'create of an existing name fails' { $r.Code -ne 0 } $r.Out
     $r = Cbox @('profile', 'create', 'bad1', '--secrets', "no-such-$rand")
