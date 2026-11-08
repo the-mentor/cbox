@@ -7,7 +7,7 @@
   Part A needs no VM: profiles.toml handling, the help-without-arguments behaviour, secrets
   in the real OS store (dummy values), edit/--reset, delete warnings, and a check that no
   dummy value is ever printed.
-  Part B boots one real box (skip it with -SkipUp; each `up` runs `sleep 2` and and the in-box checks run through a resuming `up` instead of `exec`, because `cb exec` failed with "resize_tty failed" when run by this script (cause not yet known) and `up` did not): the profile's cpus, memory, image and secret
+  Part B boots one real box (skip it with -SkipUp; each `up` runs `sleep 2` and and the in-box checks run the cbox binary directly (cbox/target/release/cbox, build it with `cb build-cbox`) because `cb` pastes arguments unquoted into a shell, which splits `sh -c 'a; b'` on the `;`): the profile's cpus, memory, image and secret
   reach the box, the "already in profile" check, and the resume cases (diff warning, deleted
   secret, deleted profile, -f).
 
@@ -60,9 +60,16 @@ $profilesToml = Join-Path $cfg 'cbox/profiles.toml'
 function Redact([string]$s) { $s.Replace($valA, '<redacted>').Replace($valB, '<redacted>') }
 
 # Runs cbox, returns Out (stdout+stderr) and Code. Optional $In is piped to stdin.
+# -Direct runs the cbox binary itself, not the just wrapper: just pastes its arguments unquoted into
+# a shell script, so a guest command like `sh -c 'a; b'` is split on the `;` and the box runs only
+# `sh -c a`, which exits at once.
+$script:DirectBin = Join-Path $PSScriptRoot '../cbox/target/release/cbox'
+$script:Registries = Join-Path $PSScriptRoot '../registries.local.json'
 function Cbox {
-    param([string[]]$A, [string]$In = $null)
-    $o = if ($null -ne $In) { $In | & $script:Exe @A 2>&1 } else { & $script:Exe @A 2>&1 }
+    param([string[]]$A, [string]$In = $null, [switch]$Direct)
+    $exe = if ($Direct) { $script:DirectBin } else { $script:Exe }
+    if ($Direct) { $A = @($A[0], '--config', $script:Registries) + $A[1..($A.Count - 1)] }
+    $o = if ($null -ne $In) { $In | & $exe @A 2>&1 } else { & $exe @A 2>&1 }
     $r = [pscustomobject]@{ Out = (($o | Out-String).TrimEnd()); Code = $LASTEXITCODE }
     [void]$script:AllOutput.AppendLine($r.Out)
     $r
@@ -210,13 +217,13 @@ try {
                 Check 'B2 list shows the profile image' { $r.Out -match [regex]::Escape($prefix) } $r.Out
             }
 
-            $r = Cbox @('up', $box, '-d', '--', 'sh', '-c', 'echo cpus=$(nproc); awk ''/MemTotal/{print "memmb=" int($2/1024)}'' /proc/meminfo; sleep 2')
+            $r = Cbox -Direct @('up', $box, '-d', '--', 'sh', '-c', 'echo cpus=$(nproc); awk ''/MemTotal/{print "memmb=" int($2/1024)}'' /proc/meminfo; sleep 2')
             if ($r.Code -ne 0) { Skip 'B3/B4 resource and secret checks' "command failed: $($r.Out)" }
             else {
                 Check 'B3 box has 1 vCPU (profile cpus = 1, built-in is 2)' { $r.Out -match 'cpus=1\b' } $r.Out
                 $mb = if ($r.Out -match 'memmb=(\d+)') { [int]$Matches[1] } else { 0 }
                 Check 'B3 box memory is about 2 GiB (profile memory = 2, built-in is 4)' { $mb -gt 1200 -and $mb -lt 2300 } "memmb=$mb"
-                $r = Cbox @('up', $box, '-d', '--', 'sh', '-c', "printenv $envA; printenv $envB; sleep 2")
+                $r = Cbox -Direct @('up', $box, '-d', '--', 'sh', '-c', "printenv $envA; printenv $envB; sleep 2")
                 Check 'B4 both profile secrets are set in the box' { ($r.Out -split "`n").Count -ge 2 -and $r.Code -eq 0 } $r.Out
                 Check 'B4 ...and the real values are not in the box environment' { $r.Out -notmatch [regex]::Escape($valA) -and $r.Out -notmatch [regex]::Escape($valB) }
             }
@@ -246,7 +253,7 @@ try {
 
             $r = Cbox @('up', $box, '-f', '--profile', 'pb', '-d', '--', 'sleep', '2')
             Check 'B9 -f recreates the box from profile pb' { $r.Code -eq 0 } "exit $($r.Code): $($r.Out)"
-            $r = Cbox @('up', $box, '-d', '--', 'sh', '-c', 'echo cpus=$(nproc); sleep 2')
+            $r = Cbox -Direct @('up', $box, '-d', '--', 'sh', '-c', 'echo cpus=$(nproc); sleep 2')
             Check 'B9 the recreated box has pb''s 2 vCPUs' { $r.Code -eq 0 -and $r.Out -match 'cpus=2\b' } $r.Out
             $r = Cbox @('up', $box, '-d', '--', 'sleep', '2')
             Check 'B9 resume with no --profile uses the recorded profile (pb): no warning' { $r.Code -eq 0 -and $r.Out -notmatch 'differs from this box' -and $r.Out -notmatch 'you asked for' } "exit $($r.Code): $($r.Out)"
