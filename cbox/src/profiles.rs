@@ -431,6 +431,11 @@ fn create_new_via(path: &Path, body: &str, link: impl Fn(&Path, &Path) -> std::i
     }
 }
 
+/// The list `env::compose` gets: profile entries first, then `-e` flags, so a flag wins a name clash.
+pub fn env_with_flags(profile_env: &[String], flags: &[String]) -> Vec<String> {
+    [profile_env, flags].concat()
+}
+
 /// Split "KEY=VALUE" at the first `=`.
 pub fn split_env(entry: &str) -> Option<(&str, &str)> {
     entry.split_once('=')
@@ -784,9 +789,11 @@ mod tests {
 
     #[test]
     fn a_flag_beats_the_profile_in_compose() {
-        let merged = [strs(&["A=prof", "P=only"]), strs(&["A=flag"])].concat();
+        let merged = env_with_flags(&strs(&["A=prof", "P=only"]), &strs(&["A=flag", "F=new"]));
         let out = crate::env::compose(&merged, &[], &[]).unwrap();
-        assert_eq!(out, vec![("A".to_string(), "flag".to_string()), ("P".to_string(), "only".to_string())]);
+        let get = |n: &str| out.iter().find(|(k, _)| k == n).map(|(_, v)| v.as_str());
+        assert_eq!((get("A"), get("P"), get("F")), (Some("flag"), Some("only"), Some("new")));
+        assert_eq!(out.len(), 3);
     }
 
     #[test]
