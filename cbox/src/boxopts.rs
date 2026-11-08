@@ -113,10 +113,8 @@ pub fn check_resources(disk_size_gb: Option<u64>, memory_gb: Option<u32>, cpus: 
     if cpus == Some(0) {
         bail!("--cpus must be greater than 0");
     }
-    if let Some(m) = memory_gb {
-        if m.checked_mul(1024).is_none() {
-            bail!("--memory {m} is too large");
-        }
+    if let Some(m) = memory_gb.filter(|m| m.checked_mul(1024).is_none()) {
+        bail!("--memory {m} is too large");
     }
     Ok(())
 }
