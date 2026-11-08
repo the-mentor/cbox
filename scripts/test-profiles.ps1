@@ -7,7 +7,7 @@
   Part A needs no VM: profiles.toml handling, the help-without-arguments behaviour, secrets
   in the real OS store (dummy values), edit/--reset, delete warnings, and a check that no
   dummy value is ever printed.
-  Part B boots one real box (skip it with -SkipUp; each `up` runs `sleep 2` and and the in-box checks run through a resuming `up` instead of `exec`, because `cb exec` fails with "resize_tty failed" when its output is captured and `up` does not): the profile's cpus, memory, image and secret
+  Part B boots one real box (skip it with -SkipUp; each `up` runs `sleep 2` and and the in-box checks run through a resuming `up` instead of `exec`, because `cb exec` failed with "resize_tty failed" when run by this script (cause not yet known) and `up` did not): the profile's cpus, memory, image and secret
   reach the box, the "already in profile" check, and the resume cases (diff warning, deleted
   secret, deleted profile, -f).
 
