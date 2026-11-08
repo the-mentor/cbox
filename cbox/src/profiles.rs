@@ -9,7 +9,7 @@ use crate::sidecar::ProfileSnapshot;
 
 pub const DEFAULT: &str = "default";
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -25,6 +25,42 @@ pub struct Profile {
     pub memory: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disk_size: Option<u64>,
+}
+
+// Hand-written so an env value never reaches Debug output.
+impl std::fmt::Debug for Profile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Profile")
+            .field("secrets", &self.secrets)
+            .field("env", &RedactedEnv(&self.env))
+            .field("image", &self.image)
+            .field("cpus", &self.cpus)
+            .field("memory", &self.memory)
+            .field("disk_size", &self.disk_size)
+            .finish()
+    }
+}
+
+/// Debug view of an env list: `NAME=<redacted>`, or `<invalid entry N>` for a malformed entry
+/// (whose text could be a pasted token and is never shown).
+pub struct RedactedEnv<'a>(pub &'a [String]);
+
+impl std::fmt::Debug for RedactedEnv<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let items = self.0.iter().enumerate().map(|(i, e)| match env_pair(e) {
+            Some((n, _)) => format!("{n}=<redacted>"),
+            None => format!("<invalid entry {}>", i + 1),
+        });
+        f.debug_list().entries(items.map(Plain)).finish()
+    }
+}
+
+struct Plain(String);
+
+impl std::fmt::Debug for Plain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -70,7 +106,6 @@ pub fn profiles_using(profiles: &Profiles, secret: &str) -> Vec<String> {
 }
 
 /// A profile with the flags of one `up` applied. `None` resources mean the built-in default.
-#[derive(Debug)]
 pub struct Resolved {
     pub profile_name: String,
     /// The profile's env entries, raw `KEY=VALUE`.
@@ -81,6 +116,21 @@ pub struct Resolved {
     pub cpus: Option<u8>,
     pub memory_gb: Option<u32>,
     pub disk_size_gb: Option<u64>,
+}
+
+// Hand-written so an env value never reaches Debug output.
+impl std::fmt::Debug for Resolved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Resolved")
+            .field("profile_name", &self.profile_name)
+            .field("env", &RedactedEnv(&self.env))
+            .field("secrets", &self.secrets)
+            .field("image", &self.image)
+            .field("cpus", &self.cpus)
+            .field("memory_gb", &self.memory_gb)
+            .field("disk_size_gb", &self.disk_size_gb)
+            .finish()
+    }
 }
 
 impl Resolved {

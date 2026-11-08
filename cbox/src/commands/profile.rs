@@ -91,6 +91,39 @@ pub struct EditArgs {
     pub reset: Vec<ResetField>,
 }
 
+// Hand-written so an env value never reaches Debug output.
+impl std::fmt::Debug for EditArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EditArgs")
+            .field("secrets", &self.secrets)
+            .field("add_secrets", &self.add_secrets)
+            .field("remove_secrets", &self.remove_secrets)
+            .field("image", &self.image)
+            .field("memory", &self.memory)
+            .field("cpus", &self.cpus)
+            .field("disk_size", &self.disk_size)
+            .field("env", &profiles::RedactedEnv(&self.env))
+            .field("unset_env", &self.unset_env)
+            .field("reset", &self.reset)
+            .finish()
+    }
+}
+
+// Hand-written so an env value never reaches Debug output; only the fields that identify the command.
+impl std::fmt::Debug for ProfileCmd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProfileCmd::Create { name, env, .. } => f.debug_struct("Create").field("name", name).field("env", &profiles::RedactedEnv(env)).finish_non_exhaustive(),
+            ProfileCmd::Edit { name, env, unset_env, .. } => {
+                f.debug_struct("Edit").field("name", name).field("env", &profiles::RedactedEnv(env)).field("unset_env", unset_env).finish_non_exhaustive()
+            }
+            ProfileCmd::List => f.write_str("List"),
+            ProfileCmd::Delete { name, yes } => f.debug_struct("Delete").field("name", name).field("yes", yes).finish(),
+            ProfileCmd::Validate { name } => f.debug_struct("Validate").field("name", name).finish(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum ResetField {
     Secrets,
@@ -709,5 +742,19 @@ mod tests {
         let bad = ProfileCmd::Edit { name: "w".into(), secrets: None, add_secrets: None, remove_secrets: None, image: None, memory: None, cpus: None, disk_size: None, reset: vec![], env: v(&["=x"]), unset_env: None };
         assert!(run_at(bad, &p, &idx, &mut no_ask, &mut Vec::new()).is_err());
         assert_eq!(std::fs::read_to_string(&p).unwrap(), before);
+    }
+
+    #[test]
+    fn debug_output_never_shows_env_values() {
+        let envs = v(&["MY_API_TOKEN=sk-DUMMY-VALUE-123", "GIT_AUTHOR_NAME=Avri Chen-Roth", "bad-sk-DUMMY-VALUE-123"]);
+        let create = ProfileCmd::Create { name: "w".into(), secrets: None, image: None, memory: None, cpus: None, disk_size: None, env: envs.clone() };
+        let edit = ProfileCmd::Edit { name: "w".into(), secrets: None, add_secrets: None, remove_secrets: None, image: None, memory: None, cpus: None, disk_size: None, reset: vec![], env: envs.clone(), unset_env: None };
+        let args = EditArgs { env: envs.clone(), ..Default::default() };
+        let profile = Profile { env: envs.clone(), ..Default::default() };
+        let resolved = profiles::resolve(&Profiles([("w".to_string(), profile.clone())].into()), "w", &[], None, None, None, None).unwrap();
+        for d in [format!("{create:?}"), format!("{edit:?}"), format!("{args:?}"), format!("{profile:?}"), format!("{resolved:?}")] {
+            assert!(!d.contains("sk-DUMMY") && !d.contains("Avri") && !d.contains("Chen-Roth"), "{d}");
+            assert!(d.contains("MY_API_TOKEN=<redacted>") && d.contains("GIT_AUTHOR_NAME=<redacted>") && d.contains("<invalid entry 3>"), "{d}");
+        }
     }
 }
