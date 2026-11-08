@@ -135,9 +135,11 @@ env = [
   would show in `profile list`, the duplicate error, the credential warning and the box
   environment.
 - **Credential warning (warn, never refuse).** A variable is flagged when its name has
-  `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD` or `CREDENTIAL` as a whole word (split on
-  `_`, any case), or when its value starts with `sk-`, `ghp_`, `github_pat_`, `AKIA` or
-  `xox`. The warning says tokens and secrets should not go in environment variables and
+  `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `PASS`, `PASSPHRASE`, `CREDENTIAL`,
+  `CREDENTIALS`, `AUTH`, `BEARER`, `PRIVATE`, `PAT`, `APIKEY`, `APITOKEN`, `ACCESSKEY` or
+  `SECRETKEY` as a whole word (split on `_`, any case), or when its value starts with
+  `sk-`, `ghp_`, `github_pat_`, `AKIA`, `glpat-`, `npm_`, `AIza`, `eyJ`, `xoxb-`, `xoxp-`,
+  `xoxa-`, `xoxs-` or `xoxr-`. The warning says tokens and secrets should not go in environment variables and
   to use `cbox secret`; it names the variable, never the value. It is printed by
   `profile create`, `edit` and `validate`, not by every `up`. The check is a heuristic: it
   will miss some and flag some wrongly, and there is no entropy test (a git email scores

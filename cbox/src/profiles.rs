@@ -454,8 +454,11 @@ pub fn valid_env_name(name: &str) -> bool {
 
 /// Heuristic only (no entropy test): a secret-ish word in the name, or a well-known token prefix in the value.
 pub fn is_credential_like(name: &str, value: &str) -> bool {
-    const WORDS: [&str; 6] = ["KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL"];
-    const PREFIXES: [&str; 5] = ["sk-", "ghp_", "github_pat_", "AKIA", "xox"];
+    const WORDS: [&str; 17] = [
+        "KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "PASS", "PASSPHRASE", "CREDENTIAL", "CREDENTIALS", "AUTH", "BEARER", "PRIVATE", "PAT", "APIKEY", "APITOKEN",
+        "ACCESSKEY", "SECRETKEY",
+    ];
+    const PREFIXES: [&str; 13] = ["sk-", "ghp_", "github_pat_", "AKIA", "glpat-", "npm_", "AIza", "eyJ", "xoxb-", "xoxp-", "xoxa-", "xoxs-", "xoxr-"];
     name.to_ascii_uppercase().split('_').any(|w| WORDS.contains(&w)) || PREFIXES.iter().any(|p| value.starts_with(p))
 }
 
@@ -961,6 +964,25 @@ mod tests {
             ("X", "github_pat_abc"),
             ("X", "AKIAABCD"),
             ("X", "xoxb-1"),
+            ("X", "xoxp-1"),
+            ("X", "xoxa-1"),
+            ("X", "xoxs-1"),
+            ("X", "xoxr-1"),
+            ("X", "glpat-abc"),
+            ("X", "npm_abc"),
+            ("X", "AIzaabc"),
+            ("X", "eyJhbGciOi"),
+            ("DB_PASS", "x"),
+            ("SSH_PASSPHRASE", "x"),
+            ("AWS_CREDENTIALS", "x"),
+            ("AUTH", "x"),
+            ("HTTP_BEARER", "x"),
+            ("PRIVATE", "x"),
+            ("GH_PAT", "x"),
+            ("APIKEY", "x"),
+            ("APITOKEN", "x"),
+            ("ACCESSKEY", "x"),
+            ("SECRETKEY", "x"),
         ] {
             assert!(is_credential_like(n, v), "{n}");
         }
@@ -970,6 +992,9 @@ mod tests {
             ("MONKEY", "x"),
             ("KEYBOARD", "x"),
             ("TOKENIZER", "x"),
+            ("GREETING", "xoxo"),
+            ("PASSENGER", "x"),
+            ("AUTHOR", "x"),
         ] {
             assert!(!is_credential_like(n, v), "{n}");
         }
