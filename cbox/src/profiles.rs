@@ -47,19 +47,11 @@ pub struct RedactedEnv<'a>(pub &'a [String]);
 
 impl std::fmt::Debug for RedactedEnv<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let items = self.0.iter().enumerate().map(|(i, e)| match env_pair(e) {
+        let items: Vec<String> = self.0.iter().enumerate().map(|(i, e)| match env_pair(e) {
             Some((n, _)) => format!("{n}=<redacted>"),
             None => format!("<invalid entry {}>", i + 1),
-        });
-        f.debug_list().entries(items.map(Plain)).finish()
-    }
-}
-
-struct Plain(String);
-
-impl std::fmt::Debug for Plain {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        }).collect();
+        f.write_str(&format!("[{}]", items.join(", ")))
     }
 }
 
