@@ -123,7 +123,10 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Before parse: clap exits on --help, which must still create the file.
-    commands::profile::startup_ensure();
+    // `completion` runs from shell startup files; it must not create profiles.toml as a side effect.
+    if std::env::args().nth(1).as_deref() != Some("completion") {
+        commands::profile::startup_ensure();
+    }
     let cli = Cli::try_parse().unwrap_or_else(|e| {
         // Asking for help by leaving arguments out is not a failure: clap exits 2 for it, which
         // makes `just` print "Recipe failed". Real usage errors keep their exit code.
@@ -154,7 +157,9 @@ async fn main() -> Result<()> {
         Commands::List { all } => commands::list::run(all).await?,
         Commands::Secret { cmd } => commands::secret::run(cmd)?,
         Commands::Profile { cmd } => commands::profile::run(cmd)?,
-        Commands::Completion { shell } => clap_complete::generate(shell, &mut Cli::command(), "cbox", &mut std::io::stdout()),
+        Commands::Completion { shell } => {
+            clap_complete::generate(shell, &mut Cli::command(), "cbox", &mut std::io::stdout())
+        }
     }
     Ok(())
 }
