@@ -7,7 +7,7 @@
   Part A needs no VM: profiles.toml handling, the help-without-arguments behaviour, secrets
   in the real OS store (dummy values), edit/--reset, delete warnings, and a check that no
   dummy value is ever printed.
-  Part B boots one real box (skip it with -SkipUp): the profile's cpus, memory, image and secret
+  Part B boots one real box (skip it with -SkipUp; each `up` runs `sleep 2` because an instantly-exiting command races cbox's terminal resize): the profile's cpus, memory, image and secret
   reach the box, the "already in profile" check, and the resume cases (diff warning, deleted
   secret, deleted profile, -f).
 
@@ -198,7 +198,7 @@ try {
     if ($SkipUp) { Skip 'all box tests' '-SkipUp' }
     else {
         if ($Image) { [void](Cbox @('profile', 'edit', 'pa', '--image', $Image)) }
-        $r = Cbox @('up', $box, '--profile', 'pa', '-d', '--', 'true')
+        $r = Cbox @('up', $box, '--profile', 'pa', '-d', '--', 'sleep', '2')
         $created = ($r.Code -eq 0)
         Check 'B1 up --profile pa creates the box' { $created } "exit $($r.Code): $($r.Out)"
         if (-not $created) { Skip 'remaining box tests' 'box was not created' }
@@ -221,34 +221,34 @@ try {
                 Check 'B4 ...and the real values are not in the box environment' { $r.Out -notmatch [regex]::Escape($valA) -and $r.Out -notmatch [regex]::Escape($valB) }
             }
 
-            $r = Cbox @('up', $box, '--profile', 'pa', '--secret', $secA, '-d', '--', 'true')
+            $r = Cbox @('up', $box, '--profile', 'pa', '--secret', $secA, '-d', '--', 'sleep', '2')
             Check 'B5 --secret already in the profile is rejected' { $r.Code -ne 0 -and $r.Out -match 'already in profile pa' } "exit $($r.Code): $($r.Out)"
 
             [void](Cbox @('profile', 'edit', 'pa', '--cpus', '2'))
-            $r = Cbox @('up', $box, '-d', '--', 'true')
+            $r = Cbox @('up', $box, '-d', '--', 'sleep', '2')
             Check 'B6 resume (no --profile) succeeds' { $r.Code -eq 0 } "exit $($r.Code): $($r.Out)"
             Check 'B6 ...prints the profile diff and points to -f' { $r.Out -match 'differs from this box' -and $r.Out -match 'cpus' -and $r.Out -match '-f/--force' } $r.Out
 
             $r = Cbox @('secret', 'delete', $secB, '-y')
             Check 'B7 secret delete names profile pa' { $r.Out -match 'used by profile' -and $r.Out -match '\bpa\b' } $r.Out
-            $r = Cbox @('up', $box, '-d', '--', 'true')
+            $r = Cbox @('up', $box, '-d', '--', 'sleep', '2')
             Check 'B7 resume with a deleted secret warns but still works' { $r.Code -eq 0 -and $r.Out -match 'warning' -and $r.Out -match 'not a stored secret' } "exit $($r.Code): $($r.Out)"
-            $r = Cbox @('up', "$box-new", '--profile', 'pa', '-d', '--', 'true')
+            $r = Cbox @('up', "$box-new", '--profile', 'pa', '-d', '--', 'sleep', '2')
             Check 'B7 a NEW box from that profile fails validation' { $r.Code -ne 0 -and $r.Out -match 'not a stored secret' } "exit $($r.Code): $($r.Out)"
 
             [void](Cbox @('profile', 'edit', 'pa', '--remove-secrets', $secB))
             [void](Cbox @('profile', 'create', 'pb', '--cpus', '2'))
             [void](Cbox @('profile', 'delete', 'pa', '-y'))
-            $r = Cbox @('up', $box, '-d', '--', 'true')
+            $r = Cbox @('up', $box, '-d', '--', 'sleep', '2')
             Check 'B8 resume when the recorded profile is gone is refused' { $r.Code -ne 0 -and $r.Out -match 'no longer exists' -and $r.Out -match '--profile NAME' } "exit $($r.Code): $($r.Out)"
-            $r = Cbox @('up', $box, '--profile', 'pb', '-d', '--', 'true')
+            $r = Cbox @('up', $box, '--profile', 'pb', '-d', '--', 'sleep', '2')
             Check 'B8 ...but --profile pb resumes with a warning naming both profiles' { $r.Code -eq 0 -and $r.Out -match 'you asked for profile pb' -and $r.Out -match 'created with profile pa' } "exit $($r.Code): $($r.Out)"
 
-            $r = Cbox @('up', $box, '-f', '--profile', 'pb', '-d', '--', 'true')
+            $r = Cbox @('up', $box, '-f', '--profile', 'pb', '-d', '--', 'sleep', '2')
             Check 'B9 -f recreates the box from profile pb' { $r.Code -eq 0 } "exit $($r.Code): $($r.Out)"
             $r = Cbox @('exec', $box, '--', 'sh', '-c', 'echo cpus=$(nproc)')
             Check 'B9 the recreated box has pb''s 2 vCPUs' { $r.Code -eq 0 -and $r.Out -match 'cpus=2\b' } $r.Out
-            $r = Cbox @('up', $box, '-d', '--', 'true')
+            $r = Cbox @('up', $box, '-d', '--', 'sleep', '2')
             Check 'B9 resume with no --profile uses the recorded profile (pb): no warning' { $r.Code -eq 0 -and $r.Out -notmatch 'differs from this box' -and $r.Out -notmatch 'you asked for' } "exit $($r.Code): $($r.Out)"
         }
     }
