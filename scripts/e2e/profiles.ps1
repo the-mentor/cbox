@@ -30,9 +30,9 @@
   Run Part A only (no VM is started).
 
 .EXAMPLE
-  pwsh ./scripts/test-profiles.ps1 -SkipUp
-  pwsh ./scripts/test-profiles.ps1 -Image localhost:5551/library/cbox-rust:latest
-  pwsh ./scripts/test-profiles.ps1 -Image ''
+  pwsh ./scripts/e2e/profiles.ps1 -SkipUp
+  pwsh ./scripts/e2e/profiles.ps1 -Image localhost:5551/library/cbox-rust:latest
+  pwsh ./scripts/e2e/profiles.ps1 -Image ''
 #>
 param(
     [string]$Cbox = 'cb',
@@ -65,8 +65,8 @@ function Redact([string]$s) { $s.Replace($valA, '<redacted>').Replace($valB, '<r
 # into a shell script, so a guest command like `sh -c 'a; b'` is split on the `;` and the box runs
 # only `sh -c a`, which exits at once. A helper script also keeps stdin open for a few seconds,
 # because cbox ends the session (and can drop the guest's output) as soon as stdin hits EOF.
-$script:DirectBin = Join-Path $PSScriptRoot '../cbox/target/release/cbox'
-$script:Registries = Join-Path $PSScriptRoot '../registries.local.json'
+$script:DirectBin = Join-Path $PSScriptRoot '../../cbox/target/release/cbox'
+$script:Registries = Join-Path $PSScriptRoot '../../registries.local.json'
 $script:InBoxHelper = Join-Path $cfg 'in-box.sh'
 Set-Content $script:InBoxHelper '#!/bin/sh
 sleep 5 | "$1" up --config "$2" "$3" -d -- sh -c "$4"' 
@@ -103,6 +103,10 @@ function Skip([string]$Name, [string]$Why) {
 }
 
 try {
+    # Which version of the repo this run tested, so a pasted result says what it ran against.
+    $commit = (& git -C $PSScriptRoot log -1 --format='%h %s (%cd)' --date=short 2>$null)
+    $dirty = if (& git -C $PSScriptRoot status --porcelain --untracked-files=no 2>$null) { ' + uncommitted changes' } else { '' }
+    Write-Host "commit: $commit$dirty"
     Write-Host "running cbox through: $script:Exe"
     Write-Host "temp config dir: $cfg   test secrets: $secA, $secB   test box: $box"
 
