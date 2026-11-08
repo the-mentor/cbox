@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.24](https://github.com/the-mentor/cbox/compare/v0.1.23...v0.1.24) (2026-11-08)
+
+
+### Features
+
+* add Windows Credential Manager secret store for WSL ([#141](https://github.com/the-mentor/cbox/issues/141)) ([4a76738](https://github.com/the-mentor/cbox/commit/4a76738492b8f2126e2293cd5ad2ce5f35d49404))
+
 ## [0.1.23](https://github.com/the-mentor/cbox/compare/v0.1.22...v0.1.23) (2026-11-06)
 
 
