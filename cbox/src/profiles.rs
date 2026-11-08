@@ -1,6 +1,5 @@
 //! Named bundles of `up` choices, stored in `profiles.toml` (see docs/design/profiles.md).
 
-
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};

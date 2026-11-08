@@ -322,7 +322,9 @@ mod tests {
         assert!(ed(EditArgs { remove_secrets: v(&["q"]), ..Default::default() }).is_err());
         let r = ed(EditArgs { image: Some("i".into()), memory: Some(8), disk_size: Some(20), ..Default::default() }).unwrap();
         let d = r.get("dev").unwrap();
-        assert_eq!((d.image.as_deref(), d.memory, d.cpus, d.disk_size), (Some("i"), Some(8), Some(2), Some(20)));
+        assert_eq!((d.image.as_deref(), d.memory, d.cpus, d.disk_size), (Some("i"), Some(8), Some(2), Some(20)), "unset cpus preserved");
+        let r = ed(EditArgs { cpus: Some(4), ..Default::default() }).unwrap();
+        assert_eq!(r.get("dev").unwrap().cpus, Some(4));
         assert_eq!(base().get("dev").unwrap().secrets, v(&["a", "b"]), "input untouched");
     }
 
@@ -372,22 +374,17 @@ mod tests {
 
     #[test]
     fn startup_ensure_creates_the_file_once_and_survives_a_read_only_dir() {
-        use std::os::unix::fs::PermissionsExt;
         let d = tmp("startup");
         let p = d.join("cbox/profiles.toml");
         assert_eq!(ensure_warning(&p), None);
         std::fs::write(&p, "[default]\ncpus = 3\n").unwrap();
         assert_eq!(ensure_warning(&p), None);
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "[default]\ncpus = 3\n");
-        let ro = d.join("ro");
-        std::fs::create_dir(&ro).unwrap();
-        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o500)).unwrap();
-        let w = ensure_warning(&ro.join("profiles.toml"));
-        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o700)).unwrap();
-        // Root ignores directory modes, so only assert the shape when the write was refused.
-        if let Some(w) = w {
-            assert!(w.starts_with("cbox: warning: could not create ") && w.ends_with("using an empty default profile."), "{w}");
-        }
+        // A regular file as the parent fails with ENOTDIR for any uid.
+        let f = d.join("file");
+        std::fs::write(&f, "").unwrap();
+        let w = ensure_warning(&f.join("profiles.toml")).expect("warning");
+        assert!(w.starts_with("cbox: warning: could not create ") && w.ends_with("using an empty default profile."), "{w}");
     }
 
     #[test]
