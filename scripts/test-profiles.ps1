@@ -19,7 +19,10 @@
     * Secret values are never printed; every output is scanned for them.
 
 .PARAMETER Cbox
-  Path to the cbox binary. Default: cbox on PATH.
+  The command that runs cbox. Default: cb (the just wrapper, so every call goes through the
+  justfile recipes: profile, secret, up, exec, list, down). A direct cbox binary also works,
+  e.g. ./cbox/target/release/cbox. Note that `cb --help` and `cb --version` are just's own, so
+  the script never uses them.
 .PARAMETER Image
   Optional image for the test profile, e.g. localhost:5551/library/cbox-rust:latest. It must
   already be pullable. Default: none (the built-in cbox-custom image).
@@ -27,11 +30,11 @@
   Run Part A only (no VM is started).
 
 .EXAMPLE
-  pwsh ./scripts/test-profiles.ps1 -Cbox ./cbox/target/release/cbox -SkipUp
-  pwsh ./scripts/test-profiles.ps1 -Cbox ./cbox/target/release/cbox -Image localhost:5551/library/cbox-rust:latest
+  pwsh ./scripts/test-profiles.ps1 -SkipUp
+  pwsh ./scripts/test-profiles.ps1 -Image localhost:5551/library/cbox-rust:latest
 #>
 param(
-    [string]$Cbox = 'cbox',
+    [string]$Cbox = 'cb',
     [string]$Image = '',
     [switch]$SkipUp
 )
@@ -84,18 +87,21 @@ function Skip([string]$Name, [string]$Why) {
 }
 
 try {
-    Write-Host "cbox: $script:Exe   ($((& $script:Exe --version) -join ' '))"
+    Write-Host "running cbox through: $script:Exe"
     Write-Host "temp config dir: $cfg   test secrets: $secA, $secB   test box: $box"
 
     # ---------------------------------------------------------------- Part A
     Section 'A1. First run creates profiles.toml'
     Check 'file does not exist yet' { -not (Test-Path $profilesToml) }
-    $r = Cbox @('--help')
-    Check '`cbox --help` exits 0' { $r.Code -eq 0 } $r.Out
-    Check 'profiles.toml now exists with an empty [default]' { (Get-Content $profilesToml -Raw).Trim() -eq '[default]' } (Get-Content $profilesToml -Raw)
-    $before = Get-Content $profilesToml -Raw
+    # Bare `profile` prints help and exits before doing any work, so it proves the file is made
+    # on the very first run, even for a command that only shows help.
+    $r = Cbox @('profile')
+    Check 'first run (`profile`, help only) exits 0' { $r.Code -eq 0 } $r.Out
+    $body = Get-Content $profilesToml -Raw -ErrorAction SilentlyContinue
+    Check 'profiles.toml now exists with an empty [default]' { $null -ne $body -and $body.Trim() -eq '[default]' } "file content: $body"
+    $before = $body
     [void](Cbox @('profile', 'list'))
-    Check 'a second run leaves the file untouched' { (Get-Content $profilesToml -Raw) -eq $before }
+    Check 'a second run leaves the file untouched' { (Get-Content $profilesToml -Raw -ErrorAction SilentlyContinue) -eq $before }
     $r = Cbox @('profile', 'list')
     Check '`profile list` shows default (empty)' { $r.Code -eq 0 -and $r.Out -match 'default' -and $r.Out -match '\(empty\)' } $r.Out
     $r = Cbox @('profile', 'validate')
@@ -126,7 +132,7 @@ try {
     Check 'create of an existing name fails' { $r.Code -ne 0 } $r.Out
     $r = Cbox @('profile', 'create', 'bad1', '--secrets', "no-such-$rand")
     Check 'create with an unknown secret fails' { $r.Code -ne 0 } $r.Out
-    Check '  ...and writes nothing' { (Get-Content $profilesToml -Raw) -notmatch 'bad1' }
+    Check '  ...and writes nothing' { (Get-Content $profilesToml -Raw -ErrorAction SilentlyContinue) -notmatch 'bad1' }
     $r = Cbox @('profile', 'create', 'bad2', '--secrets', 'gh')
     Check 'create with the reserved name gh fails' { $r.Code -ne 0 } $r.Out
     $r = Cbox @('profile', 'create', 'bad3', '--cpus', '0')
@@ -174,7 +180,7 @@ try {
     [void](Cbox @('profile', 'delete', 'pw', '-y'))
 
     Section 'A7. A pasted value in profiles.toml is never echoed'
-    $good = Get-Content $profilesToml -Raw
+    $good = Get-Content $profilesToml -Raw -ErrorAction SilentlyContinue
     $pasted = "SECRET-PASTED-$rand"
     Set-Content $profilesToml ($good + "`n[leak1]`ntoken = `"$pasted`"`n")
     $r = Cbox @('profile', 'validate')
