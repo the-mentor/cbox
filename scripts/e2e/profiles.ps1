@@ -49,6 +49,7 @@ $envA = 'CBTEST_KEY_A'
 $envB = 'CBTEST_KEY_B'
 $valA = "DUMMY-VALUE-A-$rand"
 $valB = "DUMMY-VALUE-B-$rand"
+$valTok = "DUMMY-VALUE-TOK-$rand"
 $box = "cbtest-$rand"
 $cfg = Join-Path ([IO.Path]::GetTempPath()) "cbox-profile-test-$rand"
 $script:Results = [System.Collections.Generic.List[object]]::new()
@@ -58,7 +59,7 @@ New-Item -ItemType Directory -Path $cfg | Out-Null
 $env:XDG_CONFIG_HOME = $cfg
 $profilesToml = Join-Path $cfg 'cbox/profiles.toml'
 
-function Redact([string]$s) { $s.Replace($valA, '<redacted>').Replace($valB, '<redacted>') }
+function Redact([string]$s) { $s.Replace($valA, '<redacted>').Replace($valB, '<redacted>').Replace($valTok, '<redacted>') }
 
 # In-box checks run the cbox binary directly, not through `cb`: just pastes its arguments unquoted
 # into a shell script, so a guest command like `sh -c 'a; b'` is split on the `;` and the box runs
@@ -256,11 +257,62 @@ try {
     Check 'wrong type: value hidden' { $r.Code -ne 0 -and $r.Out -notmatch $pasted } $r.Out
     Set-Content $profilesToml $good
 
+    Section 'A8. Environment variables'
+    $gitEnv = @('--env', 'GIT_AUTHOR_NAME=Avri Chen-Roth', '--env', 'GIT_AUTHOR_EMAIL=11185446+the-mentor@users.noreply.github.com',
+                '--env', 'GIT_COMMITTER_NAME=Avri Chen-Roth', '--env', 'GIT_COMMITTER_EMAIL=11185446+the-mentor@users.noreply.github.com')
+    $r = Cbox (@('profile', 'create', 'pe') + $gitEnv)
+    Check 'create pe with the four git variables' { $r.Code -eq 0 -and $r.Out -match 'Created profile "pe"' } $r.Out
+    Check '  ...no credential warning for them' { $r.Out -notmatch 'looks like a credential' } $r.Out
+    $blk = ProfileBlock (Cbox @('profile', 'list')).Out 'pe'
+    Check 'list shows the four variables with their values' { $blk -match 'env: GIT_AUTHOR_NAME=Avri Chen-Roth' -and $blk -match 'env: GIT_AUTHOR_EMAIL=11185446\+the-mentor@users\.noreply\.github\.com' -and $blk -match 'env: GIT_COMMITTER_NAME=' -and $blk -match 'env: GIT_COMMITTER_EMAIL=' } $blk
+    $r = Cbox @('profile', 'validate', 'pe')
+    Check 'validate pe passes without a credential warning' { $r.Code -eq 0 -and $r.Out -notmatch 'looks like a credential' } $r.Out
+
+    $r = Cbox @('profile', 'create', 'pt', '--env', "MY_API_TOKEN=$valTok")
+    Check 'create pt with a credential-looking variable succeeds' { $r.Code -eq 0 -and $r.Out -match 'Created profile "pt"' } $r.Out
+    Check '  ...warns, naming MY_API_TOKEN' { $r.Out -match 'looks like a credential' -and $r.Out -match 'MY_API_TOKEN' } $r.Out
+    Check '  ...and never prints the value' { -not $r.Out.Contains($valTok) } $r.Out
+    $blk = ProfileBlock (Cbox @('profile', 'list')).Out 'pt'
+    Check 'list hides it: MY_API_TOKEN=<hidden>' { $blk -match 'env: MY_API_TOKEN=<hidden>' -and -not $blk.Contains($valTok) } $blk
+    [void](Cbox @('profile', 'delete', 'pt', '-y'))
+
+    $r = Cbox @('profile', 'edit', 'pe', '--env', 'GIT_AUTHOR_NAME=Someone Else')
+    Check 'edit --env replaces one value' { $r.Code -eq 0 -and $r.Out -match 'Updated profile "pe"' } $r.Out
+    $blk = ProfileBlock (Cbox @('profile', 'list')).Out 'pe'
+    Check '  ...the new value is set and the other three are kept' { $blk -match 'env: GIT_AUTHOR_NAME=Someone Else' -and $blk -notmatch 'GIT_AUTHOR_NAME=Avri' -and $blk -match 'env: GIT_AUTHOR_EMAIL=' -and $blk -match 'env: GIT_COMMITTER_NAME=Avri Chen-Roth' -and $blk -match 'env: GIT_COMMITTER_EMAIL=' } $blk
+    $r = Cbox @('profile', 'edit', 'pe', '--unset-env', 'GIT_COMMITTER_EMAIL')
+    Check 'edit --unset-env removes one variable' { $r.Code -eq 0 } $r.Out
+    $blk = ProfileBlock (Cbox @('profile', 'list')).Out 'pe'
+    Check '  ...it is gone and the others stay' { $blk -notmatch 'GIT_COMMITTER_EMAIL' -and $blk -match 'GIT_AUTHOR_NAME' -and $blk -match 'GIT_COMMITTER_NAME' } $blk
+    $r = Cbox @('profile', 'edit', 'pe', '--unset-env', 'NO_SUCH_VAR')
+    Check '--unset-env of an unknown name fails' { $r.Code -ne 0 -and $r.Out -match 'has no env variable' } $r.Out
+    $r = Cbox @('profile', 'edit', 'pe', '--env', 'X=1', '--unset-env', 'X')
+    Check '--env X=1 together with --unset-env X is rejected' { $r.Code -ne 0 } $r.Out
+    $r = Cbox @('profile', 'edit', 'pe', '--reset', 'env', '--env', 'X=1')
+    Check '--reset env together with --env is rejected' { $r.Code -ne 0 } $r.Out
+    $blk = ProfileBlock (Cbox @('profile', 'list')).Out 'pe'
+    Check '  ...and the rejected edits changed nothing' { $blk -match 'GIT_AUTHOR_NAME=Someone Else' -and $blk -notmatch 'X=1' } $blk
+    $r = Cbox @('profile', 'edit', 'pe', '--reset', 'env')
+    Check '--reset env clears every variable' { $r.Code -eq 0 -and (ProfileBlock (Cbox @('profile', 'list')).Out 'pe') -match '\(empty\)' } $r.Out
+    [void](Cbox @('profile', 'delete', 'pe', '-y'))
+
+    # Hand-edited profiles.toml, like A7.
+    $good = Get-Content $profilesToml -Raw -ErrorAction SilentlyContinue
+    Set-Content $profilesToml ($good + "`n[envdup]`nenv = [`"A=1`", `"A=2`"]`n")
+    $r = Cbox @('profile', 'validate')
+    Check 'duplicate env name: validate fails with "is set twice"' { $r.Code -ne 0 -and $r.Out -match 'is set twice' } $r.Out
+    $noEq = "NOEQUALS-$rand"
+    Set-Content $profilesToml ($good + "`n[envbad]`nenv = [`"$noEq`"]`n")
+    $r = Cbox @('profile', 'validate')
+    Check 'env entry without "=": reported by position, value hidden' { $r.Code -ne 0 -and $r.Out -match 'env entry 1' -and $r.Out -notmatch $noEq } $r.Out
+    Set-Content $profilesToml $good
+
     # ---------------------------------------------------------------- Part B
     Section 'B. Real box'
     if ($SkipUp) { Skip 'all box tests' '-SkipUp' }
     else {
         if ($Image) { [void](Cbox @('profile', 'edit', 'pa', '--image', $Image)) }
+        [void](Cbox @('profile', 'edit', 'pa', '--env', 'CBT_PLAIN=hello', '--env', 'CBT_SPACED=a b=c'))
         $r = Cbox @('up', $box, '--profile', 'pa', '-d', '--', 'sleep', '2')
         $created = ($r.Code -eq 0)
         Check 'B1 up --profile pa creates the box' { $created } "exit $($r.Code): $($r.Out)"
@@ -288,8 +340,15 @@ try {
                 Check 'B4 ...and the real values are not in the box environment' { $r.Out -notmatch [regex]::Escape($valA) -and $r.Out -notmatch [regex]::Escape($valB) }
             }
 
+            $r = InBox 'echo "P=$CBT_PLAIN"; echo "S=$CBT_SPACED"; sleep 2'
+            Check 'B4 profile env reaches the box with exact values (spaces and "=" kept)' { $r.Code -eq 0 -and $r.Out -match '(?m)^P=hello\r?$' -and $r.Out -match '(?m)^S=a b=c\r?$' } $r.Out
+
             $r = Cbox @('up', $box, '--profile', 'pa', '--secret', $secA, '-d', '--', 'sleep', '2')
             Check 'B5 --secret already in the profile is rejected' { $r.Code -ne 0 -and $r.Out -match 'already in profile pa' } "exit $($r.Code): $($r.Out)"
+
+            [void](Cbox @('profile', 'edit', 'pa', '--env', 'CBT_PLAIN=changed-value'))
+            $r = Cbox @('up', $box, '-d', '--', 'sleep', '2')
+            Check 'B5b resume after an env change names the variable but not the new value' { $r.Code -eq 0 -and $r.Out -match '(?m)env changed: .*CBT_PLAIN' -and $r.Out -notmatch 'changed-value' } "exit $($r.Code): $($r.Out)"
 
             [void](Cbox @('profile', 'edit', 'pa', '--cpus', '2'))
             $r = Cbox @('up', $box, '-d', '--', 'sleep', '2')
@@ -327,6 +386,7 @@ try {
     $all = $script:AllOutput.ToString()
     Check 'secret A value never appeared in any output' { -not $all.Contains($valA) }
     Check 'secret B value never appeared in any output' { -not $all.Contains($valB) }
+    Check 'credential-looking env value never appeared in any output' { -not $all.Contains($valTok) }
 }
 finally {
     Section 'Cleanup'
