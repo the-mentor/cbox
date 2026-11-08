@@ -208,6 +208,12 @@ try {
     Check '--reset secrets together with --add-secrets is rejected' { $r.Code -ne 0 } $r.Out
     $blk = ProfileBlock (Cbox @('profile', 'list')).Out 'po'
     Check '  ...and the rejected edit changed nothing' { $blk -match [regex]::Escape($secA) -and $blk -match 'image: other/image:1' } $blk
+    $r = Cbox @('profile', 'edit', 'po', '--reset', 'secrets', '--secrets', $secB)
+    Check '--reset secrets together with --secrets is rejected' { $r.Code -ne 0 } $r.Out
+    $r = Cbox @('profile', 'edit', 'po', '--reset', 'secrets', '--remove-secrets', $secA)
+    Check '--reset secrets together with --remove-secrets is rejected' { $r.Code -ne 0 } $r.Out
+    $blk = ProfileBlock (Cbox @('profile', 'list')).Out 'po'
+    Check '  ...and the rejected edits changed nothing' { $blk -match [regex]::Escape($secA) -and $blk -notmatch [regex]::Escape($secB) } $blk
     $r = Cbox @('profile', 'edit', 'po', '--reset', 'secrets')
     Check '--reset secrets alone empties the list and keeps the other fields' { $r.Code -eq 0 -and (ProfileBlock (Cbox @('profile', 'list')).Out 'po') -notmatch [regex]::Escape($secA) -and (ProfileBlock (Cbox @('profile', 'list')).Out 'po') -match 'image: other/image:1' } $r.Out
     $r = Cbox @('profile', 'edit', 'po', '--reset', 'image', '--cpus', '4')
