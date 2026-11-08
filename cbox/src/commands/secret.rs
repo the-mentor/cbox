@@ -84,11 +84,11 @@ pub fn read_value(
     Ok(v)
 }
 
-fn confirm_delete(name: &str, yes: bool, ask: &mut dyn FnMut(&str) -> io::Result<String>) -> Result<bool> {
+pub(crate) fn confirm_delete(kind: &str, name: &str, yes: bool, ask: &mut dyn FnMut(&str) -> io::Result<String>) -> Result<bool> {
     if yes {
         return Ok(true);
     }
-    let a = ask(&format!("Delete secret \"{name}\"? [y/N] "))?;
+    let a = ask(&format!("Delete {kind} \"{name}\"? [y/N] "))?;
     Ok(matches!(a.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
 }
 
@@ -193,7 +193,7 @@ pub fn run(cmd: SecretCmd) -> Result<()> {
             if !secretstore::exists(&*store, &index, &name)? {
                 bail!("secret {name:?} not found");
             }
-            let ok = confirm_delete(&name, yes, &mut |q| {
+            let ok = confirm_delete("secret", &name, yes, &mut |q| {
                 print!("{q}");
                 io::stdout().flush()?;
                 let mut s = String::new();
@@ -352,16 +352,16 @@ mod tests {
     #[test]
     fn delete_without_y_needs_a_yes_answer() {
         let ask = |a: &'static str| move |_: &str| Ok(a.to_string());
-        assert!(!confirm_delete("n", false, &mut ask("\n")).unwrap());
-        assert!(!confirm_delete("n", false, &mut ask("no\n")).unwrap());
-        assert!(confirm_delete("n", false, &mut ask("y\n")).unwrap());
-        assert!(confirm_delete("n", false, &mut ask("YES\n")).unwrap());
-        assert!(confirm_delete("n", true, &mut |_| panic!("must not prompt")).unwrap());
+        assert!(!confirm_delete("secret", "n", false, &mut ask("\n")).unwrap());
+        assert!(!confirm_delete("secret", "n", false, &mut ask("no\n")).unwrap());
+        assert!(confirm_delete("secret", "n", false, &mut ask("y\n")).unwrap());
+        assert!(confirm_delete("secret", "n", false, &mut ask("YES\n")).unwrap());
+        assert!(confirm_delete("secret", "n", true, &mut |_| panic!("must not prompt")).unwrap());
     }
 
     #[test]
     fn confirm_delete_does_not_delete_on_eof() {
-        assert!(!confirm_delete("n", false, &mut |_| Ok(String::new())).unwrap());
+        assert!(!confirm_delete("secret", "n", false, &mut |_| Ok(String::new())).unwrap());
     }
 
     fn row(name: &str, state: RowState) -> ListRow {

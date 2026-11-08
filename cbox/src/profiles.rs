@@ -1,7 +1,5 @@
 //! Named bundles of `up` choices, stored in `profiles.toml` (see docs/design/profiles.md).
 
-// Consumed by the `profile` and `up` commands, added in the following tasks.
-#![allow(dead_code)]
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

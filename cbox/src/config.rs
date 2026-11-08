@@ -80,7 +80,6 @@ pub fn secrets_index_path() -> Option<PathBuf> {
 }
 
 /// `$XDG_CONFIG_HOME/cbox/profiles.toml`, else `~/.config/cbox/profiles.toml`.
-#[allow(dead_code)] // used by the profile commands (later task)
 pub fn profiles_path() -> Option<PathBuf> {
     Some(secrets_index_path()?.with_file_name("profiles.toml"))
 }

@@ -106,10 +106,17 @@ enum Commands {
         #[command(subcommand)]
         cmd: commands::secret::SecretCmd,
     },
+    /// Manage named bundles of `up` choices (profiles.toml).
+    Profile {
+        #[command(subcommand)]
+        cmd: commands::profile::ProfileCmd,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Before parse: clap exits on --help, which must still create the file.
+    commands::profile::startup_ensure();
     let cli = Cli::parse();
     match cli.command {
         Commands::Name { name } => {
@@ -131,6 +138,7 @@ async fn main() -> Result<()> {
         Commands::Down { name } => commands::down::run(name).await?,
         Commands::List { all } => commands::list::run(all).await?,
         Commands::Secret { cmd } => commands::secret::run(cmd)?,
+        Commands::Profile { cmd } => commands::profile::run(cmd)?,
     }
     Ok(())
 }
