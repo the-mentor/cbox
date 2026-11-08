@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.26](https://github.com/the-mentor/cbox/compare/v0.1.25...v0.1.26) (2026-11-08)
+
+
+### Bug Fixes
+
+* keep just up, exec, down, list and up-dev arguments whole ([#148](https://github.com/the-mentor/cbox/issues/148)) ([f1710a9](https://github.com/the-mentor/cbox/commit/f1710a93cd5c326e75c80e9a7c90a535417d69fe))
+
 ## [0.1.25](https://github.com/the-mentor/cbox/compare/v0.1.24...v0.1.25) (2026-11-08)
 
 
