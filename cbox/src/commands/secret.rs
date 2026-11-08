@@ -159,7 +159,7 @@ fn delete_warning(profiles: &Result<crate::profiles::Profiles>, name: &str) -> O
         Ok(p) => {
             let used = crate::profiles::profiles_using(p, name);
             (!used.is_empty()).then(|| {
-                format!("cbox: warning: secret \"{name}\" is used by profile(s): {}. They will fail at \"cbox up\" until you remove it from them.", used.join(", "))
+                format!("cbox: warning: secret \"{name}\" is used by profile(s): {}. A new box from them will fail at \"cbox up\" (a resumed one only warns) until you remove it from them.", used.join(", "))
             })
         }
         Err(e) => Some(format!("cbox: warning: could not check profiles.toml for uses of this secret ({e}).")),
@@ -388,7 +388,7 @@ mod tests {
         let p = Ok(crate::profiles::Profiles(m));
         assert_eq!(
             delete_warning(&p, "k").as_deref(),
-            Some("cbox: warning: secret \"k\" is used by profile(s): a, b. They will fail at \"cbox up\" until you remove it from them.")
+            Some("cbox: warning: secret \"k\" is used by profile(s): a, b. A new box from them will fail at \"cbox up\" (a resumed one only warns) until you remove it from them.")
         );
         assert_eq!(delete_warning(&p, "other"), None);
         let e = Err(anyhow::anyhow!("boom"));

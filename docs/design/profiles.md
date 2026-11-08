@@ -92,8 +92,9 @@ valid inside a profile.
 - `profile create` and `profile edit` check each named secret exists, using the names-only
   index (`secrets.json`), not the OS store. A missing name fails the command and
   nothing is written.
-- A secret deleted later is not tracked. `cbox up --profile foo` fails with the existing
-  "secret not found" error.
+- A secret deleted later is not tracked. For a new box, `cbox up --profile foo` fails
+  validation with `profile foo: secrets: no secret named X (<profiles.toml path>)`.
+  Resuming a box whose profile lists it only warns (see Resuming a box).
 - `cbox secret delete NAME` names the profiles that use `NAME` in its confirmation
   prompt. With `-y` it prints the same warning and proceeds. It does not refuse.
 
@@ -142,6 +143,20 @@ was created (`sidecar::changed_secrets`, `up.rs`). Profiles follow the same rule
 works and never refuses, and `up` prints a warning showing what differs. One accepted
 exception: with no `--profile`, `up` refuses to resume a box whose recorded profile no
 longer exists in `profiles.toml`; the error says to pass `--profile NAME`.
+
+- A profile that no longer validates (a listed secret was deleted, a hand-edited bad
+  value) does not stop a resume. "Resume" means the box has a sidecar and `-f` was not
+  passed, with or without `--profile`. `up` prints each problem as a `cbox: warning:`
+  line, says the box keeps the settings it was created with and that this run ignores
+  the missing secrets, and points to `-f`. Profile secrets the index does not know (or
+  that are not a valid name) are left out of this run, so they show as removed in the
+  diff below; a bad profile resource value falls back to the built-in for this run (the
+  resumed box ignores it anyway). A `--secret X` flag for a missing `X` still fails, and
+  so does a bad `--cpus`/`--memory`/`--disk-size` flag.
+- A new box, and `-f`, keep the hard failure.
+- If the sidecar outlived its box (the box was removed some other way), the run that
+  downgraded the problems ends up creating a box. `up` then removes that box and fails
+  with the same error a new box gets.
 
 - At creation, the box's sidecar records the resolved profile: profile name, secret
   names, image, CPUs, memory, disk size.

@@ -54,24 +54,37 @@ pub async fn run(args: UpArgs) -> Result<()> {
         old_sidecar.as_ref().and_then(|s| s.profile.as_ref()).map(|s| s.name.as_str()),
         &all_profiles,
     )?;
-    let resolved_profile = profiles::resolve(
+    let mut resolved_profile = profiles::resolve(
         &all_profiles, &profile_name, &args.secret_flags,
         args.image.as_deref(), args.cpus, args.memory_gb, args.disk_size_gb,
     )?;
-    let problems = profiles::problems_for_up(
-        &profile_name,
-        all_profiles.get(&profile_name).expect("resolve found it"),
-        || {
-            let index = config::secrets_index_path().context("cannot locate config directory for the secrets index")?;
-            Ok(crate::secretstore::Index::load(&index)?.names)
-        },
-    )?;
-    anyhow::ensure!(
-        problems.is_empty(),
-        "{} ({})",
-        problems.join("\n"),
-        profiles_file.as_deref().map_or("profiles.toml".into(), |p| p.display().to_string())
-    );
+    let p = all_profiles.get(&profile_name).expect("resolve found it");
+    let known = profiles::known_for_up(p, || {
+        let index = config::secrets_index_path().context("cannot locate config directory for the secrets index")?;
+        Ok(crate::secretstore::Index::load(&index)?.names)
+    })?;
+    // A sidecar means a box to resume (the safety net after get_or_create covers a stale one).
+    let resuming = old_sidecar.is_some() && !args.force;
+    let file_label = profiles_file.as_deref().map_or("profiles.toml".into(), |p| p.display().to_string());
+    let check = profiles::up_check(profiles::validate(&profile_name, p, &known), resuming, &p.secrets, &known, &file_label)?;
+    for w in &check.warnings {
+        eprintln!("{w}");
+    }
+    resolved_profile.drop_profile_secrets(p.secrets.len(), &check.drop_secrets);
+    if check.downgraded.is_some() {
+        // A resumed box ignores options, but boxopts::build still checks them: fall back to
+        // built-ins for a bad profile value so the resume is not refused. Bad flags still fail.
+        let bad = |r: Result<()>| r.is_err();
+        if args.cpus.is_none() && bad(boxopts::check_resources(None, None, p.cpus)) {
+            resolved_profile.cpus = None;
+        }
+        if args.memory_gb.is_none() && bad(boxopts::check_resources(None, p.memory, None)) {
+            resolved_profile.memory_gb = None;
+        }
+        if args.disk_size_gb.is_none() && bad(boxopts::check_resources(p.disk_size, None, None)) {
+            resolved_profile.disk_size_gb = None;
+        }
+    }
 
     // Secrets first: their source variables must be withheld from passthrough.
     let mut specs = Vec::new();
@@ -159,6 +172,14 @@ pub async fn run(args: UpArgs) -> Result<()> {
         .get_or_create(options, Some(name.clone()))
         .await
         .context("failed to create or reuse the box")?;
+
+    if let (true, Some(error)) = (created, &check.downgraded) {
+        // The sidecar outlived its box: this new box came from a config with problems
+        // downgraded for a resume. Remove it and fail as a new box would have.
+        drop(litebox);
+        let _ = runtime.remove(&name, true).await;
+        anyhow::bail!("{error}");
+    }
 
     if created {
         // Best-effort, like the git bootstrap below: `cbox list` losing the

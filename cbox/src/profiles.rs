@@ -113,14 +113,53 @@ pub fn load_or_empty(path: Option<&Path>) -> Result<Profiles> {
     }
 }
 
-/// `validate`, reading the names-only secrets index only when the profile names secrets.
-pub fn problems_for_up(
-    name: &str,
-    p: &Profile,
-    known: impl FnOnce() -> Result<BTreeSet<String>>,
-) -> Result<Vec<String>> {
-    let known = if p.secrets.is_empty() { BTreeSet::new() } else { known()? };
-    Ok(validate(name, p, &known))
+/// The names-only secrets index, read only when the profile names secrets.
+pub fn known_for_up(p: &Profile, known: impl FnOnce() -> Result<BTreeSet<String>>) -> Result<BTreeSet<String>> {
+    if p.secrets.is_empty() { Ok(BTreeSet::new()) } else { known() }
+}
+
+/// What `up` does with a profile's validation problems.
+#[derive(Debug, Default, PartialEq)]
+pub struct UpCheck {
+    /// Set when problems were downgraded to warnings: the error a new box gets instead.
+    pub downgraded: Option<String>,
+    pub warnings: Vec<String>,
+    /// Profile secrets this run leaves out: unknown to the index or not a usable name.
+    pub drop_secrets: Vec<String>,
+}
+
+/// A new box (or `-f`) fails on any problem. A resumed box keeps its creation settings, so
+/// it only warns and leaves out the profile secrets that cannot be read.
+pub fn up_check(problems: Vec<String>, resuming: bool, profile_secrets: &[String], known: &BTreeSet<String>, file: &str) -> Result<UpCheck> {
+    if problems.is_empty() {
+        return Ok(UpCheck::default());
+    }
+    let error = format!("{} ({file})", problems.join("\n"));
+    if !resuming {
+        anyhow::bail!("{error}");
+    }
+    let mut warnings: Vec<String> = problems.iter().map(|p| format!("cbox: warning: {p} ({file})")).collect();
+    warnings.push(
+        "cbox: warning: resuming anyway: the box keeps the settings it was created with, and this run ignores \
+         the missing secrets. Fix the profile, then run with -f/--force to recreate the box."
+            .into(),
+    );
+    let drop_secrets = profile_secrets
+        .iter()
+        .filter(|s| crate::secretstore::validate_name(s).is_err() || !known.contains(*s))
+        .cloned()
+        .collect();
+    Ok(UpCheck { downgraded: Some(error), warnings, drop_secrets })
+}
+
+impl Resolved {
+    /// Remove `drop` (and repeats) from the first `n_profile` secrets, the profile's; flag secrets stay.
+    pub fn drop_profile_secrets(&mut self, n_profile: usize, drop: &[String]) {
+        let flags = self.secrets.split_off(n_profile.min(self.secrets.len()));
+        let mut seen = BTreeSet::new();
+        self.secrets.retain(|s| !drop.contains(s) && seen.insert(s.clone()));
+        self.secrets.extend(flags);
+    }
 }
 
 /// `--profile` if given, else the box's recorded profile, else `default`.
@@ -348,9 +387,41 @@ mod tests {
     #[test]
     fn the_secrets_index_is_not_read_for_a_profile_without_secrets() {
         let boom = || -> Result<BTreeSet<String>> { anyhow::bail!("corrupt index") };
-        assert!(problems_for_up("default", &Profile::default(), boom).unwrap().is_empty());
+        assert!(known_for_up(&Profile::default(), boom).unwrap().is_empty());
         let with = Profile { secrets: vec!["a".into()], ..Default::default() };
-        assert!(problems_for_up("foo", &with, boom).is_err());
+        assert!(known_for_up(&with, boom).is_err());
+    }
+
+    #[test]
+    fn up_check_fails_a_new_box_and_warns_a_resumed_one() {
+        let known: BTreeSet<String> = ["a".to_string()].into();
+        let p = Profile { secrets: strs(&["a", "gone"]), ..Default::default() };
+        let problems = validate("foo", &p, &known);
+        let e = up_check(problems.clone(), false, &p.secrets, &known, "/x/profiles.toml").unwrap_err().to_string();
+        assert_eq!(e, "profile foo: secrets: no secret named gone (/x/profiles.toml)");
+        let c = up_check(problems, true, &p.secrets, &known, "/x/profiles.toml").unwrap();
+        assert_eq!(c.downgraded.as_deref(), Some(e.as_str()));
+        assert_eq!(c.drop_secrets, strs(&["gone"]));
+        assert!(c.warnings[0].starts_with("cbox: warning: profile foo: secrets: no secret named gone"), "{:?}", c.warnings);
+        assert!(c.warnings.last().unwrap().contains("-f/--force"), "{:?}", c.warnings);
+        assert_eq!(up_check(vec![], false, &p.secrets, &known, "f").unwrap(), UpCheck::default());
+    }
+
+    #[test]
+    fn up_check_on_resume_warns_for_a_resource_problem_and_drops_nothing() {
+        let p = Profile { cpus: Some(0), ..Default::default() };
+        let c = up_check(validate("foo", &p, &BTreeSet::new()), true, &p.secrets, &BTreeSet::new(), "f").unwrap();
+        assert!(c.warnings[0].contains("cpus must be greater than 0"), "{:?}", c.warnings);
+        assert!(c.drop_secrets.is_empty());
+    }
+
+    #[test]
+    fn dropping_profile_secrets_never_drops_a_flag_secret() {
+        let mut p = two();
+        p.0.get_mut("foo").unwrap().secrets = strs(&["a", "gone", "a"]);
+        let mut r = resolve(&p, "foo", &strs(&["gone2"]), None, None, None, None).unwrap();
+        r.drop_profile_secrets(3, &strs(&["gone", "gone2"]));
+        assert_eq!(r.secrets, strs(&["a", "gone2"]));
     }
 
     #[test]
