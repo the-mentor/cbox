@@ -13,10 +13,10 @@ This design makes secrets something cbox manages: `cbox secret create | list |
 edit | delete`, with values held in the operating system's credential store, and
 `cbox up --secret NAME` resolving them from there.
 
-This is the first step toward **profiles** (a named bundle of source image,
+This was the first step toward **profiles** (a named bundle of source image,
 secrets, and resource overrides, selected with `cbox up --profile foo`). Profiles
-are explicitly out of scope here, but the secret record and the `up` lookup are
-shaped so a profile can later refer to a secret by name without a migration.
+are out of scope here and are now implemented; see `docs/design/profiles.md`. A
+profile refers to a secret by name, so no migration was needed.
 
 ## Goals
 
@@ -43,7 +43,7 @@ shaped so a profile can later refer to a secret by name without a migration.
 
 ## Non-goals (this design)
 
-- Profiles, and any `--profile` flag.
+- Profiles, and any `--profile` flag (since done: `docs/design/profiles.md`).
 - Linux desktop (Secret Service) support. Designed for, built later.
 - `--from-env` on `create`/`edit`. Deferred by decision; see Follow-ups.
 - Certificates, SSH keys, or any secret over a few KB. Secrets are short strings
@@ -203,7 +203,7 @@ Merge order matters only as noted: 1 before 2; 3 any time after 1.
 - `--from-env VAR` on `create` and `edit`, defaulting `--env` to the same
   variable. Deferred by the user to a later PR.
 - Linux Secret Service backend.
-- Profiles (own design pass).
+- Profiles: done, see `docs/design/profiles.md`.
 - A native Windows helper binary (startup in tens of milliseconds, no PowerShell)
   if PowerShell is blocked by policy on managed Windows machines (Constrained
   Language Mode breaks the C# compile) or latency matters.

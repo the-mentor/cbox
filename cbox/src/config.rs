@@ -79,6 +79,11 @@ pub fn secrets_index_path() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".config/cbox/secrets.json"))
 }
 
+/// `$XDG_CONFIG_HOME/cbox/profiles.toml`, else `~/.config/cbox/profiles.toml`.
+pub fn profiles_path() -> Option<PathBuf> {
+    Some(secrets_index_path()?.with_file_name("profiles.toml"))
+}
+
 /// Each box name gets its own BOXLITE_HOME, which is what lets two boxes run
 /// at once — BoxLite locks the whole home directory, not the individual box.
 pub fn box_home(name: &str) -> PathBuf {
@@ -146,5 +151,16 @@ mod tests {
     fn explicit_config_path_wins() {
         let explicit = PathBuf::from("/tmp/explicit.json");
         assert_eq!(resolve_config_path(Some(&explicit)), Some(explicit));
+    }
+
+    #[test]
+    fn profiles_path_follows_xdg_then_home() {
+        use crate::test_env_lock::{EnvVarGuard, lock};
+        let _l = lock();
+        let _x = EnvVarGuard::set("XDG_CONFIG_HOME", "/xdg");
+        assert_eq!(profiles_path(), Some(PathBuf::from("/xdg/cbox/profiles.toml")));
+        let _x = EnvVarGuard::remove("XDG_CONFIG_HOME");
+        let _h = EnvVarGuard::set("HOME", "/home/u");
+        assert_eq!(profiles_path(), Some(PathBuf::from("/home/u/.config/cbox/profiles.toml")));
     }
 }

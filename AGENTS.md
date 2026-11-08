@@ -26,6 +26,7 @@ just ci-local           # run the ci workflow's Linux build job locally via nekt
 just exec               # open a session in the running box (alias: just shell)
 just list               # list running boxes across every box name (see below), forwarding args to cbox's own `list` command
 just secret             # manage stored secrets: `just secret create NAME --host HOSTS --env VAR`, `list`, `edit`, `delete` (see below)
+just profile            # manage profiles: `just profile create NAME [--secrets a,b] [--image I] ...`, `list`, `edit`, `delete`, `validate` (see below)
 just down               # stop and remove the box
 just gateway-up/down/logs # manage the host-side agentgateway
 just gateway-generate-ui-password # change the admin UI's default credentials, see below
@@ -70,6 +71,13 @@ but BoxLite keeps a copy of a box's secret values in that box's own database und
 (not encrypted, owner-only file permissions) until the box is removed (`cbox down`/`-f`). `cbox up --secret NAME` uses a
 stored secret (a missing name fails; there is no fallback to a host env var), and `gh`/`gh_basic`
 are reserved names. See `docs/design/secrets.md`.
+
+Profiles are named bundles of `cbox up` choices (secret names, image, memory, cpus, disk size) kept in
+`~/.config/cbox/profiles.toml` (or `$XDG_CONFIG_HOME/cbox/`), managed with
+`cbox profile create|list|edit|delete|validate` and applied with `cbox up --profile NAME`. There is no
+inheritance: a profile is just its own fields, and `up` flags override its image/memory/cpus/disk size and `--secret` adds to its secrets. The file is created on first
+run with an empty `default` profile; `cbox profile validate [NAME]` checks it. A resumed box warns when its
+profile has changed since creation or no longer validates (a new box fails on an invalid profile). Profiles hold secret names only, never values or hosts. See `docs/design/profiles.md`.
 
 `build`, `build-image`, `build-base`, and `build-local` are variadic: everything after the recipe name is
 forwarded verbatim to `docker build` (`--pull`, `--progress=plain` and friends all work). `build`

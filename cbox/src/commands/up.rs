@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use boxlite::{BoxCommand, BoxliteOptions, BoxliteRuntime, LiteBox};
 
-use crate::{attach, boxopts, config, env, envfile, naming, secrets, secretstore, sidecar};
+use crate::{attach, boxopts, config, env, envfile, naming, profiles, secrets, secretstore, sidecar};
 
 pub struct UpArgs {
     pub name: Option<String>,
@@ -15,7 +15,8 @@ pub struct UpArgs {
     pub cwd_mount: bool,
     pub volumes: Vec<String>,
     pub env_flags: Vec<String>,
-    pub image: String,
+    pub image: Option<String>,
+    pub profile: Option<String>,
     pub config: Option<PathBuf>,
     pub secret_flags: Vec<String>,
     pub env_file: Option<PathBuf>,
@@ -43,13 +44,40 @@ pub async fn run(args: UpArgs) -> Result<()> {
         envfile::apply(path);
     }
 
+    // Profile first: a bad profiles.toml or profile aborts before any box work.
+    // No config dir (HOME and XDG_CONFIG_HOME unset) is an empty `default`, not an error.
+    let profiles_file = config::profiles_path();
+    let old_sidecar = sidecar::read(&config::box_home(&name));
+    let prepared = profiles::prepare_up(
+        profiles_file.as_deref(),
+        args.profile.as_deref(),
+        old_sidecar.as_ref().and_then(|s| s.profile.as_ref()).map(|s| s.name.as_str()),
+        // A sidecar means a box to resume (the safety net after get_or_create covers a stale one).
+        old_sidecar.is_some() && !args.force,
+        &profiles::Profile {
+            secrets: args.secret_flags.clone(),
+            image: args.image.clone(),
+            cpus: args.cpus,
+            memory: args.memory_gb,
+            disk_size: args.disk_size_gb,
+        },
+        || {
+            let index = config::secrets_index_path().context("cannot locate config directory for the secrets index")?;
+            Ok(crate::secretstore::Index::load(&index)?.names)
+        },
+    )?;
+    for w in &prepared.check.warnings {
+        eprintln!("{w}");
+    }
+    let (resolved_profile, check) = (&prepared.resolved, &prepared.check);
+
     // Secrets first: their source variables must be withheld from passthrough.
     let mut specs = Vec::new();
     if secrets::has_github_token() {
         specs.push(secrets::github_spec());
     }
     // The store opens only when a bare name exists; all bare names are read in one call.
-    specs.extend(secrets::specs_from_flags(&args.secret_flags, secretstore::open_default)?);
+    specs.extend(secrets::specs_from_flags(&resolved_profile.secrets, secretstore::open_default)?);
     secrets::check_unique_env(&specs)?;
     let built = secrets::build(&specs)?;
     let has_github = specs.iter().any(|s| s.name == "gh");
@@ -107,14 +135,14 @@ pub async fn run(args: UpArgs) -> Result<()> {
     }
 
     let flags = boxopts::UpFlags {
-        image: args.image,
+        image: resolved_profile.image.clone(),
         cwd_mount: args.cwd_mount,
         volumes: args.volumes,
         cmd,
         invocation_dir: cwd,
-        disk_size_gb: args.disk_size_gb,
-        memory_gb: args.memory_gb,
-        cpus: args.cpus,
+        disk_size_gb: resolved_profile.disk_size_gb,
+        memory_gb: resolved_profile.memory_gb,
+        cpus: resolved_profile.cpus,
         detach: args.detach,
     };
     let options = boxopts::build(&flags, built.secrets, plain)?;
@@ -130,11 +158,19 @@ pub async fn run(args: UpArgs) -> Result<()> {
         .await
         .context("failed to create or reuse the box")?;
 
+    if let (true, Some(error)) = (created, &check.downgraded) {
+        // The sidecar outlived its box: this new box came from a config with problems
+        // downgraded for a resume. Remove it and fail as a new box would have.
+        drop(litebox);
+        let _ = runtime.remove(&name, true).await;
+        anyhow::bail!("{error}");
+    }
+
     if created {
         // Best-effort, like the git bootstrap below: `cbox list` losing the
         // origin column for this one box is far better than `cbox up`
         // failing over a metadata write.
-        if let Err(e) = sidecar::write(&home, &flags.invocation_dir, &secret_hashes) {
+        if let Err(e) = sidecar::write(&home, &flags.invocation_dir, &secret_hashes, Some(prepared.snapshot.clone())) {
             eprintln!(
                 "cbox: warning: could not record this box's origin ({e}); \
                  `cbox list` won't show a directory for it."
@@ -165,6 +201,10 @@ pub async fn run(args: UpArgs) -> Result<()> {
                      the box keeps the OLD setting(s) until you run with -f/--force to recreate it.",
                     changed.join(", ")
                 );
+            }
+            let new = &prepared.snapshot;
+            if let Some(w) = profiles::resume_warning(existing.profile.as_ref(), new, args.profile.as_deref()) {
+                eprintln!("{w}");
             }
         }
     }

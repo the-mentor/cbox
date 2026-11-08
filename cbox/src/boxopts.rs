@@ -99,6 +99,26 @@ pub fn parse_volume(s: &str) -> Result<VolumeSpec> {
     }
 }
 
+/// Limits shared by the `up` flags and profile values.
+/// 0 is rejected rather than passed through: BoxOptions silently ignores a disk size
+/// smaller than the base image, so `--disk-size 0` would look accepted but do nothing.
+/// No upper bound: BoxLite fails loudly on a size the host can't back.
+pub fn check_resources(disk_size_gb: Option<u64>, memory_gb: Option<u32>, cpus: Option<u8>) -> Result<()> {
+    if disk_size_gb == Some(0) {
+        bail!("--disk-size must be greater than 0");
+    }
+    if memory_gb == Some(0) {
+        bail!("--memory must be greater than 0");
+    }
+    if cpus == Some(0) {
+        bail!("--cpus must be greater than 0");
+    }
+    if let Some(m) = memory_gb.filter(|m| m.checked_mul(1024).is_none()) {
+        bail!("--memory {m} is too large");
+    }
+    Ok(())
+}
+
 pub fn build(
     flags: &UpFlags,
     secrets: Vec<Secret>,
@@ -117,28 +137,9 @@ pub fn build(
         volumes.push(parse_volume(v)?);
     }
 
-    // 0 is rejected here rather than passed through: BoxOptions silently
-    // ignores any value smaller than the base image, so `--disk-size 0`
-    // would look accepted but do nothing — worth a clear error instead of a
-    // quiet no-op. No upper bound: an absurdly large value is the user's
-    // problem (and boxlite/the host will fail loudly enough on it).
-    if flags.disk_size_gb == Some(0) {
-        bail!("--disk-size must be greater than 0");
-    }
-
-    // Same reasoning as --disk-size above: 0 is a clear mistake worth an
-    // error, and no upper bound -- BoxLite fails loudly on a size the host
-    // can't back.
-    if flags.memory_gb == Some(0) {
-        bail!("--memory must be greater than 0");
-    }
-    if flags.cpus == Some(0) {
-        bail!("--cpus must be greater than 0");
-    }
+    check_resources(flags.disk_size_gb, flags.memory_gb, flags.cpus)?;
     let memory_gb = flags.memory_gb.unwrap_or(MEMORY_GB);
-    let Some(memory_mib) = memory_gb.checked_mul(1024) else {
-        bail!("--memory {memory_gb} is too large");
-    };
+    let memory_mib = memory_gb * 1024; // check_resources rejected overflow
 
     Ok(BoxOptions {
         rootfs: RootfsSpec::Image(flags.image.clone()),
@@ -385,5 +386,22 @@ mod tests {
         let opts = build(&flags(), vec![s], vec![("A".into(), "1".into())]).unwrap();
         assert_eq!(opts.secrets.len(), 1);
         assert!(opts.env.contains(&("A".to_string(), "1".to_string())));
+    }
+
+    #[test]
+    fn check_resources_rejects_zero_values() {
+        assert!(check_resources(None, None, None).is_ok());
+        let e = |d, m, c| check_resources(d, m, c).unwrap_err().to_string();
+        assert_eq!(e(Some(0), None, None), "--disk-size must be greater than 0");
+        assert_eq!(e(None, Some(0), None), "--memory must be greater than 0");
+        assert_eq!(e(None, None, Some(0)), "--cpus must be greater than 0");
+        assert_eq!(e(None, Some(u32::MAX), None), format!("--memory {} is too large", u32::MAX));
+    }
+
+    #[test]
+    fn build_still_rejects_zero_cpus_with_the_same_message() {
+        let mut f = flags();
+        f.cpus = Some(0);
+        assert_eq!(build(&f, vec![], vec![]).unwrap_err().to_string(), "--cpus must be greater than 0");
     }
 }

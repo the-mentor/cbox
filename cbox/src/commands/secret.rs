@@ -8,7 +8,7 @@ use std::io::{self, IsTerminal, Read, Write};
 #[derive(Subcommand)]
 pub enum SecretCmd {
     /// Store a secret in the OS secret store.
-    #[command(after_help = "\
+    #[command(arg_required_else_help = true, after_help = "\
 The value is read from a hidden prompt or from stdin and is never a command-line argument.
 
 Examples:
@@ -27,7 +27,7 @@ Examples:
     /// List stored secrets (never their values).
     List,
     /// Change a secret's hosts or variable name, or replace its value.
-    #[command(after_help = "\
+    #[command(arg_required_else_help = true, after_help = "\
 With no flags, the value is replaced (hidden prompt or stdin). With any flag, the value is left unchanged.
 
 Examples:
@@ -51,6 +51,7 @@ Examples:
         env: Option<String>,
     },
     /// Delete a secret.
+    #[command(arg_required_else_help = true)]
     Delete {
         name: String,
         /// Skip the confirmation prompt.
@@ -84,11 +85,11 @@ pub fn read_value(
     Ok(v)
 }
 
-fn confirm_delete(name: &str, yes: bool, ask: &mut dyn FnMut(&str) -> io::Result<String>) -> Result<bool> {
+pub(crate) fn confirm_delete(kind: &str, name: &str, yes: bool, ask: &mut dyn FnMut(&str) -> io::Result<String>) -> Result<bool> {
     if yes {
         return Ok(true);
     }
-    let a = ask(&format!("Delete secret \"{name}\"? [y/N] "))?;
+    let a = ask(&format!("Delete {kind} \"{name}\"? [y/N] "))?;
     Ok(matches!(a.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
 }
 
@@ -153,6 +154,19 @@ fn run_edit(
     secretstore::edit(store, index, name, c)
 }
 
+/// Stderr warning for `secret delete`, or `None` when no profile uses the secret.
+fn delete_warning(profiles: &Result<crate::profiles::Profiles>, name: &str) -> Option<String> {
+    match profiles {
+        Ok(p) => {
+            let used = crate::profiles::profiles_using(p, name);
+            (!used.is_empty()).then(|| {
+                format!("cbox: warning: secret \"{name}\" is used by profile(s): {}. A new box from them will fail at \"cbox up\" (a resumed one only warns) until you remove it from them.", used.join(", "))
+            })
+        }
+        Err(e) => Some(format!("cbox: warning: could not check profiles.toml for uses of this secret ({e:#}).")),
+    }
+}
+
 pub fn run(cmd: SecretCmd) -> Result<()> {
     let store = open_default()?;
     let index = secrets_index_path().context("cannot locate config directory for the secrets index")?;
@@ -193,7 +207,10 @@ pub fn run(cmd: SecretCmd) -> Result<()> {
             if !secretstore::exists(&*store, &index, &name)? {
                 bail!("secret {name:?} not found");
             }
-            let ok = confirm_delete(&name, yes, &mut |q| {
+            if let Some(w) = crate::config::profiles_path().and_then(|p| delete_warning(&crate::profiles::Profiles::load(&p), &name)) {
+                eprintln!("{w}");
+            }
+            let ok = confirm_delete("secret", &name, yes, &mut |q| {
                 print!("{q}");
                 io::stdout().flush()?;
                 let mut s = String::new();
@@ -331,6 +348,14 @@ mod tests {
     }
 
     #[test]
+    fn no_args_prints_help() {
+        for c in ["create", "edit", "delete"] {
+            let k = W::try_parse_from(["w", c]).err().unwrap().kind();
+            assert_eq!(k, clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand, "{c}");
+        }
+    }
+
+    #[test]
     fn create_requires_env_and_host() {
         let e = W::try_parse_from(["w", "create", "n", "--host", "a.com"]).err().unwrap().to_string();
         assert!(e.contains("--env"), "{e}");
@@ -352,16 +377,31 @@ mod tests {
     #[test]
     fn delete_without_y_needs_a_yes_answer() {
         let ask = |a: &'static str| move |_: &str| Ok(a.to_string());
-        assert!(!confirm_delete("n", false, &mut ask("\n")).unwrap());
-        assert!(!confirm_delete("n", false, &mut ask("no\n")).unwrap());
-        assert!(confirm_delete("n", false, &mut ask("y\n")).unwrap());
-        assert!(confirm_delete("n", false, &mut ask("YES\n")).unwrap());
-        assert!(confirm_delete("n", true, &mut |_| panic!("must not prompt")).unwrap());
+        assert!(!confirm_delete("secret", "n", false, &mut ask("\n")).unwrap());
+        assert!(!confirm_delete("secret", "n", false, &mut ask("no\n")).unwrap());
+        assert!(confirm_delete("secret", "n", false, &mut ask("y\n")).unwrap());
+        assert!(confirm_delete("secret", "n", false, &mut ask("YES\n")).unwrap());
+        assert!(confirm_delete("secret", "n", true, &mut |_| panic!("must not prompt")).unwrap());
     }
 
     #[test]
     fn confirm_delete_does_not_delete_on_eof() {
-        assert!(!confirm_delete("n", false, &mut |_| Ok(String::new())).unwrap());
+        assert!(!confirm_delete("secret", "n", false, &mut |_| Ok(String::new())).unwrap());
+    }
+
+    #[test]
+    fn delete_warning_covers_used_unused_and_load_failure() {
+        let mut m = std::collections::BTreeMap::new();
+        m.insert("b".to_string(), crate::profiles::Profile { secrets: vec!["k".into()], ..Default::default() });
+        m.insert("a".to_string(), crate::profiles::Profile { secrets: vec!["k".into()], ..Default::default() });
+        let p = Ok(crate::profiles::Profiles(m));
+        assert_eq!(
+            delete_warning(&p, "k").as_deref(),
+            Some("cbox: warning: secret \"k\" is used by profile(s): a, b. A new box from them will fail at \"cbox up\" (a resumed one only warns) until you remove it from them.")
+        );
+        assert_eq!(delete_warning(&p, "other"), None);
+        let e = Err(anyhow::anyhow!("boom").context("reading /x/profiles.toml"));
+        assert_eq!(delete_warning(&e, "k").as_deref(), Some("cbox: warning: could not check profiles.toml for uses of this secret (reading /x/profiles.toml: boom)."));
     }
 
     fn row(name: &str, state: RowState) -> ListRow {
