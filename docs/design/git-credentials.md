@@ -1,5 +1,7 @@
 # Git and GitHub credentials from stored secrets
 
+Status: implemented in PR (draft) on branch `feat/git-credentials-from-secrets`.
+
 ## Intent
 
 Today GitHub access in a box is hard-coded: if the host shell has `GH_TOKEN` or

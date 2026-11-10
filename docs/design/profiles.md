@@ -97,7 +97,7 @@ valid inside a profile.
 
 ### Secrets inside a profile
 
-- Only stored secrets can be named. `gh` and `gh_basic` are reserved and rejected.
+- Only stored secrets can be named. Names ending in `_basic` are reserved and rejected.
 - `profile create` and `profile edit` check each named secret exists, using the names-only
   index (`secrets.json`), not the OS store. A missing name fails the command and
   nothing is written.
@@ -186,7 +186,7 @@ cbox profile validate [NAME]
 - `list` prints every profile with its contents, `[default]` first, fields in the fixed order above (`image`, each `env:` line, `secrets`, `cpus`, `memory`, `disk size`).
 - `validate` checks `profiles.toml` without starting anything: it parses the file
   (syntax, unknown keys, wrong types), applies the flag limits to every value, rejects
-  `gh`/`gh_basic`, and checks that each named secret exists in the index. With NAME it
+  names ending in `_basic`, and checks that each named secret exists in the index. With NAME it
   checks that profile only; without, all of them. It reports every problem it finds
   (not only the first), names the profile and field, and exits 0 when clean, non-zero
   otherwise. It reads no secret values and never writes. A missing file is valid (empty

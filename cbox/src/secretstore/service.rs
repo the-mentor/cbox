@@ -1,4 +1,4 @@
-use super::{Index, SecretStore, StoredSecret, check_size, validate_env, validate_name};
+use super::{Index, SecretStore, StoredSecret, check_size, validate_env, validate_name, validate_shape};
 use anyhow::{Result, anyhow, bail};
 use std::path::Path;
 
@@ -9,7 +9,7 @@ pub struct ListRow {
 
 #[derive(Debug, PartialEq)]
 pub enum RowState {
-    Ok { hosts: Vec<String>, env: String },
+    Ok { hosts: Vec<String>, env: Option<String>, git: bool },
     /// The index has the name but the store entry is gone.
     Missing,
     /// The store entry exists but cannot be read or parsed.
@@ -40,6 +40,7 @@ pub fn exists(store: &dyn SecretStore, index_path: &Path, name: &str) -> Result<
 
 pub fn create(store: &dyn SecretStore, index_path: &Path, name: &str, s: StoredSecret) -> Result<()> {
     check_absent(store, index_path, name)?;
+    validate_shape(&s)?;
     let mut index = Index::load(index_path)?;
     let json = s.to_json();
     check_size(&json, store.max_entry_bytes())?;
@@ -61,7 +62,7 @@ pub fn list(store: &dyn SecretStore, index_path: &Path) -> Result<Vec<ListRow>> 
         .zip(results)
         .map(|(name, result)| {
             let state = match result {
-                Ok(Some(s)) => RowState::Ok { hosts: s.hosts, env: s.env },
+                Ok(Some(s)) => RowState::Ok { hosts: s.hosts, env: s.env, git: s.git },
                 Ok(None) => RowState::Missing,
                 Err(_) => RowState::Unreadable,
             };
@@ -78,10 +79,14 @@ pub struct HostChange {
     pub remove: Vec<String>,
 }
 
+#[derive(Default)]
 pub struct EditChanges {
     pub value: Option<String>,
     pub hosts: HostChange,
     pub env: Option<String>,
+    pub user: Option<String>,
+    /// `Some(false)` turns git off and clears the username.
+    pub git: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -123,8 +128,18 @@ pub fn edit(store: &dyn SecretStore, index_path: &Path, name: &str, c: EditChang
     }
     if let Some(e) = c.env {
         validate_env(&e)?;
-        s.env = e;
+        s.env = Some(e);
     }
+    if let Some(g) = c.git {
+        s.git = g;
+        if !g {
+            s.user = None;
+        }
+    }
+    if let Some(u) = c.user {
+        s.user = Some(u);
+    }
+    validate_shape(&s).map_err(|e| anyhow!("{e}; secret {name:?} was not changed"))?;
     if let Some(v) = c.value {
         s.value = v;
     }
@@ -187,7 +202,7 @@ mod tests {
     }
 
     fn sec() -> StoredSecret {
-        StoredSecret { value: "sk-TOPSECRET".into(), hosts: vec!["api.openai.com".into()], env: "OPENAI_API_KEY".into() }
+        StoredSecret { value: "sk-TOPSECRET".into(), hosts: vec!["api.openai.com".into()], env: Some("OPENAI_API_KEY".into()), ..Default::default() }
     }
 
     #[test]
@@ -198,7 +213,7 @@ mod tests {
         let rows = list(&st, &d.index()).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "openai");
-        assert_eq!(rows[0].state, RowState::Ok { hosts: vec!["api.openai.com".into()], env: "OPENAI_API_KEY".into() });
+        assert_eq!(rows[0].state, RowState::Ok { hosts: vec!["api.openai.com".into()], env: Some("OPENAI_API_KEY".into()), git: false });
     }
 
     #[test]
@@ -383,10 +398,10 @@ mod tests {
     }
 
     fn put_sec(st: &KeyringStore, hosts: &[&str]) {
-        st.put("k", &StoredSecret { value: "v1".into(), hosts: hosts.iter().map(|s| s.to_string()).collect(), env: "E".into() }).unwrap();
+        st.put("k", &StoredSecret { value: "v1".into(), hosts: hosts.iter().map(|s| s.to_string()).collect(), env: Some("E".into()), ..Default::default() }).unwrap();
     }
     fn ch(hosts: HostChange) -> EditChanges {
-        EditChanges { value: None, hosts, env: None }
+        EditChanges { value: None, hosts, env: None, ..Default::default() }
     }
     fn v(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| s.to_string()).collect()
@@ -437,10 +452,10 @@ mod tests {
         let _l = crate::test_env_lock::lock();
         let (st, d) = setup(None);
         put_sec(&st, &["a.com"]);
-        edit(&st, &d.index(), "k", EditChanges { value: Some("v2".into()), hosts: HostChange::default(), env: Some("NEW".into()) }).unwrap();
+        edit(&st, &d.index(), "k", EditChanges { value: Some("v2".into()), hosts: HostChange::default(), env: Some("NEW".into()), ..Default::default() }).unwrap();
         let s = st.get("k").unwrap().unwrap();
-        assert_eq!((s.value.as_str(), s.env.as_str()), ("v2", "NEW"));
-        assert!(edit(&st, &d.index(), "k", EditChanges { value: None, hosts: HostChange::default(), env: Some("1x".into()) }).is_err());
+        assert_eq!((s.value.as_str(), s.env.as_deref().unwrap()), ("v2", "NEW"));
+        assert!(edit(&st, &d.index(), "k", EditChanges { value: None, hosts: HostChange::default(), env: Some("1x".into()), ..Default::default() }).is_err());
     }
 
     #[test]
@@ -448,7 +463,7 @@ mod tests {
         let _l = crate::test_env_lock::lock();
         let (st, d) = setup(Some(100));
         put_sec(&st, &["a.com"]);
-        let e = edit(&st, &d.index(), "k", EditChanges { value: Some("x".repeat(200)), hosts: HostChange::default(), env: None }).unwrap_err().to_string();
+        let e = edit(&st, &d.index(), "k", EditChanges { value: Some("x".repeat(200)), hosts: HostChange::default(), env: None, ..Default::default() }).unwrap_err().to_string();
         assert!(e.contains("limit") && !e.contains("xxxx"), "{e}");
         assert_eq!(st.get("k").unwrap().unwrap().value, "v1");
     }
@@ -490,7 +505,7 @@ mod tests {
         put_sec(&st, &["a.com"]);
         std::fs::create_dir_all(&d.0).unwrap();
         std::fs::write(d.0.join("cbox"), "x").unwrap(); // parent of the index is a file
-        let c = EditChanges { value: Some("sk-NEWVALUE".into()), hosts: HostChange::default(), env: None };
+        let c = EditChanges { value: Some("sk-NEWVALUE".into()), hosts: HostChange::default(), env: None, ..Default::default() };
         let e = format!("{:#}", edit(&st, &d.index(), "k", c).unwrap_err());
         assert!(e.contains("updated") && !e.contains("NEWVALUE"), "{e}");
         assert_eq!(st.get("k").unwrap().unwrap().value, "sk-NEWVALUE");
@@ -582,5 +597,30 @@ mod tests {
         assert_eq!((rows[0].name.as_str(), &rows[0].state), ("bad", &RowState::Unreadable));
         assert_eq!(rows[1].name, "good");
         assert!(matches!(rows[1].state, RowState::Ok { .. }));
+    }
+
+    #[test]
+    fn edit_turns_git_on_only_with_a_user_and_off_forgets_the_user() {
+        let _l = crate::test_env_lock::lock();
+        let (st, d) = setup(None);
+        create(&st, &d.index(), "k", sec()).unwrap();
+        let e = edit(&st, &d.index(), "k", EditChanges { git: Some(true), ..Default::default() }).unwrap_err().to_string();
+        assert!(e.contains("--user") && e.contains("not changed"), "{e}");
+        assert!(!st.get("k").unwrap().unwrap().git);
+        edit(&st, &d.index(), "k", EditChanges { git: Some(true), user: Some("x-access-token".into()), ..Default::default() }).unwrap();
+        let s = st.get("k").unwrap().unwrap();
+        assert_eq!((s.git, s.user.as_deref()), (true, Some("x-access-token")));
+        edit(&st, &d.index(), "k", EditChanges { git: Some(false), ..Default::default() }).unwrap();
+        let s = st.get("k").unwrap().unwrap();
+        assert_eq!((s.git, s.user), (false, None));
+    }
+
+    #[test]
+    fn create_rejects_a_secret_that_would_never_reach_the_box() {
+        let _l = crate::test_env_lock::lock();
+        let (st, d) = setup(None);
+        let s = StoredSecret { value: "v".into(), hosts: vec!["a.com".into()], ..Default::default() };
+        assert!(create(&st, &d.index(), "k", s).unwrap_err().to_string().contains("--env, --git"));
+        assert!(st.get("k").unwrap().is_none());
     }
 }

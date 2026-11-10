@@ -14,15 +14,22 @@ The value is read from a hidden prompt or from stdin and is never a command-line
 Examples:
   cbox secret create openai --host api.openai.com --env OPENAI_API_KEY
   cbox secret create openai --host api.openai.com,api.example.com --env OPENAI_API_KEY
+  cbox secret create github_work --host github.com,api.github.com,gist.github.com --env GH_TOKEN --git --user x-access-token
   pbpaste | cbox secret create openai --host api.openai.com --env OPENAI_API_KEY")]
     Create {
         name: String,
         /// Comma-separated hosts the secret may be sent to.
         #[arg(long)]
         host: String,
-        /// Environment variable name the box sees.
+        /// Environment variable name the box sees (optional with --git).
         #[arg(long)]
-        env: String,
+        env: Option<String>,
+        /// Also configure git in the box to use this secret for every --host (Basic auth over https).
+        #[arg(long, requires = "user")]
+        git: bool,
+        /// Basic-auth username used with --git (e.g. x-access-token for GitHub, oauth2 for GitLab; may be empty).
+        #[arg(long, requires = "git")]
+        user: Option<String>,
     },
     /// List stored secrets (never their values).
     List,
@@ -49,6 +56,15 @@ Examples:
         /// New environment variable name the box sees.
         #[arg(long)]
         env: Option<String>,
+        /// Turn git configuration on for this secret (needs --user unless one is already set).
+        #[arg(long, conflicts_with = "no_git")]
+        git: bool,
+        /// Turn git configuration off and forget the username.
+        #[arg(long)]
+        no_git: bool,
+        /// New Basic-auth username for --git.
+        #[arg(long)]
+        user: Option<String>,
     },
     /// Delete a secret.
     #[command(arg_required_else_help = true)]
@@ -99,6 +115,8 @@ fn edit_changes(
     add: Option<&str>,
     remove: Option<&str>,
     env: Option<&str>,
+    user: Option<&str>,
+    git: Option<bool>,
     read: &mut dyn FnMut() -> Result<String>,
 ) -> Result<EditChanges> {
     if let Some(e) = env {
@@ -110,9 +128,9 @@ fn edit_changes(
         add: list(add)?.unwrap_or_default(),
         remove: list(remove)?.unwrap_or_default(),
     };
-    let flagged = env.is_some() || host.is_some() || add.is_some() || remove.is_some();
+    let flagged = env.is_some() || host.is_some() || add.is_some() || remove.is_some() || user.is_some() || git.is_some();
     let value = if flagged { None } else { Some(read()?) };
-    Ok(EditChanges { value, hosts, env: env.map(String::from) })
+    Ok(EditChanges { value, hosts, env: env.map(String::from), user: user.map(String::from), git })
 }
 
 fn hosts_line(o: &EditOutcome) -> Option<String> {
@@ -120,18 +138,18 @@ fn hosts_line(o: &EditOutcome) -> Option<String> {
 }
 
 fn format_list(rows: &[ListRow], label: &str) -> String {
-    let cells: Vec<[String; 4]> = rows
+    let cells: Vec<[String; 5]> = rows
         .iter()
         .map(|r| match &r.state {
-            RowState::Ok { hosts, env } => [r.name.clone(), hosts.join(","), env.clone(), label.into()],
-            RowState::Missing => [r.name.clone(), "(missing value)".into(), "(missing value)".into(), label.into()],
-            RowState::Unreadable => [r.name.clone(), format!("(unreadable: run cbox secret delete {})", r.name), "-".into(), label.into()],
+            RowState::Ok { hosts, env, git } => [r.name.clone(), hosts.join(","), env.clone().unwrap_or_else(|| "-".into()), if *git { "yes" } else { "-" }.into(), label.into()],
+            RowState::Missing => [r.name.clone(), "(missing value)".into(), "(missing value)".into(), "-".into(), label.into()],
+            RowState::Unreadable => [r.name.clone(), format!("(unreadable: run cbox secret delete {})", r.name), "-".into(), "-".into(), label.into()],
         })
         .collect();
-    let head = ["NAME", "HOSTS", "ENV", "STORE"].map(String::from);
-    let w: Vec<usize> = (0..3).map(|i| cells.iter().chain([&head]).map(|r| r[i].len()).max().unwrap()).collect();
+    let head = ["NAME", "HOSTS", "ENV", "GIT", "STORE"].map(String::from);
+    let w: Vec<usize> = (0..4).map(|i| cells.iter().chain([&head]).map(|r| r[i].len()).max().unwrap()).collect();
     [&head].into_iter().chain(&cells).fold(String::new(), |mut out, r| {
-        out += &format!("{:<w0$}  {:<w1$}  {:<w2$}  {}\n", r[0], r[1], r[2], r[3], w0 = w[0], w1 = w[1], w2 = w[2]);
+        out += &format!("{:<w0$}  {:<w1$}  {:<w2$}  {:<w3$}  {}\n", r[0], r[1], r[2], r[3], r[4], w0 = w[0], w1 = w[1], w2 = w[2], w3 = w[3]);
         out
     })
 }
@@ -146,11 +164,12 @@ fn run_edit(
     store: &dyn SecretStore,
     index: &Path,
     name: &str,
-    [host, add, remove, env]: [Option<&str>; 4],
+    [host, add, remove, env, user]: [Option<&str>; 5],
+    git: Option<bool>,
     read: &mut dyn FnMut() -> Result<String>,
 ) -> Result<EditOutcome> {
     secretstore::check_editable(store, name)?;
-    let c = edit_changes(host, add, remove, env, read)?;
+    let c = edit_changes(host, add, remove, env, user, git, read)?;
     secretstore::edit(store, index, name, c)
 }
 
@@ -171,29 +190,34 @@ pub fn run(cmd: SecretCmd) -> Result<()> {
     let store = open_default()?;
     let index = secrets_index_path().context("cannot locate config directory for the secrets index")?;
     match cmd {
-        SecretCmd::Create { name, host, env } => {
+        SecretCmd::Create { name, host, env, git, user } => {
             validate_name(&name)?;
             let hosts = parse_hosts(&host)?;
-            validate_env(&env)?;
+            if let Some(e) = &env {
+                validate_env(e)?;
+            }
+            // Checked before the value prompt so a bad flag combination does not cost a paste.
+            secretstore::validate_shape(&StoredSecret { hosts: hosts.clone(), env: env.clone(), user: user.clone(), git, ..Default::default() })?;
             secretstore::check_absent(&*store, &index, &name)?;
             let value = read_value(
                 io::stdin().is_terminal(),
                 &mut io::stdin(),
                 &mut || rpassword::prompt_password(prompt("Value for", &name)),
             )?;
-            secretstore::create(&*store, &index, &name, StoredSecret { value, hosts: hosts.clone(), env })?;
+            secretstore::create(&*store, &index, &name, StoredSecret { value, hosts: hosts.clone(), env, user, git })?;
             println!("Saved \"{name}\" in {}, allowed hosts: {}", store.label(), hosts.join(", "));
         }
         SecretCmd::List => {
             let rows = secretstore::list(&*store, &index)?;
             if rows.is_empty() {
-                println!("No secrets yet. Add one with `cbox secret create <NAME> --host <HOSTS> --env <VAR>`.");
+                println!("No secrets yet. Add one with `cbox secret create <NAME> --host <HOSTS> --env <VAR>` (add `--git --user <USER>` for git over https).");
                 return Ok(());
             }
             print!("{}", format_list(&rows, store.label()));
         }
-        SecretCmd::Edit { name, host, add_host, remove_host, env } => {
-            let o = run_edit(&*store, &index, &name, [host.as_deref(), add_host.as_deref(), remove_host.as_deref(), env.as_deref()], &mut || {
+        SecretCmd::Edit { name, host, add_host, remove_host, env, git, no_git, user } => {
+            let git = if no_git { Some(false) } else { git.then_some(true) };
+            let o = run_edit(&*store, &index, &name, [host.as_deref(), add_host.as_deref(), remove_host.as_deref(), env.as_deref(), user.as_deref()], git, &mut || {
                 read_value(io::stdin().is_terminal(), &mut io::stdin(), &mut || {
                     rpassword::prompt_password(prompt("New value for", &name))
                 })
@@ -252,10 +276,10 @@ mod tests {
             if self.corrupt.contains(&name) {
                 bail!("secret {name:?} in fake: invalid stored secret");
             }
-            Ok(self.m.borrow().get(name).map(|s| StoredSecret { value: s.value.clone(), hosts: s.hosts.clone(), env: s.env.clone() }))
+            Ok(self.m.borrow().get(name).map(|s| StoredSecret { value: s.value.clone(), hosts: s.hosts.clone(), env: s.env.clone(), user: s.user.clone(), git: s.git }))
         }
         fn put(&self, name: &str, s: &StoredSecret) -> Result<()> {
-            self.m.borrow_mut().insert(name.into(), StoredSecret { value: s.value.clone(), hosts: s.hosts.clone(), env: s.env.clone() });
+            self.m.borrow_mut().insert(name.into(), StoredSecret { value: s.value.clone(), hosts: s.hosts.clone(), env: s.env.clone(), user: s.user.clone(), git: s.git });
             Ok(())
         }
         fn delete(&self, name: &str) -> Result<bool> {
@@ -268,7 +292,7 @@ mod tests {
     }
     fn seeded() -> Fake {
         let f = Fake { corrupt: vec!["bad"], ..Default::default() };
-        f.put("openai", &StoredSecret { value: "old".into(), hosts: vec!["a.com".into()], env: "K".into() }).unwrap();
+        f.put("openai", &StoredSecret { value: "old".into(), hosts: vec!["a.com".into()], env: Some("K".into()), ..Default::default() }).unwrap();
         f
     }
     fn must_not_read() -> Result<String> {
@@ -288,9 +312,9 @@ mod tests {
             ("Bad_Name", ""),
             ("gh", ""),
         ] {
-            let e = run_edit(&st, &index, name, [None; 4], &mut must_not_read).unwrap_err().to_string();
+            let e = run_edit(&st, &index, name, [None; 5], None, &mut must_not_read).unwrap_err().to_string();
             assert!(e.contains(want) && !e.contains("LEAKME"), "{name}: {e}");
-            run_edit(&st, &index, name, [None, None, None, Some("E")], &mut must_not_read).unwrap_err();
+            run_edit(&st, &index, name, [None, None, None, Some("E"), None], None, &mut must_not_read).unwrap_err();
         }
         let _ = std::fs::remove_file(&index);
     }
@@ -300,15 +324,15 @@ mod tests {
         let st = seeded();
         let index = idx("ok");
         let mut calls = 0;
-        run_edit(&st, &index, "openai", [None; 4], &mut || {
+        run_edit(&st, &index, "openai", [None; 5], None, &mut || {
             calls += 1;
             Ok("new".into())
         })
         .unwrap();
         assert_eq!((calls, st.get("openai").unwrap().unwrap().value.as_str()), (1, "new"));
-        run_edit(&st, &index, "openai", [None, None, None, Some("E")], &mut must_not_read).unwrap();
+        run_edit(&st, &index, "openai", [None, None, None, Some("E"), None], None, &mut must_not_read).unwrap();
         let s = st.get("openai").unwrap().unwrap();
-        assert_eq!((s.value.as_str(), s.env.as_str()), ("new", "E"));
+        assert_eq!((s.value.as_str(), s.env.as_deref().unwrap()), ("new", "E"));
         let _ = std::fs::remove_file(&index);
     }
 
@@ -356,11 +380,21 @@ mod tests {
     }
 
     #[test]
-    fn create_requires_env_and_host() {
-        let e = W::try_parse_from(["w", "create", "n", "--host", "a.com"]).err().unwrap().to_string();
-        assert!(e.contains("--env"), "{e}");
+    fn create_requires_host_and_pairs_git_with_user() {
         let e = W::try_parse_from(["w", "create", "n", "--env", "X"]).err().unwrap().to_string();
         assert!(e.contains("--host"), "{e}");
+        // --env is optional on the command line; the at-least-one rule lives in `validate_shape`.
+        W::try_parse_from(["w", "create", "n", "--host", "a.com"]).unwrap();
+        W::try_parse_from(["w", "create", "n", "--host", "a.com", "--git", "--user", ""]).unwrap();
+        assert!(W::try_parse_from(["w", "create", "n", "--host", "a.com", "--git"]).is_err());
+        assert!(W::try_parse_from(["w", "create", "n", "--host", "a.com", "--user", "u"]).is_err());
+    }
+
+    #[test]
+    fn edit_can_turn_git_on_and_off_and_not_both() {
+        assert!(W::try_parse_from(["w", "edit", "n", "--git", "--no-git"]).is_err());
+        let c = edit_changes(None, None, None, None, Some("u"), Some(true), &mut no_read).unwrap();
+        assert!(c.value.is_none() && c.git == Some(true) && c.user.as_deref() == Some("u"));
     }
 
     #[test]
@@ -370,7 +404,7 @@ mod tests {
         assert!(help.contains("Examples:"), "{help}");
         assert!(help.contains("never a command-line argument"), "{help}");
         let ex: Vec<_> = help.lines().filter(|l| l.contains("cbox secret create")).collect();
-        assert_eq!(ex.len(), 3, "{help}");
+        assert_eq!(ex.len(), 4, "{help}");
         assert!(ex.iter().all(|l| l.contains("--env")), "{help}");
     }
 
@@ -409,7 +443,7 @@ mod tests {
     }
 
     fn ok(hosts: &[&str], env: &str) -> RowState {
-        RowState::Ok { hosts: hosts.iter().map(|s| s.to_string()).collect(), env: env.into() }
+        RowState::Ok { hosts: hosts.iter().map(|s| s.to_string()).collect(), env: Some(env.into()), git: env == "K" }
     }
 
     #[test]
@@ -420,16 +454,16 @@ mod tests {
         );
         assert_eq!(
             out,
-            "NAME    HOSTS                                     ENV              STORE\n\
-             openai  a.com,b.com                               K                macOS Keychain\n\
-             x       (missing value)                           (missing value)  macOS Keychain\n\
-             bad     (unreadable: run cbox secret delete bad)  -                macOS Keychain\n"
+            "NAME    HOSTS                                     ENV              GIT  STORE\n\
+             openai  a.com,b.com                               K                yes  macOS Keychain\n\
+             x       (missing value)                           (missing value)  -    macOS Keychain\n\
+             bad     (unreadable: run cbox secret delete bad)  -                -    macOS Keychain\n"
         );
     }
 
     #[test]
     fn create_and_edit_validate_the_name_before_reading_the_value() {
-        for n in ["gh", "gh_basic", "Bad"] {
+        for n in ["x_basic", "gh_basic", "Bad"] {
             assert!(validate_name(n).is_err(), "{n}");
         }
         validate_name("ok").unwrap();
@@ -447,26 +481,26 @@ mod tests {
             (None, None, Some("a.com"), None),
             (None, None, None, Some("NEW")),
         ] {
-            let c = edit_changes(h, a, r, e, &mut no_read).unwrap();
+            let c = edit_changes(h, a, r, e, None, None, &mut no_read).unwrap();
             assert!(c.value.is_none());
         }
-        let c = edit_changes(None, Some("a.com, b.com"), None, Some("NEW"), &mut no_read).unwrap();
+        let c = edit_changes(None, Some("a.com, b.com"), None, Some("NEW"), None, None, &mut no_read).unwrap();
         assert!(c.hosts.add == ["a.com", "b.com"] && c.hosts.replace.is_none());
         assert_eq!(c.env.as_deref(), Some("NEW"));
-        assert!(edit_changes(None, None, None, Some("1bad"), &mut no_read).is_err());
+        assert!(edit_changes(None, None, None, Some("1bad"), None, None, &mut no_read).is_err());
     }
 
     #[test]
     fn edit_rejects_url_hosts_in_every_host_flag() {
         let u = Some("https://api.openai.com/v1");
-        assert!(edit_changes(u, None, None, None, &mut || Ok(String::new())).is_err());
-        assert!(edit_changes(None, u, None, None, &mut || Ok(String::new())).is_err());
-        assert!(edit_changes(None, None, u, None, &mut || Ok(String::new())).is_err());
+        assert!(edit_changes(u, None, None, None, None, None, &mut || Ok(String::new())).is_err());
+        assert!(edit_changes(None, u, None, None, None, None, &mut || Ok(String::new())).is_err());
+        assert!(edit_changes(None, None, u, None, None, None, &mut || Ok(String::new())).is_err());
     }
 
     #[test]
     fn edit_with_no_flags_replaces_the_value() {
-        let c = edit_changes(None, None, None, None, &mut || Ok("newval".into())).unwrap();
+        let c = edit_changes(None, None, None, None, None, None, &mut || Ok("newval".into())).unwrap();
         assert_eq!(c.value.as_deref(), Some("newval"));
         assert!(c.hosts.replace.is_none() && c.hosts.add.is_empty() && c.hosts.remove.is_empty() && c.env.is_none());
     }

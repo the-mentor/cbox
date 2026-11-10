@@ -32,7 +32,7 @@ MCP tools to the box.
 
 - **🔒 Real isolation:** each box is a BoxLite microVM; `cbox` embeds the BoxLite runtime, so
   there is no separate CLI to install.
-- **🔑 Secrets stay home:** `GH_TOKEN` becomes a placeholder in the box that a host-side proxy
+- **🔑 Secrets stay home:** a stored GitHub token becomes a placeholder in the box that a host-side proxy
   swaps for the real token on GitHub-bound traffic only; in keyed mode the gateway attaches
   `ANTHROPIC_API_KEY` so the VM never sees it.
 - **📦 One box per repo:** the box name comes from your git repo, boxes run side by side, and
@@ -87,8 +87,8 @@ Pick **one** set in `.env` (the template in `.env.example` explains each line):
 | API key, direct | `ANTHROPIC_API_KEY` | unset | yes |
 | API key, gateway-keyed | `ANTHROPIC_API_KEY` (cbox gives the box a placeholder `ANTHROPIC_AUTH_TOKEN`) | `http://host.boxlite.internal:15002/api` | **no**, the gateway attaches it |
 
-Optional on top: `GH_TOKEN` (a PAT that never enters the box, see [Credentials](#credentials-);
-the gateway's github MCP target also uses it directly),
+Optional on top: `GH_TOKEN` (used directly by the gateway's github MCP target; the box's own
+GitHub access comes from a stored secret, see [Credentials](#credentials-)),
 `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL`, `ANTHROPIC_MODEL`. Both gateway modes need
 `just gateway-up` running.
 
@@ -316,7 +316,7 @@ flowchart LR
 
 The microVM is the trust boundary. Real credentials stay on the host side of it: the gateway
 holds the Anthropic API key (keyed `/api` mode) and its own GitHub token, and the per-box MITM
-proxy swaps the box's `GH_TOKEN` placeholder for the real value only on GitHub-bound traffic.
+proxy swaps the box's placeholders for the real values only on each secret's allowed hosts.
 
 - **Two-layer image.** `base/` builds `cbox-base` (Debian trixie + Node 26 + Claude Code,
   plus `gh`, `uv`, `pre-commit`, `lazygit` and oh-my-posh), running as a non-root
@@ -342,18 +342,16 @@ two different ways, and the difference matters:
 - **Forwarded** as ordinary environment variables when set: the Claude auth set from
   [Auth modes](#auth-modes-), `ANTHROPIC_MODEL`, and git identity (`GIT_AUTHOR_*` /
   `GIT_COMMITTER_*`). Unset vars are skipped.
-- **Substituted**: `GH_TOKEN`/`GITHUB_TOKEN` become BoxLite *secrets*, so the box sees only a
-  placeholder (`<BOXLITE_SECRET:gh>`) and a host-side proxy substitutes the real value into
-  HTTPS requests to `github.com`/`api.github.com`. `gh` authenticates automatically, and
-  `git clone`/`push` over HTTPS work too, through an `http.extraHeader` carrying the
-  placeholder (git builds Basic auth itself, and base64-encoding would hide a placeholder from
-  the proxy, which is why there are two separate secrets).
+- **Substituted**: stored secrets (below) become BoxLite *secrets*, so the box sees only a
+  placeholder (`<BOXLITE_SECRET:NAME>`) and a host-side proxy substitutes the real value into
+  HTTPS requests to that secret's hosts. A host `GH_TOKEN`/`GITHUB_TOKEN` is **not** picked up
+  any more: create a stored secret for GitHub (see below).
 
 Both paths are implemented by `cbox`; see `docs/design/cbox.md`.
 
 ### Stored secrets and profiles 🗝️
 
-Any other credential (an OpenAI key, a second GitHub token) can be kept in the OS secret store
+Any credential (an OpenAI key, a GitHub or GitLab token) can be kept in the OS secret store
 and handed to a box the same substituted way: the box sees a placeholder, and the proxy swaps
 in the real value only for that secret's allowed hosts. The store is the macOS Keychain, or
 Windows Credential Manager under WSL; Linux desktop is not supported yet.
@@ -367,8 +365,26 @@ cbox secret delete openai                          # confirms first; -y skips
 cbox up --secret openai                            # boot with it
 ```
 
-`--host` is a comma-separated list of bare host names and is required. `gh` and `gh_basic` are
-reserved for the `GH_TOKEN` path above. cbox never writes a value to disk itself, but BoxLite
+**Git and GitHub.** Add `--git --user USER` and cbox also makes git work over https for every
+`--host`: it registers `base64(USER:token)` as a second secret (`<name>_basic`) and, at `up`,
+writes `http.https://<host>/.extraHeader` carrying its placeholder (git builds Basic auth
+itself, and base64 would hide a plain placeholder from the proxy). `--env` is then optional.
+Use one secret per account and pick the account per profile:
+
+```bash
+cbox secret create github_work --host github.com,api.github.com,gist.github.com \
+    --env GH_TOKEN --git --user x-access-token
+cbox profile create work --secrets github_work
+cbox up --profile work
+```
+
+For GitLab use `--host gitlab.com --user oauth2 --git`; for a self-hosted GitHub Enterprise
+Server `gh` reads `GH_ENTERPRISE_TOKEN`, so use that as `--env`. SSH remotes
+(`git@host:...`) bypass the proxy and are not covered. Two `--git` secrets that share a host
+cannot be in one box.
+
+`--host` is a comma-separated list of bare host names and is required. Names ending in `_basic`
+are reserved for the `--git` copy. cbox never writes a value to disk itself, but BoxLite
 keeps a copy of a box's secret values in that box's own home (owner-only, not encrypted) until
 the box is removed, so deleting a secret does not revoke it for boxes that already use it. The
 older one-off form `--secret NAME=ENV_VAR@host[,host...]`, which reads the value from a host env

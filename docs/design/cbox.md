@@ -404,6 +404,13 @@ is worse than refusing to start.
 
 ### GitHub moves to secrets
 
+> **Superseded by `docs/design/git-credentials.md`.** The two-secret mechanism below is
+> unchanged, but it is no longer a hard-coded GitHub preset built from a host `GH_TOKEN`: any
+> stored secret created with `--git --user U` gets a derived `<name>_basic` secret and an
+> `extraHeader` for each of its hosts. The built-in `gh`/`gh_basic` secrets and the host
+> `GH_TOKEN`/`GITHUB_TOKEN` auto-detection are gone. The reasoning below still explains why
+> git needs the pre-encoded secret.
+
 `GH_TOKEN`/`GITHUB_TOKEN` leave the passthrough list. This requires **two** secrets, because
 `gh` and `git` want the credential in incompatible shapes.
 

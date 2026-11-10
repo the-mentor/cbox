@@ -241,12 +241,13 @@ user's; each is small enough to change in review.
   secrets the hash covers value, hosts and env name. Flag-form secrets keep the
   value-only hash, so existing boxes do not warn spuriously.
 - **Names.** Lowercase letters, digits, `-` and `_`, starting with a letter (the
-  name appears inside the `<BOXLITE_SECRET:name>` placeholder). `gh` and `gh_basic` (the
-  two built-in GitHub secrets) stay reserved, in both the store and the flag form. A bare `--secret NAME` that is not in the store fails `up`; it never
+  name appears inside the `<BOXLITE_SECRET:name>` placeholder). Names ending in `_basic`
+  are reserved (the derived copy of a `--git` secret), in both the store and the flag form. A bare `--secret NAME` that is not in the store fails `up`; it never
   falls back to a host env var (confirmed by the user). Repeating a `--secret`
   name, or two secrets sharing an in-box env var in one `up`, is an error; this
-  is now also the case for the flag form (the GitHub preset is reported as "the
-  GitHub token (GH_TOKEN/GITHUB_TOKEN)").
+  is also the case for the flag form. Two `--git` secrets sharing a host are an error too.
+  See `docs/design/git-credentials.md` for `--git`/`--user` and the removal of the built-in
+  `gh`/`gh_basic` secrets.
 - **Create and delete.** `create` on a name that already exists errors and points
   at `edit`. It checks the store entry, not the index, so an orphan entry without
   an index line reports "exists but not in the index" and offers `edit` (keeps it)

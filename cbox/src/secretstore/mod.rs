@@ -18,11 +18,19 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(target_os = "macos", allow(dead_code))] // only the Linux WSL store uses it
 pub const WSL_MAX_ENTRY_BYTES: usize = 2560;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct StoredSecret {
     pub value: String,
     pub hosts: Vec<String>,
-    pub env: String,
+    /// In-box variable that carries the placeholder; `None` for a git-only secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<String>,
+    /// Basic-auth username for the derived `base64(user:token)`; set exactly when `git` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    /// Configure git in the box to authenticate to every host with this secret.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub git: bool,
 }
 
 impl std::fmt::Debug for StoredSecret {
@@ -31,6 +39,8 @@ impl std::fmt::Debug for StoredSecret {
             .field("value", &"<redacted>")
             .field("hosts", &self.hosts)
             .field("env", &self.env)
+            .field("user", &self.user)
+            .field("git", &self.git)
             .finish()
     }
 }
@@ -47,8 +57,8 @@ impl StoredSecret {
     }
 }
 
-/// Names of the built-in GitHub secrets; neither store nor flag form may use them.
-pub const RESERVED_NAMES: &[&str] = &["gh", "gh_basic"];
+/// Suffix of the SDK secret derived from a `--git` secret (`<name>_basic`); no user secret may end in it.
+pub const DERIVED_SUFFIX: &str = "_basic";
 
 /// A lowercase letter, then lowercase letters, digits, '-' or '_'. Must match the regex in wincred.ps1.
 pub(super) fn name_charset_ok(name: &str) -> bool {
@@ -59,8 +69,35 @@ pub fn validate_name(name: &str) -> Result<()> {
     if !name_charset_ok(name) {
         bail!("invalid secret name {name:?}: use lowercase letters, digits, '-' or '_', starting with a letter");
     }
-    if RESERVED_NAMES.contains(&name) {
-        bail!("secret name {name:?} is reserved for the built-in GitHub secret");
+    if name.ends_with(DERIVED_SUFFIX) {
+        bail!("secret name {name:?} is reserved: names ending in {DERIVED_SUFFIX:?} are used for the encoded copy of a --git secret");
+    }
+    Ok(())
+}
+
+/// A secret must reach the box somehow, and `--git` needs a username (which may be empty, e.g. Azure DevOps).
+pub fn validate_shape(s: &StoredSecret) -> Result<()> {
+    if s.env.is_none() && !s.git {
+        bail!("a secret needs --env, --git, or both: with neither it would never reach the box");
+    }
+    match (s.git, &s.user) {
+        (true, None) => bail!("--git needs --user (the Basic-auth username, e.g. x-access-token for GitHub; may be empty)"),
+        (false, Some(_)) => bail!("--user only applies with --git"),
+        _ => {}
+    }
+    if s.git {
+        for h in &s.hosts {
+            validate_git_host(h)?;
+        }
+    }
+    Ok(())
+}
+
+/// Hosts go into a shell command and a git config key: a plain name with an optional port, nothing else.
+pub fn validate_git_host(h: &str) -> Result<()> {
+    let ok = !h.is_empty() && h.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'));
+    if !ok {
+        bail!("invalid host {h:?} for --git: use letters, digits, '.', '-' and an optional :port");
     }
     Ok(())
 }
@@ -113,7 +150,7 @@ mod tests {
 
     #[test]
     fn names_reject_uppercase_leading_digit_empty_and_gh() {
-        for n in ["", "Abc", "1a", "-a", "_a", "a b", "gh", "gh_basic", "a.b"] {
+        for n in ["", "Abc", "1a", "-a", "_a", "a b", "gh_basic", "a_basic", "a.b"] {
             assert!(validate_name(n).is_err(), "{n:?}");
         }
     }
@@ -149,7 +186,7 @@ mod tests {
 
     #[test]
     fn debug_never_contains_the_value() {
-        let s = StoredSecret { value: "sk-supersecret".into(), hosts: vec!["a.com".into()], env: "K".into() };
+        let s = StoredSecret { value: "sk-supersecret".into(), hosts: vec!["a.com".into()], env: Some("K".into()), ..Default::default() };
         let d = format!("{s:?}");
         assert!(!d.contains("sk-supersecret"));
         assert!(d.contains("<redacted>"));
@@ -165,9 +202,9 @@ mod tests {
 
     #[test]
     fn json_round_trips() {
-        let s = StoredSecret { value: "v\"€".into(), hosts: vec!["a.com".into(), "b.com".into()], env: "K".into() };
+        let s = StoredSecret { value: "v\"€".into(), hosts: vec!["a.com".into(), "b.com".into()], env: Some("K".into()), user: Some("u".into()), git: true };
         let back = StoredSecret::from_json(&s.to_json()).unwrap();
-        assert_eq!((back.value, back.hosts, back.env), (s.value, s.hosts, s.env));
+        assert_eq!((back.value, back.hosts, back.env, back.user, back.git), (s.value, s.hosts, s.env, s.user, s.git));
     }
 
     #[test]
@@ -175,5 +212,33 @@ mod tests {
         assert!(check_size(&"€".repeat(900), Some(WSL_MAX_ENTRY_BYTES)).unwrap_err().to_string().contains("2700"));
         check_size(&"x".repeat(2560), Some(WSL_MAX_ENTRY_BYTES)).unwrap();
         check_size(&"€".repeat(900), None).unwrap();
+    }
+
+    #[test]
+    fn an_old_entry_without_user_or_git_still_loads_and_a_plain_one_serializes_as_before() {
+        let old = StoredSecret::from_json(r#"{"value":"v","hosts":["a.com"],"env":"K"}"#).unwrap();
+        assert_eq!((old.env.as_deref(), old.user, old.git), (Some("K"), None, false));
+        let plain = StoredSecret { value: "v".into(), hosts: vec!["a.com".into()], env: Some("K".into()), ..Default::default() };
+        assert_eq!(plain.to_json(), r#"{"value":"v","hosts":["a.com"],"env":"K"}"#);
+    }
+
+    #[test]
+    fn shape_needs_env_or_git_and_a_user_exactly_with_git() {
+        let base = || StoredSecret { value: "v".into(), hosts: vec!["a.com".into()], ..Default::default() };
+        assert!(validate_shape(&base()).is_err());
+        validate_shape(&StoredSecret { env: Some("K".into()), ..base() }).unwrap();
+        assert!(validate_shape(&StoredSecret { git: true, ..base() }).unwrap_err().to_string().contains("--user"));
+        validate_shape(&StoredSecret { git: true, user: Some(String::new()), ..base() }).unwrap();
+        assert!(validate_shape(&StoredSecret { env: Some("K".into()), user: Some("u".into()), ..base() }).is_err());
+    }
+
+    #[test]
+    fn git_hosts_reject_shell_and_config_metacharacters() {
+        for h in ["a.com;rm", "a.com'", "a b", "a.com/x", "$(x)", ""] {
+            assert!(validate_git_host(h).is_err(), "{h:?}");
+        }
+        for h in ["github.com", "git.example.com:8443", "10.0.0.1"] {
+            validate_git_host(h).unwrap();
+        }
     }
 }

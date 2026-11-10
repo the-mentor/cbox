@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct FakeStore {
-    entries: HashMap<String, (String, Vec<String>, String)>,
+    entries: HashMap<String, StoredSecret>,
     short: bool,
     calls: Cell<usize>,
 }
@@ -21,7 +21,12 @@ impl FakeStore {
     }
 
     pub fn insert(&mut self, name: &str, value: &str, hosts: &[&str], env: &str) {
-        self.entries.insert(name.into(), (value.into(), hosts.iter().map(|h| h.to_string()).collect(), env.into()));
+        self.entries.insert(name.into(), StoredSecret { value: value.into(), hosts: hosts.iter().map(|h| h.to_string()).collect(), env: Some(env.into()), ..Default::default() });
+    }
+
+    /// A `--git` secret: `env` may be `None` (git only).
+    pub fn insert_git(&mut self, name: &str, value: &str, hosts: &[&str], env: Option<&str>, user: &str) {
+        self.entries.insert(name.into(), StoredSecret { value: value.into(), hosts: hosts.iter().map(|h| h.to_string()).collect(), env: env.map(String::from), user: Some(user.into()), git: true });
     }
 
     /// `get_many` will return no results at all, whatever the names.
@@ -34,7 +39,7 @@ impl FakeStore {
     }
 
     fn lookup(&self, name: &str) -> Option<StoredSecret> {
-        self.entries.get(name).map(|(value, hosts, env)| StoredSecret { value: value.clone(), hosts: hosts.clone(), env: env.clone() })
+        self.entries.get(name).cloned()
     }
 }
 
