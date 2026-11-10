@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.29](https://github.com/the-mentor/cbox/compare/v0.1.28...v0.1.29) (2026-11-10)
+
+
+### Features
+
+* add cbox completion command ([#155](https://github.com/the-mentor/cbox/issues/155)) ([97e2776](https://github.com/the-mentor/cbox/commit/97e277642a008d0f446f5a8c0dcf02b8e604f552))
+
 ## [0.1.28](https://github.com/the-mentor/cbox/compare/v0.1.27...v0.1.28) (2026-11-08)
 
 
