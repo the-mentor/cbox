@@ -59,8 +59,12 @@ fn completion_without_a_shell_prints_help_and_a_known_shell_prints_a_script() {
     for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
         assert!(text.contains(shell), "{shell} missing: {text}");
     }
+    // `completion` runs from shell startup files: it must not create profiles.toml as a side effect.
+    let profiles = d.join("cbox/profiles.toml");
+    assert!(!profiles.exists(), "`completion` without a shell must not create profiles.toml");
     let out = run(&["completion", "bash"]);
     assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("_cbox"), "{out:?}");
+    assert!(!profiles.exists(), "`completion bash` must not create profiles.toml");
     assert_eq!(run(&["completion", "nosuchshell"]).status.code(), Some(2));
     std::fs::remove_dir_all(&d).ok();
 }
