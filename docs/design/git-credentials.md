@@ -122,6 +122,18 @@ them shows the existing "changed since this box was created" warning.
   suffix rule), the `has_github_token` call in `commands/up.rs`, and their tests.
 - `git_bootstrap_script` becomes a function of the git-enabled secrets (host list and
   placeholder per secret); `commands/up.rs` runs it when any exist.
+- `commands/up.rs` (decided by the owner): remove the `has_github_token()`/`github_spec()`
+  push (line ~81). `has_github` (line ~88, `name == "gh"`) becomes "any spec has `--git`",
+  and that drives the guest bootstrap (line ~236 and the script run near line ~394). Its
+  warnings say "GitHub"; make them provider-neutral. A `GH_TOKEN`/`GITHUB_TOKEN` in the
+  env file (`~/.config/cbox/env`, `--env-file`, `$CBOX_ENV_FILE`) no longer gives the box
+  any GitHub access; the token must be a stored secret. The env file keeps working for
+  `--secret NAME=ENV@hosts`, passthrough vars and `-e`.
+- Platforms without a secret store (Linux desktop is not implemented; `cbox secret` fails
+  with "no secret store available") lose GitHub access in the box. Accepted by the owner
+  (macOS and WSL only for now); note it in the release notes.
+- `just build-image` keeps using `GH_TOKEN`/`gh auth token` as a build-time BuildKit secret
+  for private plugins; unrelated and unchanged.
 - The flag form `--secret NAME=ENV@hosts` (value from a host env var) is unchanged and does
   not get `--git`.
 - Hosts are interpolated into a shell command: validate as plain host names with an
