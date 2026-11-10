@@ -491,7 +491,7 @@ pub fn validate(name: &str, p: &Profile, known_secrets: &BTreeSet<String>) -> Ve
         let n = i + 1;
         if crate::secretstore::validate_name(s).is_err() {
             bad(format!(
-                "secrets entry {n} is not a valid secret name (lowercase letters, digits, '-' or '_', starting with a letter; gh and gh_basic are reserved)"
+                "secrets entry {n} is not a valid secret name (lowercase letters, digits, '-' or '_', starting with a letter; names ending in _basic are reserved)"
             ));
         } else if !known_secrets.contains(s) {
             bad(format!("secrets entry {n} is not a stored secret (see cbox secret list)"));
@@ -996,14 +996,14 @@ mod tests {
     #[test]
     fn validate_reports_every_problem() {
         let known: BTreeSet<String> = ["good".to_string()].into();
-        let p = Profile { secrets: vec!["gh".into(), "good".into(), "good".into(), "nope".into()], memory: Some(0), ..Default::default() };
+        let p = Profile { secrets: vec!["x_basic".into(), "good".into(), "good".into(), "nope".into()], memory: Some(0), ..Default::default() };
         let v = validate("Bad", &p, &known);
         assert_eq!(v.len(), 5, "{v:?}");
         assert!(v.iter().any(|m| m.contains("invalid profile name")));
-        assert!(v.iter().any(|m| m.contains("secrets entry") && m.contains("gh")));
+        assert!(v.iter().any(|m| m.contains("secrets entry") && m.contains("_basic")));
         assert!(v.iter().all(|m| m.starts_with("profile Bad:")), "{v:?}");
         assert!(v.iter().any(|m| m.contains("name")));
-        assert!(v.iter().any(|m| m.contains("gh")));
+        assert!(v.iter().any(|m| m.contains("_basic")));
         assert!(v.iter().any(|m| m.contains("repeats entry")));
         assert!(v.iter().any(|m| m.contains("is not a stored secret")));
         assert!(v.iter().any(|m| m.contains("memory must be greater than 0") && !m.contains("--")));

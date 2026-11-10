@@ -70,8 +70,8 @@ alone; `delete NAME [-y]` confirms first. Values are never printed. cbox never w
 disk (the OS store holds it encrypted; the index `~/.config/cbox/secrets.json` holds names only),
 but BoxLite keeps a copy of a box's secret values in that box's own database under the box home
 (not encrypted, owner-only file permissions) until the box is removed (`cbox down`/`-f`). `cbox up --secret NAME` uses a
-stored secret (a missing name fails; there is no fallback to a host env var), and `gh`/`gh_basic`
-are reserved names. See `docs/design/secrets.md`.
+stored secret (a missing name fails; there is no fallback to a host env var), and names ending in `_basic`
+are reserved. `cbox secret create ... --git --user U` also configures git over https for the secret's hosts (this replaces the old built-in GitHub secret; a host `GH_TOKEN` no longer reaches the box). See `docs/design/secrets.md` and `docs/design/git-credentials.md`.
 
 Profiles are named bundles of `cbox up` choices (secret names, environment variables, image, memory, cpus, disk size) kept in
 `~/.config/cbox/profiles.toml` (or `$XDG_CONFIG_HOME/cbox/`), managed with

@@ -20,9 +20,6 @@ use boxlite::Secret;
 use crate::secretstore::{SecretStore, StoredSecret};
 use crate::sidecar;
 
-/// The Basic-auth username GitHub expects when the password is a PAT.
-pub const GH_BASIC_USER: &str = "x-access-token";
-
 /// Must match the Python binding's format, or the same box would present
 /// different placeholders depending on which SDK launched it.
 pub fn placeholder(name: &str) -> String {
@@ -34,10 +31,15 @@ pub fn placeholder(name: &str) -> String {
 #[derive(Clone, PartialEq)]
 pub struct SecretSpec {
     pub name: String,
-    pub env_var: String,
+    /// In-box variable carrying the placeholder; `None` only for a stored git-only secret.
+    pub env_var: Option<String>,
     pub hosts: Vec<String>,
     pub value: Option<String>,
     pub stored: bool,
+    /// Basic-auth username; set exactly when `git` is.
+    pub user: Option<String>,
+    /// Configure git in the box for every host, via a derived `<name>_basic` secret.
+    pub git: bool,
 }
 
 // Hand-written so a stored value never reaches Debug output.
@@ -49,6 +51,8 @@ impl std::fmt::Debug for SecretSpec {
             .field("hosts", &self.hosts)
             .field("value", &self.value.as_ref().map(|_| "<redacted>"))
             .field("stored", &self.stored)
+            .field("user", &self.user)
+            .field("git", &self.git)
             .finish()
     }
 }
@@ -74,20 +78,9 @@ pub fn parse_secret_flag(s: &str) -> Result<SecretSpec> {
         bail!("--secret needs a non-empty name and variable: {s:?}");
     }
 
-    // "gh" is reserved: `secrets::build` special-cases a spec named "gh" as
-    // the built-in GitHub preset and, in that branch, discards its
-    // `hosts` entirely in favor of the two hardcoded GitHub hosts. A
-    // user-supplied `--secret gh=ANYVAR@internal.example.com` would silently
-    // hit that same branch and get retargeted at api.github.com/github.com
-    // instead of the host the user actually named -- rejecting the name
-    // outright is simpler and safer than trying to distinguish "the
-    // preset" from "a user secret that happens to be named gh" downstream.
-    // "gh_basic" is reserved too: it is the GitHub preset's second SDK secret.
-    if crate::secretstore::RESERVED_NAMES.contains(&name) {
-        bail!(
-            "--secret name {name:?} is reserved for the built-in GitHub secret \
-             (auto-detected from GH_TOKEN/GITHUB_TOKEN); choose a different name."
-        );
+    // Names ending in `_basic` are the derived copy of a stored `--git` secret.
+    if name.ends_with(crate::secretstore::DERIVED_SUFFIX) {
+        bail!("--secret name {name:?} is reserved: names ending in {:?} are used for a --git secret's encoded copy", crate::secretstore::DERIVED_SUFFIX);
     }
 
     let hosts: Vec<String> = hosts
@@ -100,7 +93,7 @@ pub fn parse_secret_flag(s: &str) -> Result<SecretSpec> {
         bail!("--secret {name} has no hosts. An unscoped secret is substituted on requests to any host.");
     }
 
-    Ok(SecretSpec { name: name.to_string(), env_var: env_var.to_string(), hosts, value: None, stored: false })
+    Ok(SecretSpec { name: name.to_string(), env_var: Some(env_var.to_string()), hosts, value: None, stored: false, user: None, git: false })
 }
 
 /// A bare `--secret NAME` (no `=`, no `@`) names a secret in the store.
@@ -134,61 +127,39 @@ pub fn specs_from_store(store: &dyn SecretStore, names: &[&str]) -> Result<Vec<S
         .iter()
         .zip(results)
         .map(|(name, found)| {
-            let StoredSecret { value, hosts, env } =
+            let StoredSecret { value, hosts, env, user, git } =
                 found?.ok_or_else(|| anyhow!("secret {name:?} not found; run cbox secret create {name}"))?;
-            Ok(SecretSpec { name: name.to_string(), env_var: env, hosts, value: Some(value), stored: true })
+            Ok(SecretSpec { name: name.to_string(), env_var: env, hosts, value: Some(value), stored: true, user, git })
         })
         .collect()
 }
 
 /// Two secrets writing the same in-box variable (or sharing a name, hence a
-/// placeholder) would leave one silently shadowing the other.
+/// placeholder) would leave one silently shadowing the other; two `--git`
+/// secrets for one host would fight over its `extraHeader`.
 pub fn check_unique_env(specs: &[SecretSpec]) -> Result<()> {
     for (i, spec) in specs.iter().enumerate() {
         // One name means one placeholder, whatever the env vars are.
         if specs[..i].iter().any(|o| o.name == spec.name) {
             bail!("secret {:?} is given more than once; use each --secret name once", spec.name);
         }
-        if let Some(other) = specs[..i].iter().find(|o| o.env_var == spec.env_var) {
-            let who = |s: &SecretSpec| {
-                if s.name == "gh" { "the GitHub token (GH_TOKEN/GITHUB_TOKEN)".to_string() } else { format!("--secret {}", s.name) }
-            };
-            bail!("{} and {} both set {} in the box; use one", who(other), who(spec), spec.env_var);
+        if let Some(var) = &spec.env_var
+            && let Some(other) = specs[..i].iter().find(|o| o.env_var.as_ref() == Some(var))
+        {
+            bail!("--secret {} and --secret {} both set {var} in the box; use one", other.name, spec.name);
+        }
+        if spec.git
+            && let Some((other, host)) = specs[..i].iter().filter(|o| o.git).find_map(|o| o.hosts.iter().find(|h| spec.hosts.contains(h)).map(|h| (o, h)))
+        {
+            bail!("--secret {} and --secret {} both configure git for {host} in the box; use one", other.name, spec.name);
         }
     }
     Ok(())
 }
 
 /// A variable counts as a usable source only if it is both set and non-empty.
-/// `github_spec` and `build` must agree on this predicate: picking a variable
-/// here that `build` would then reject as empty produces a misleading error
-/// pointing at the wrong variable.
 fn set_and_non_empty(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.is_empty())
-}
-
-/// Whether GitHub secret support should be requested at all. Built on the
-/// same `set_and_non_empty` predicate as `github_spec`/`build`, so it cannot
-/// drift from what those actually treat as usable: in particular,
-/// `GH_TOKEN=""` (e.g. a blank line in a sourced `.env`) must not count as
-/// present when `GITHUB_TOKEN` is also unset, or a caller that gates on this
-/// and then calls `build` unconditionally would abort on a spurious "unset or
-/// empty" error instead of silently skipping the secret, as having neither
-/// variable set at all does.
-pub fn has_github_token() -> bool {
-    set_and_non_empty("GH_TOKEN").is_some() || set_and_non_empty("GITHUB_TOKEN").is_some()
-}
-
-/// The GitHub preset. Its `name` is a marker: `build` expands it into the two
-/// secrets the two protocols need, using its own hardcoded host lists rather
-/// than this spec's `hosts` -- which is therefore left empty here rather
-/// than populated with a value nothing reads, so there's no data sitting
-/// around that looks live but isn't. `parse_secret_flag` rejects a
-/// user-supplied `--secret` named "gh" outright, so this is the only
-/// constructor that ever produces one.
-pub fn github_spec() -> SecretSpec {
-    let env_var = if set_and_non_empty("GH_TOKEN").is_some() { "GH_TOKEN" } else { "GITHUB_TOKEN" };
-    SecretSpec { name: "gh".into(), env_var: env_var.into(), hosts: vec![], value: None, stored: false }
 }
 
 /// Read each spec's source variable and build the SDK secrets plus the
@@ -199,11 +170,10 @@ pub fn build(specs: &[SecretSpec]) -> Result<Built> {
     let mut source_vars = Vec::new();
 
     for spec in specs {
-        // Hosts are mandatory on every constructed secret — this is the
+        // Hosts are mandatory on every constructed secret: this is the
         // property the feature exists to provide, so it is enforced here
-        // rather than trusted from the caller. The "gh" marker is exempt: it
-        // hardcodes its own two host lists below instead of using spec.hosts.
-        if spec.name != "gh" && spec.hosts.is_empty() {
+        // rather than trusted from the caller.
+        if spec.hosts.is_empty() {
             bail!(
                 "--secret {} has no hosts. An unscoped secret is substituted on requests to any host.",
                 spec.name
@@ -215,40 +185,32 @@ pub fn build(specs: &[SecretSpec]) -> Result<Built> {
         // passthrough copy is dropped by `passthrough_without_stored`).
         let value = match &spec.value {
             Some(v) => v.clone(),
-            None => set_and_non_empty(&spec.env_var)
-                .ok_or_else(|| anyhow!("--secret {} names {}, which is unset or empty", spec.name, spec.env_var))?,
+            None => {
+                let var = spec.env_var.as_deref().ok_or_else(|| anyhow!("--secret {} has no value source", spec.name))?;
+                set_and_non_empty(var).ok_or_else(|| anyhow!("--secret {} names {var}, which is unset or empty", spec.name))?
+            }
         };
 
-        source_vars.push(spec.env_var.clone());
-
-        if spec.name == "gh" {
-            // Two secrets: gh sends Bearer to api.github.com; git sends Basic
-            // to github.com and encodes it itself, so the encoding moves here.
-            secrets.push(Secret {
-                name: "gh".into(),
-                hosts: vec!["api.github.com".into()],
-                placeholder: placeholder("gh"),
-                value: value.clone(),
-            });
-            secrets.push(Secret {
-                name: "gh_basic".into(),
-                hosts: vec!["github.com".into()],
-                placeholder: placeholder("gh_basic"),
-                value: BASE64.encode(format!("{GH_BASIC_USER}:{value}")),
-            });
-            env.push((spec.env_var.clone(), placeholder("gh")));
-        } else {
-            secrets.push(Secret {
-                name: spec.name.clone(),
-                hosts: spec.hosts.clone(),
-                placeholder: placeholder(&spec.name),
-                value,
-            });
-            env.push((spec.env_var.clone(), placeholder(&spec.name)));
+        secrets.push(Secret { name: spec.name.clone(), hosts: spec.hosts.clone(), placeholder: placeholder(&spec.name), value: value.clone() });
+        if let Some(var) = &spec.env_var {
+            source_vars.push(var.clone());
+            env.push((var.clone(), placeholder(&spec.name)));
+        }
+        if spec.git {
+            // git builds `Basic base64(user:token)` itself and base64 hides a placeholder from the
+            // proxy, so the encoding moves to the host and the placeholder goes where the blob belongs.
+            let user = spec.user.as_deref().ok_or_else(|| anyhow!("--secret {} has git on but no user", spec.name))?;
+            let name = derived_name(&spec.name);
+            secrets.push(Secret { placeholder: placeholder(&name), name, hosts: spec.hosts.clone(), value: BASE64.encode(format!("{user}:{value}")) });
         }
     }
 
     Ok(Built { secrets, env, source_vars })
+}
+
+/// The SDK secret holding `base64(user:token)` for a `--git` secret.
+fn derived_name(name: &str) -> String {
+    format!("{name}{}", crate::secretstore::DERIVED_SUFFIX)
 }
 
 /// The passthrough list minus the in-box names of stored secrets. A stored
@@ -256,44 +218,47 @@ pub fn build(specs: &[SecretSpec]) -> Result<Built> {
 /// forwarded and the guest gets the placeholder instead. Flag-form sources
 /// stay, so `compose` still refuses them.
 pub fn passthrough_without_stored(mut passthrough: Vec<String>, specs: &[SecretSpec]) -> Vec<String> {
-    passthrough.retain(|k| !specs.iter().any(|s| s.stored && s.env_var == *k));
+    passthrough.retain(|k| !specs.iter().any(|s| s.stored && s.env_var.as_deref() == Some(k.as_str())));
     passthrough
 }
 
 /// Per-secret hashes recorded at creation and compared on resume. Flag-form
-/// (and gh/gh_basic) secrets keep the value-only hash so existing boxes show
+/// secrets keep the value-only hash so existing boxes show
 /// no spurious "changed" warning; stored ones also cover hosts and env name.
 pub fn resume_hashes(specs: &[SecretSpec], built: &Built) -> BTreeMap<String, u64> {
     let mut hashes: BTreeMap<String, u64> =
         built.secrets.iter().map(|s| (s.name.clone(), sidecar::hash_secret_value(&s.value))).collect();
     for spec in specs.iter().filter(|s| s.stored) {
         if let Some(value) = &spec.value {
-            hashes.insert(spec.name.clone(), sidecar::hash_stored_secret(value, &spec.hosts, &spec.env_var));
+            hashes.insert(spec.name.clone(), sidecar::hash_stored_secret(value, &spec.hosts, spec.env_var.as_deref(), spec.user.as_deref(), spec.git));
         }
     }
     hashes
 }
 
-/// Run inside the box after creation when GitHub secrets are present.
+/// Run inside the box at `up` when any secret has `--git`; `None` when none does.
 ///
-/// Blanking the helper is required, not tidiness: without it git falls back to
-/// it on a 401 and sends base64'd garbage, which fails confusingly.
+/// For every host of every git secret: `http.https://<host>/.extraHeader` carries the placeholder
+/// of the pre-encoded credential, and the credential helper is blanked. Blanking is required, not
+/// tidiness: without it git falls back to a helper on a 401 and sends base64'd garbage.
 ///
-/// The blank must be scoped to `credential.https://github.com.helper`, not
-/// the generic `credential.helper` — git resolves credential config by
-/// urlmatch specificity, not by which file it came from, so a generic
-/// `--global` blank does not override a URL-scoped entry from a lower-
-/// precedence file (there is no such entry baked into the image anymore, but
-/// a scoped blank is also what correctly overrides one if some other layer
-/// ever adds it back). Measured with git 2.50.1 via
-/// `git config --get-urlmatch credential https://github.com`.
-pub fn git_bootstrap_script() -> String {
-    format!(
-        "git config --global http.https://github.com/.extraHeader \
-         'Authorization: Basic {}' && \
-         git config --global credential.https://github.com.helper ''",
-        placeholder("gh_basic")
-    )
+/// The blank is scoped to `credential.https://<host>.helper`, not the generic `credential.helper`:
+/// git resolves credential config by urlmatch specificity, not by which file it came from, so a
+/// generic `--global` blank does not override a URL-scoped entry from a lower-precedence file.
+/// Measured with git 2.50.1 via `git config --get-urlmatch credential https://github.com`.
+///
+/// Hosts are validated here too (they end up in a shell command), whatever stored them.
+pub fn git_bootstrap_script(specs: &[SecretSpec]) -> Result<Option<String>> {
+    let mut cmds = Vec::new();
+    for spec in specs.iter().filter(|s| s.git) {
+        let ph = placeholder(&derived_name(&spec.name));
+        for host in &spec.hosts {
+            crate::secretstore::validate_git_host(host)?;
+            cmds.push(format!("git config --global 'http.https://{host}/.extraHeader' 'Authorization: Basic {ph}'"));
+            cmds.push(format!("git config --global 'credential.https://{host}.helper' ''"));
+        }
+    }
+    Ok((!cmds.is_empty()).then(|| cmds.join(" && ")))
 }
 
 #[cfg(test)]
@@ -308,8 +273,8 @@ mod tests {
 
     #[test]
     fn placeholder_matches_the_python_binding_format() {
-        assert_eq!(placeholder("gh"), "<BOXLITE_SECRET:gh>");
-        assert_eq!(placeholder("gh_basic"), "<BOXLITE_SECRET:gh_basic>");
+        assert_eq!(placeholder("openai"), "<BOXLITE_SECRET:openai>");
+        assert_eq!(placeholder("github_work_basic"), "<BOXLITE_SECRET:github_work_basic>");
     }
 
     #[test]
@@ -317,10 +282,12 @@ mod tests {
         let s = parse_secret_flag("openai=OPENAI_API_KEY@api.openai.com").unwrap();
         assert_eq!(s, SecretSpec {
             name: "openai".into(),
-            env_var: "OPENAI_API_KEY".into(),
+            env_var: Some("OPENAI_API_KEY".into()),
             hosts: vec!["api.openai.com".into()],
             value: None,
             stored: false,
+            user: None,
+            git: false,
         });
 
         let s = parse_secret_flag("x=X@a.com,b.com").unwrap();
@@ -341,42 +308,17 @@ mod tests {
     }
 
     #[test]
-    fn a_secret_named_gh_basic_is_rejected_as_reserved() {
-        let err = parse_secret_flag("gh_basic=X@a.com").unwrap_err().to_string();
-        assert!(err.contains("reserved for the built-in GitHub secret"), "{err}");
-    }
-
-    #[test]
-    fn duplicate_env_with_the_github_preset_names_the_token() {
-        let _lock = crate::test_env_lock::lock();
-        let _g = EnvGuard::set("GH_TOKEN", "t");
-        let specs = vec![github_spec(), parse_secret_flag("x=GH_TOKEN@a.com").unwrap()];
-        let err = check_unique_env(&specs).unwrap_err().to_string();
-        assert!(err.contains("the GitHub token (GH_TOKEN/GITHUB_TOKEN)"), "{err}");
-        assert!(!err.contains("--secret gh"), "{err}");
-    }
-
-    /// "gh" is reserved for the built-in GitHub preset. Without this, a
-    /// user-supplied `--secret gh=ANYVAR@internal.example.com` would hit
-    /// `build`'s "gh" special case and get silently retargeted at
-    /// api.github.com/github.com instead of the host actually named.
-    #[test]
-    fn a_secret_named_gh_is_rejected_as_reserved() {
-        let err = parse_secret_flag("gh=ANYVAR@internal.example.com").unwrap_err().to_string();
-        assert!(err.contains("gh"), "names the reserved name: {err}");
-        assert!(err.contains("reserved"), "explains why: {err}");
-    }
-
-    #[test]
     fn build_reports_a_missing_source_variable() {
         let _lock = crate::test_env_lock::lock();
         unsafe { std::env::remove_var("CBOX_T_MISSING") };
         let spec = SecretSpec {
             name: "x".into(),
-            env_var: "CBOX_T_MISSING".into(),
+            env_var: Some("CBOX_T_MISSING".into()),
             hosts: vec!["a.com".into()],
             value: None,
             stored: false,
+            user: None,
+            git: false,
         };
         let err = build(&[spec]).unwrap_err().to_string();
         assert!(err.contains("CBOX_T_MISSING"), "names the variable: {err}");
@@ -388,10 +330,12 @@ mod tests {
         let _guard = EnvGuard::set("CBOX_T_TOKEN", "super-secret");
         let spec = SecretSpec {
             name: "mysecret".into(),
-            env_var: "CBOX_T_TOKEN".into(),
+            env_var: Some("CBOX_T_TOKEN".into()),
             hosts: vec!["a.com".into()],
             value: None,
             stored: false,
+            user: None,
+            git: false,
         };
         let built = build(&[spec]).unwrap();
         assert_eq!(
@@ -403,74 +347,6 @@ mod tests {
         assert!(!built.env.iter().any(|(_, v)| v.contains("super-secret")));
     }
 
-    /// `has_github_token` must agree with `github_spec`/`build` on what counts
-    /// as usable, or a caller gating on it can still hit `build`'s "unset or
-    /// empty" error. In particular `GH_TOKEN=""` with no `GITHUB_TOKEN` must
-    /// read as absent, exactly like having neither variable set at all — this
-    /// is the exact bug this function exists to prevent.
-    #[test]
-    fn has_github_token_treats_a_blank_gh_token_as_absent() {
-        let _lock = crate::test_env_lock::lock();
-        unsafe { std::env::remove_var("GH_TOKEN") };
-        unsafe { std::env::remove_var("GITHUB_TOKEN") };
-        assert!(!has_github_token(), "both unset");
-
-        let _gh = EnvGuard::set("GH_TOKEN", "");
-        assert!(!has_github_token(), "GH_TOKEN=\"\" with GITHUB_TOKEN unset");
-
-        let _ghub = EnvGuard::set("GITHUB_TOKEN", "ghp_from_github_token");
-        assert!(has_github_token(), "GH_TOKEN=\"\" with a valid GITHUB_TOKEN");
-    }
-
-    #[test]
-    fn github_produces_two_secrets_scoped_to_different_hosts() {
-        let _lock = crate::test_env_lock::lock();
-        let _guard = EnvGuard::set("GH_TOKEN", "ghp_example");
-        let built = build(&[github_spec()]).unwrap();
-        assert_eq!(built.secrets.len(), 2);
-
-        let gh = built.secrets.iter().find(|s| s.name == "gh").unwrap();
-        assert_eq!(gh.hosts, vec!["api.github.com".to_string()]);
-        assert_eq!(gh.value, "ghp_example");
-
-        let basic = built.secrets.iter().find(|s| s.name == "gh_basic").unwrap();
-        assert_eq!(basic.hosts, vec!["github.com".to_string()]);
-    }
-
-    /// `GH_TOKEN` set-but-empty must not shadow a perfectly usable
-    /// `GITHUB_TOKEN` — `github_spec` and `build` must agree on what "usable"
-    /// means, or this fails with a misleading error about the wrong variable.
-    #[test]
-    fn github_prefers_github_token_when_gh_token_is_set_but_empty() {
-        let _lock = crate::test_env_lock::lock();
-        let _gh = EnvGuard::set("GH_TOKEN", "");
-        let _ghub = EnvGuard::set("GITHUB_TOKEN", "ghp_from_github_token");
-
-        let spec = github_spec();
-        assert_eq!(spec.env_var, "GITHUB_TOKEN");
-
-        let built = build(&[spec]).unwrap();
-        assert_eq!(built.source_vars, vec!["GITHUB_TOKEN".to_string()]);
-        let gh = built.secrets.iter().find(|s| s.name == "gh").unwrap();
-        assert_eq!(gh.value, "ghp_from_github_token");
-    }
-
-    /// The whole git fix rests on this, and it is the one value never
-    /// eyeballed in any output.
-    #[test]
-    fn the_git_blob_decodes_to_what_github_expects() {
-        let _lock = crate::test_env_lock::lock();
-        let _guard = EnvGuard::set("GH_TOKEN", "ghp_example");
-        let built = build(&[github_spec()]).unwrap();
-        let basic = built.secrets.iter().find(|s| s.name == "gh_basic").unwrap();
-
-        let decoded = String::from_utf8(BASE64.decode(&basic.value).unwrap()).unwrap();
-        assert_eq!(decoded, "x-access-token:ghp_example");
-        // And the placeholder must NOT survive encoding — that asymmetry is
-        // precisely why the credential-helper path cannot work and this can.
-        assert!(!basic.value.contains("x-access-token"));
-    }
-
     /// `parse_secret_flag` already rejects an empty host list, but `build` is
     /// where `boxlite::Secret`s actually get constructed and handed across
     /// the SDK boundary — the "hosts are mandatory" invariant must not rest
@@ -479,10 +355,12 @@ mod tests {
     fn build_rejects_a_hand_constructed_spec_with_no_hosts() {
         let spec = SecretSpec {
             name: "x".into(),
-            env_var: "CBOX_T_NOHOSTS".into(),
+            env_var: Some("CBOX_T_NOHOSTS".into()),
             hosts: vec![],
             value: None,
             stored: false,
+            user: None,
+            git: false,
         };
         let err = build(&[spec]).unwrap_err().to_string();
         assert!(err.contains("no hosts"), "names the problem: {err}");
@@ -501,7 +379,7 @@ mod tests {
         assert_eq!((specs[0].name.as_str(), st.get_many_calls()), ("one", 1));
         let err = specs_from_store(&st, &["one", "x"]).unwrap_err().to_string();
         assert_eq!((err.as_str(), st.get_many_calls()), ("secret \"x\" not found; run cbox secret create x", 2));
-        assert!(specs_from_store(&st, &["one", "gh"]).is_err());
+        assert!(specs_from_store(&st, &["one", "x_basic"]).is_err());
         assert_eq!(st.get_many_calls(), 2, "validation happens before any read");
     }
 
@@ -549,13 +427,6 @@ mod tests {
         let specs = vec![one(&store, "openai").unwrap(), parse_secret_flag("openai=OTHER@b.com").unwrap()];
         let err = check_unique_env(&specs).unwrap_err().to_string();
         assert!(err.contains("openai") && err.contains("more than once"), "{err}");
-    }
-
-    #[test]
-    fn gh_bare_name_is_reserved() {
-        let store = FakeStore::with("gh", "v", &["a.com"], "GH_TOKEN");
-        let err = one(&store, "gh").unwrap_err().to_string();
-        assert!(err.contains("reserved"), "{err}");
     }
 
     #[test]
@@ -636,32 +507,20 @@ mod tests {
         check_unique_env(&specs).unwrap();
     }
 
-    #[test]
-    fn the_bootstrap_blanks_the_credential_helper() {
-        let script = git_bootstrap_script();
-        assert!(script.contains("<BOXLITE_SECRET:gh_basic>"));
-        assert!(script.contains("extraHeader"));
-        // Without this, git falls back to the helper on a 401 and sends
-        // base64'd garbage. It must be scoped to the same URL
-        // (`credential.https://github.com.helper`), not the generic
-        // `credential.helper` -- git resolves credential config by urlmatch
-        // specificity, so a generic blank does not override a URL-scoped
-        // entry from another config file. Measured live with
-        // `git config --get-urlmatch credential https://github.com`.
-        assert!(
-            script.contains("credential.https://github.com.helper"),
-            "the blank must be scoped to the same URL, not the generic key: {script}"
-        );
-    }
-
     fn spec(name: &str, env: &str, hosts: &[&str], value: Option<&str>) -> SecretSpec {
         SecretSpec {
             name: name.into(),
-            env_var: env.into(),
+            env_var: Some(env.into()),
             hosts: hosts.iter().map(|h| h.to_string()).collect(),
             value: value.map(String::from),
             stored: value.is_some(),
+            user: None,
+            git: false,
         }
+    }
+
+    fn git_spec(name: &str, env: Option<&str>, hosts: &[&str], user: &str) -> SecretSpec {
+        SecretSpec { env_var: env.map(String::from), user: Some(user.into()), git: true, ..spec(name, "UNUSED", hosts, Some("ghp_example")) }
     }
 
     #[test]
@@ -680,21 +539,93 @@ mod tests {
             resume_hashes(&specs, &build(&specs).unwrap())["k"]
         };
         let base = hash(&["a.com"], "E");
-        assert_eq!(base, sidecar::hash_stored_secret("v", &["a.com".to_string()], "E"));
+        assert_eq!(base, sidecar::hash_stored_secret("v", &["a.com".to_string()], Some("E"), None, false));
         assert_ne!(base, hash(&["b.com"], "E"));
         assert_ne!(base, hash(&["a.com"], "F"));
     }
 
+
     #[test]
-    fn resume_hashes_for_gh_keep_both_entries_value_only() {
-        let _lock = crate::test_env_lock::lock();
-        let _g = EnvGuard::set("GH_TOKEN", "ghp_x");
-        let specs = [github_spec()];
-        let built = build(&specs).unwrap();
-        let h = resume_hashes(&specs, &built);
-        assert_eq!(h.len(), 2);
-        for s in &built.secrets {
-            assert_eq!(h[&s.name], sidecar::hash_secret_value(&s.value));
+    fn a_flag_secret_named_with_the_derived_suffix_is_rejected() {
+        let err = parse_secret_flag("gh_basic=X@a.com").unwrap_err().to_string();
+        assert!(err.contains("reserved"), "{err}");
+    }
+
+    #[test]
+    fn a_git_secret_builds_the_raw_and_the_encoded_secret_on_the_same_hosts() {
+        let hosts = ["github.com", "api.github.com", "gist.github.com"];
+        let built = build(&[git_spec("github_work", Some("GH_TOKEN"), &hosts, "x-access-token")]).unwrap();
+        assert_eq!(built.secrets.len(), 2);
+        let raw = &built.secrets[0];
+        assert_eq!((raw.name.as_str(), raw.value.as_str()), ("github_work", "ghp_example"));
+        let basic = &built.secrets[1];
+        assert_eq!((basic.name.as_str(), basic.placeholder.as_str()), ("github_work_basic", "<BOXLITE_SECRET:github_work_basic>"));
+        assert_eq!(basic.hosts, hosts.map(String::from));
+        assert_eq!(String::from_utf8(BASE64.decode(&basic.value).unwrap()).unwrap(), "x-access-token:ghp_example");
+        // Only the raw placeholder is exposed as a variable.
+        assert_eq!(built.env, vec![("GH_TOKEN".to_string(), "<BOXLITE_SECRET:github_work>".to_string())]);
+        assert_eq!(built.source_vars, vec!["GH_TOKEN".to_string()]);
+    }
+
+    #[test]
+    fn a_git_only_secret_sets_no_variable_and_an_empty_user_encodes_a_leading_colon() {
+        let built = build(&[git_spec("azure", None, &["dev.azure.com"], "")]).unwrap();
+        assert!(built.env.is_empty() && built.source_vars.is_empty());
+        assert_eq!(String::from_utf8(BASE64.decode(&built.secrets[1].value).unwrap()).unwrap(), ":ghp_example");
+    }
+
+    #[test]
+    fn a_stored_secret_without_env_loads_as_a_spec_with_no_variable() {
+        let mut store = FakeStore::default();
+        store.insert_git("gl", "tok", &["gitlab.com"], None, "oauth2");
+        let spec = one(&store, "gl").unwrap();
+        assert_eq!((spec.env_var, spec.user.as_deref(), spec.git), (None, Some("oauth2"), true));
+    }
+
+    #[test]
+    fn the_bootstrap_writes_the_header_and_the_scoped_blank_for_every_git_host() {
+        let specs = [git_spec("github_work", Some("GH_TOKEN"), &["github.com", "git.example.com:8443"], "x-access-token")];
+        let script = git_bootstrap_script(&specs).unwrap().unwrap();
+        for host in ["github.com", "git.example.com:8443"] {
+            assert!(script.contains(&format!("git config --global 'http.https://{host}/.extraHeader' 'Authorization: Basic <BOXLITE_SECRET:github_work_basic>'")), "{script}");
+            // Scoped to the URL, not the generic `credential.helper`: git resolves by urlmatch specificity.
+            assert!(script.contains(&format!("git config --global 'credential.https://{host}.helper' ''")), "{script}");
         }
+    }
+
+    #[test]
+    fn no_git_secret_means_no_bootstrap_and_a_hostile_host_is_refused() {
+        assert_eq!(git_bootstrap_script(&[spec("k", "K", &["a.com"], Some("v"))]).unwrap(), None);
+        let bad = [git_spec("x", None, &["a.com'; rm -rf /; '"], "u")];
+        assert!(git_bootstrap_script(&bad).is_err());
+    }
+
+    #[test]
+    fn two_git_secrets_on_one_host_are_rejected_but_disjoint_hosts_are_fine() {
+        let a = git_spec("github_work", Some("GH_TOKEN"), &["github.com"], "u");
+        let b = git_spec("github_personal", Some("GH_TOKEN2"), &["github.com", "gist.github.com"], "u");
+        let err = check_unique_env(&[a.clone(), b]).unwrap_err().to_string();
+        assert!(err.contains("github.com") && err.contains("git"), "{err}");
+        let c = git_spec("gitlab", Some("GL_TOKEN"), &["gitlab.com"], "oauth2");
+        check_unique_env(&[a, c]).unwrap();
+    }
+
+    #[test]
+    fn git_only_secrets_do_not_collide_on_a_missing_variable() {
+        let a = git_spec("a", None, &["a.com"], "u");
+        let b = git_spec("b", None, &["b.com"], "u");
+        check_unique_env(&[a, b]).unwrap();
+    }
+
+    #[test]
+    fn resume_hash_of_a_git_secret_covers_user_and_git() {
+        let h = |user: &str| {
+            let mut s = git_spec("k", Some("E"), &["a.com"], user);
+            s.value = Some("v".into());
+            let specs = [s];
+            resume_hashes(&specs, &build(&specs).unwrap())["k"]
+        };
+        assert_eq!(h("u"), h("u"));
+        assert_ne!(h("u"), h("u2"));
     }
 }

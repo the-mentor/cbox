@@ -78,14 +78,11 @@ pub async fn run(args: UpArgs) -> Result<()> {
 
     // Secrets first: their source variables must be withheld from passthrough.
     let mut specs = Vec::new();
-    if secrets::has_github_token() {
-        specs.push(secrets::github_spec());
-    }
     // The store opens only when a bare name exists; all bare names are read in one call.
     specs.extend(secrets::specs_from_flags(&resolved_profile.secrets, secretstore::open_default)?);
     secrets::check_unique_env(&specs)?;
     let built = secrets::build(&specs)?;
-    let has_github = specs.iter().any(|s| s.name == "gh");
+    let git_script = secrets::git_bootstrap_script(&specs)?;
 
     // Computed before `built.secrets` is moved into `boxopts::build` below.
     // Never the values themselves -- see `sidecar::hash_secret_value` for
@@ -233,8 +230,8 @@ pub async fn run(args: UpArgs) -> Result<()> {
         }
     }
 
-    if has_github {
-        run_git_bootstrap(&litebox).await;
+    if let Some(script) = &git_script {
+        run_git_bootstrap(&litebox, script).await;
     }
 
     let litebox = Arc::new(litebox);
@@ -347,7 +344,7 @@ fn secure_box_home(home: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Point git at the pre-encoded secret so GitHub operations authenticate.
+/// Point git at the pre-encoded secrets so git operations over https authenticate.
 ///
 /// This step is entirely best-effort: it must never take `cbox up` down with
 /// it. Two things can go wrong — the image might not have git at all, or the
@@ -357,7 +354,7 @@ fn secure_box_home(home: &std::path::Path) -> Result<()> {
 /// visible immediately and named by the warning below, and that outcome is
 /// strictly better than killing the whole session over an inessential
 /// configuration step.
-async fn run_git_bootstrap(litebox: &LiteBox) {
+async fn run_git_bootstrap(litebox: &LiteBox, script: &str) {
     let has_git = match litebox
         .exec(BoxCommand::new("sh").args(["-lc", "command -v git >/dev/null 2>&1"]))
         .await
@@ -367,7 +364,7 @@ async fn run_git_bootstrap(litebox: &LiteBox) {
             Err(e) => {
                 eprintln!(
                     "cbox: warning: could not check for git in the box ({e}); \
-                     skipping GitHub credential bootstrap. git operations against \
+                     skipping git credential bootstrap. git operations against \
                      GitHub will fail to authenticate until this is configured manually."
                 );
                 return;
@@ -376,7 +373,7 @@ async fn run_git_bootstrap(litebox: &LiteBox) {
         Err(e) => {
             eprintln!(
                 "cbox: warning: could not check for git in the box ({e}); \
-                 skipping GitHub credential bootstrap. git operations against \
+                 skipping git credential bootstrap. git operations against \
                  GitHub will fail to authenticate until this is configured manually."
             );
             return;
@@ -385,29 +382,28 @@ async fn run_git_bootstrap(litebox: &LiteBox) {
 
     if !has_git {
         eprintln!(
-            "cbox: warning: git not found in the box; skipping GitHub credential bootstrap. \
-             git operations against GitHub will fail to authenticate."
+            "cbox: warning: git not found in the box; skipping git credential bootstrap. \
+             git operations against the secret's hosts will fail to authenticate."
         );
         return;
     }
 
-    let script = secrets::git_bootstrap_script();
-    match litebox.exec(BoxCommand::new("sh").args(["-lc", &script])).await {
+    match litebox.exec(BoxCommand::new("sh").args(["-lc", script])).await {
         Ok(e) => match e.wait().await {
             Ok(result) if result.success() => {}
             Ok(result) => eprintln!(
                 "cbox: warning: git credential bootstrap exited with code {}; \
-                 git operations against GitHub will fail to authenticate.",
+                 git operations against the secret's hosts will fail to authenticate.",
                 result.exit_code
             ),
             Err(e) => eprintln!(
                 "cbox: warning: git credential bootstrap failed ({e}); \
-                 git operations against GitHub will fail to authenticate."
+                 git operations against the secret's hosts will fail to authenticate."
             ),
         },
         Err(e) => eprintln!(
             "cbox: warning: git credential bootstrap failed to start ({e}); \
-             git operations against GitHub will fail to authenticate."
+             git operations against the secret's hosts will fail to authenticate."
         ),
     }
 }

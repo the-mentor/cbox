@@ -73,9 +73,13 @@ pub fn hash_secret_value(value: &str) -> u64 {
 /// For store-backed secrets: editing hosts or the env name must also flag the
 /// box as stale. Tuple hashing is unambiguous: `str` hashes with a terminator
 /// and `[String]` with a length prefix.
-pub fn hash_stored_secret(value: &str, hosts: &[String], env: &str) -> u64 {
+pub fn hash_stored_secret(value: &str, hosts: &[String], env: Option<&str>, user: Option<&str>, git: bool) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    (value, hosts, env).hash(&mut hasher);
+    match (env, user, git) {
+        // The pre-git shape hashes as it always did, so existing boxes show no spurious "changed".
+        (Some(env), None, false) => (value, hosts, env).hash(&mut hasher),
+        _ => (value, hosts, env, user, git).hash(&mut hasher),
+    }
     hasher.finish()
 }
 
@@ -189,19 +193,22 @@ mod tests {
     #[test]
     fn hash_changes_when_hosts_or_env_change_but_value_does_not() {
         let hosts = vec!["a.com".to_string()];
-        let base = hash_stored_secret("v", &hosts, "K");
-        assert_eq!(base, hash_stored_secret("v", &hosts, "K"));
-        assert_ne!(base, hash_stored_secret("v", &["b.com".to_string()], "K"));
-        assert_ne!(base, hash_stored_secret("v", &hosts, "K2"));
-        assert_ne!(base, hash_stored_secret("v2", &hosts, "K"));
+        let h = |v: &str, hosts: &[String], env: &str| hash_stored_secret(v, hosts, Some(env), None, false);
+        let base = h("v", &hosts, "K");
+        assert_eq!(base, h("v", &hosts, "K"));
+        assert_ne!(base, h("v", &["b.com".to_string()], "K"));
+        assert_ne!(base, h("v", &hosts, "K2"));
+        assert_ne!(base, h("v2", &hosts, "K"));
+        assert_ne!(base, hash_stored_secret("v", &hosts, Some("K"), Some("u"), true));
+        assert_ne!(hash_stored_secret("v", &hosts, Some("K"), Some("u"), true), hash_stored_secret("v", &hosts, Some("K"), Some("u2"), true));
         // Field boundaries are unambiguous.
         assert_ne!(
-            hash_stored_secret("v", &["ab".to_string()], "c"),
-            hash_stored_secret("v", &["a".to_string()], "bc")
+            h("v", &["ab".to_string()], "c"),
+            h("v", &["a".to_string()], "bc")
         );
         assert_ne!(
-            hash_stored_secret("v", &["a".to_string(), "b".to_string()], "K"),
-            hash_stored_secret("v", &["a,b".to_string()], "K")
+            h("v", &["a".to_string(), "b".to_string()], "K"),
+            h("v", &["a,b".to_string()], "K")
         );
     }
 

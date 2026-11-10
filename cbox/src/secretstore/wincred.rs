@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn an_entry_over_2560_bytes_is_rejected_before_spawning() {
-        let big = StoredSecret { value: "a".repeat(2600), hosts: vec!["api.example.com".into()], env: "K".into() };
+        let big = StoredSecret { value: "a".repeat(2600), hosts: vec!["api.example.com".into()], env: Some("K".into()), ..Default::default() };
         let err = WinCredStore.put("big", &big).unwrap_err().to_string();
         assert!(err.contains("over the 2560-byte limit"), "{err}");
     }
@@ -341,7 +341,7 @@ mod tests {
 
     #[test]
     fn put_sends_the_json_on_stdin_only() {
-        let s = StoredSecret { value: "sk-abc".into(), hosts: vec!["a.com".into()], env: "K".into() };
+        let s = StoredSecret { value: "sk-abc".into(), hosts: vec!["a.com".into()], env: Some("K".into()), ..Default::default() };
         let (stdin, args) = with_fake("ok:", |d| {
             WinCredStore.put("x", &s).unwrap();
             (std::fs::read_to_string(d.join("stdin")).unwrap(), std::fs::read_to_string(d.join("args")).unwrap())
