@@ -21,7 +21,7 @@ mod terminal_guard;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
@@ -116,12 +116,54 @@ enum Commands {
         #[command(subcommand)]
         cmd: commands::profile::ProfileCmd,
     },
+    /// Print a shell completion script (bash, zsh, fish, powershell, elvish).
+    #[command(
+        arg_required_else_help = true,
+        subcommand_required = true,
+        disable_help_subcommand = true,
+        subcommand_value_name = "SHELL",
+        after_help = "Supported shells and how to load the script:\n  bash        source <(cbox completion bash)\n  zsh         source <(cbox completion zsh)   (in ~/.zshrc, after compinit)\n  fish        cbox completion fish > ~/.config/fish/completions/cbox.fish\n  powershell  cbox completion powershell | Out-String | Invoke-Expression\n  elvish      eval (cbox completion elvish | slurp)"
+    )]
+    Completion {
+        // A subcommand, not a positional: fish and PowerShell only complete subcommands.
+        #[command(subcommand)]
+        shell: ShellCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum ShellCmd {
+    /// Print the bash completion script
+    Bash,
+    /// Print the zsh completion script
+    Zsh,
+    /// Print the fish completion script
+    Fish,
+    /// Print the PowerShell completion script
+    Powershell,
+    /// Print the elvish completion script
+    Elvish,
+}
+
+impl From<ShellCmd> for clap_complete::Shell {
+    fn from(s: ShellCmd) -> Self {
+        match s {
+            ShellCmd::Bash => Self::Bash,
+            ShellCmd::Zsh => Self::Zsh,
+            ShellCmd::Fish => Self::Fish,
+            ShellCmd::Powershell => Self::PowerShell,
+            ShellCmd::Elvish => Self::Elvish,
+        }
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Before parse: clap exits on --help, which must still create the file.
-    commands::profile::startup_ensure();
+    // `completion` runs from shell startup files; it must not create profiles.toml as a side effect.
+    if std::env::args().nth(1).as_deref() != Some("completion") {
+        commands::profile::startup_ensure();
+    }
     let cli = Cli::try_parse().unwrap_or_else(|e| {
         // Asking for help by leaving arguments out is not a failure: clap exits 2 for it, which
         // makes `just` print "Recipe failed". Real usage errors keep their exit code.
@@ -152,6 +194,9 @@ async fn main() -> Result<()> {
         Commands::List { all } => commands::list::run(all).await?,
         Commands::Secret { cmd } => commands::secret::run(cmd)?,
         Commands::Profile { cmd } => commands::profile::run(cmd)?,
+        Commands::Completion { shell } => {
+            clap_complete::generate(clap_complete::Shell::from(shell), &mut Cli::command(), "cbox", &mut std::io::stdout())
+        }
     }
     Ok(())
 }

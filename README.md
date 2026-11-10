@@ -267,6 +267,35 @@ emitting events at all.
 
 </details>
 
+### Shell completion ⌨️
+
+`cbox completion <SHELL>` prints a tab-completion script for `cbox` subcommands and flags
+(`cbox name`, `cbox up --pro<TAB>`). The script is static, so it does not complete dynamic
+values such as profile or secret names. It registers completion for the command `cbox`, so the
+`cbox` binary must be on your `PATH`. `cb` is the `just` wrapper, not `cbox`: `cb completion
+bash` (`just completion`) prints the same script, but nothing is registered for `cb` itself.
+
+```bash
+# bash: current session, then permanent
+source <(cbox completion bash)
+echo 'source <(cbox completion bash)' >> ~/.bashrc
+# or, with bash-completion installed: cbox completion bash > ~/.local/share/bash-completion/completions/cbox
+
+# zsh: in ~/.zshrc, after compinit (the script registers itself with compdef when sourced)
+autoload -Uz compinit && compinit
+source <(cbox completion zsh)
+# a file named _cbox in a directory on fpath works too; if it does not show up: rm -f ~/.zcompdump*
+```
+
+```powershell
+# PowerShell 7 (pwsh): current session, then permanent
+cbox completion powershell | Out-String | Invoke-Expression
+New-Item -Path $PROFILE -Type File -Force      # only if $PROFILE does not exist yet
+Add-Content $PROFILE 'cbox completion powershell | Out-String | Invoke-Expression'
+```
+
+fish and elvish are supported too; `cbox completion --help` shows the one-line setup for each.
+
 ## How it works 🧠
 
 ```mermaid

@@ -27,6 +27,7 @@ just exec               # open a session in the running box (alias: just shell)
 just list               # list running boxes across every box name (see below), forwarding args to cbox's own `list` command
 just secret             # manage stored secrets: `just secret create NAME --host HOSTS --env VAR`, `list`, `edit`, `delete` (see below)
 just profile            # manage profiles: `just profile create NAME [--secrets a,b] [--image I] ...`, `list`, `edit`, `delete`, `validate` (see below)
+just completion [SHELL] # print cbox's shell completion script (bash, zsh, fish, powershell, elvish)
 just down               # stop and remove the box
 just gateway-up/down/logs # manage the host-side agentgateway
 just gateway-generate-ui-password # change the admin UI's default credentials, see below

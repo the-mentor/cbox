@@ -301,3 +301,12 @@ version:
     set -eu
     [ -x "{{cbox_bin}}" ] || { echo "cbox binary not found at {{cbox_bin}} - run 'just build-cbox' or 'just install-cbox' first" >&2; exit 1; }
     exec "{{cbox_bin}}" --version
+
+# Print a shell completion script for the cbox binary (bash, zsh, fish, powershell, elvish).
+# Usage: just completion [bash|zsh|fish|powershell|elvish]   (e.g. `source <(cb completion bash)`; no shell shows cbox's help)
+[positional-arguments]
+completion *args:
+    #!/usr/bin/env sh
+    set -eu
+    [ -x "{{cbox_bin}}" ] || { echo "cbox binary not found at {{cbox_bin}} - run 'just build-cbox' or 'just install-cbox' first" >&2; exit 1; }
+    exec "{{cbox_bin}}" completion "$@"

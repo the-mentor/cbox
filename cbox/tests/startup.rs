@@ -39,3 +39,48 @@ fn a_command_without_its_arguments_prints_help_and_exits_zero() {
     assert_eq!(run(&["secret", "create", "n"]).status.code(), Some(2));
     std::fs::remove_dir_all(&d).ok();
 }
+
+#[test]
+fn completion_without_a_shell_prints_help_and_a_known_shell_prints_a_script() {
+    let d = std::env::temp_dir().join(format!("cbox-completion-{}", std::process::id()));
+    std::fs::remove_dir_all(&d).ok();
+    std::fs::create_dir_all(&d).unwrap();
+    let run = |args: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_cbox"))
+            .args(args)
+            .env("XDG_CONFIG_HOME", &d)
+            .env("HOME", &d)
+            .output()
+            .unwrap()
+    };
+    let out = run(&["completion"]);
+    let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success() && text.contains("Usage:"), "{out:?}");
+    assert!(text.contains("Usage: cbox completion <SHELL>"), "{text}");
+    for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
+        assert!(text.contains(shell), "{shell} missing: {text}");
+    }
+    // `completion` runs from shell startup files: it must not create profiles.toml as a side effect.
+    let profiles = d.join("cbox/profiles.toml");
+    assert!(!profiles.exists(), "`completion` without a shell must not create profiles.toml");
+    let out = run(&["completion", "bash"]);
+    assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("_cbox"), "{out:?}");
+    assert!(!profiles.exists(), "`completion bash` must not create profiles.toml");
+    // fish and PowerShell only complete subcommands, so each shell must be one.
+    let fish = String::from_utf8_lossy(&run(&["completion", "fish"]).stdout).to_string();
+    let pwsh = String::from_utf8_lossy(&run(&["completion", "powershell"]).stdout).to_string();
+    for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
+        assert!(
+            fish.lines().any(|l| l.contains("using_subcommand completion") && l.contains(&format!("-a \"{shell}\""))),
+            "fish: {shell} not offered"
+        );
+        assert!(pwsh.contains(&format!("'{shell}', '{shell}'")), "powershell: {shell} not offered");
+    }
+    assert!(
+        !fish.lines().any(|l| l.contains("using_subcommand completion") && l.contains("-a \"help\"")),
+        "fish: help offered as a shell"
+    );
+    assert_eq!(run(&["completion", "help"]).status.code(), Some(2));
+    assert_eq!(run(&["completion", "nosuchshell"]).status.code(), Some(2));
+    std::fs::remove_dir_all(&d).ok();
+}
