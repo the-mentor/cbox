@@ -56,9 +56,8 @@ RUN usermod -l sandbox-user -d /home/sandbox-user -m node \
     && groupmod -n sandbox-user node \
     && echo 'sandbox-user ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/sandbox-user \
     && chmod 0440 /etc/sudoers.d/sandbox-user \
-    && install -d -o sandbox-user -g sandbox-user /workspace
+    && install -d -o sandbox-user -g sandbox-user /workspace \
+    && sudo -u sandbox-user -H gh auth setup-git --hostname github.com --force
 
 USER sandbox-user
-# --force: no login at build time. Writes ~/.gitconfig for sandbox-user.
-RUN gh auth setup-git --hostname github.com --force
 WORKDIR /workspace
