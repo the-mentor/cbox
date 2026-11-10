@@ -39,3 +39,28 @@ fn a_command_without_its_arguments_prints_help_and_exits_zero() {
     assert_eq!(run(&["secret", "create", "n"]).status.code(), Some(2));
     std::fs::remove_dir_all(&d).ok();
 }
+
+#[test]
+fn completion_without_a_shell_prints_help_and_a_known_shell_prints_a_script() {
+    let d = std::env::temp_dir().join(format!("cbox-completion-{}", std::process::id()));
+    std::fs::remove_dir_all(&d).ok();
+    std::fs::create_dir_all(&d).unwrap();
+    let run = |args: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_cbox"))
+            .args(args)
+            .env("XDG_CONFIG_HOME", &d)
+            .env("HOME", &d)
+            .output()
+            .unwrap()
+    };
+    let out = run(&["completion"]);
+    let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success() && text.contains("Usage:"), "{out:?}");
+    for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
+        assert!(text.contains(shell), "{shell} missing: {text}");
+    }
+    let out = run(&["completion", "bash"]);
+    assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("_cbox"), "{out:?}");
+    assert_eq!(run(&["completion", "nosuchshell"]).status.code(), Some(2));
+    std::fs::remove_dir_all(&d).ok();
+}

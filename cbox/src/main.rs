@@ -117,6 +117,10 @@ enum Commands {
         cmd: commands::profile::ProfileCmd,
     },
     /// Print a shell completion script (bash, zsh, fish, powershell, elvish).
+    #[command(
+        arg_required_else_help = true,
+        after_help = "Supported shells and how to load the script:\n  bash        source <(cbox completion bash)\n  zsh         cbox completion zsh > ~/.zfunc/_cbox   (needs ~/.zfunc in fpath)\n  fish        cbox completion fish > ~/.config/fish/completions/cbox.fish\n  powershell  cbox completion powershell | Out-String | Invoke-Expression\n  elvish      eval (cbox completion elvish | slurp)"
+    )]
     Completion { shell: clap_complete::Shell },
 }
 
