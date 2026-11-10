@@ -281,11 +281,10 @@ source <(cbox completion bash)
 echo 'source <(cbox completion bash)' >> ~/.bashrc
 # or, with bash-completion installed: cbox completion bash > ~/.local/share/bash-completion/completions/cbox
 
-# zsh: put the script on fpath, then restart the shell
-mkdir -p ~/.zfunc && cbox completion zsh > ~/.zfunc/_cbox
-# in ~/.zshrc, before compinit:  fpath=(~/.zfunc $fpath)
-#                                autoload -Uz compinit && compinit
-# if it does not show up after a restart: rm -f ~/.zcompdump*
+# zsh: in ~/.zshrc, after compinit (the script registers itself with compdef when sourced)
+autoload -Uz compinit && compinit
+source <(cbox completion zsh)
+# a file named _cbox in a directory on fpath works too; if it does not show up: rm -f ~/.zcompdump*
 ```
 
 ```powershell

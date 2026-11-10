@@ -119,9 +119,40 @@ enum Commands {
     /// Print a shell completion script (bash, zsh, fish, powershell, elvish).
     #[command(
         arg_required_else_help = true,
-        after_help = "Supported shells and how to load the script:\n  bash        source <(cbox completion bash)\n  zsh         cbox completion zsh > ~/.zfunc/_cbox   (needs ~/.zfunc in fpath)\n  fish        cbox completion fish > ~/.config/fish/completions/cbox.fish\n  powershell  cbox completion powershell | Out-String | Invoke-Expression\n  elvish      eval (cbox completion elvish | slurp)"
+        subcommand_required = true,
+        after_help = "Supported shells and how to load the script:\n  bash        source <(cbox completion bash)\n  zsh         source <(cbox completion zsh)   (in ~/.zshrc, after compinit)\n  fish        cbox completion fish > ~/.config/fish/completions/cbox.fish\n  powershell  cbox completion powershell | Out-String | Invoke-Expression\n  elvish      eval (cbox completion elvish | slurp)"
     )]
-    Completion { shell: clap_complete::Shell },
+    Completion {
+        // A subcommand, not a positional: fish and PowerShell only complete subcommands.
+        #[command(subcommand)]
+        shell: ShellCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum ShellCmd {
+    /// Print the bash completion script
+    Bash,
+    /// Print the zsh completion script
+    Zsh,
+    /// Print the fish completion script
+    Fish,
+    /// Print the PowerShell completion script
+    Powershell,
+    /// Print the elvish completion script
+    Elvish,
+}
+
+impl From<ShellCmd> for clap_complete::Shell {
+    fn from(s: ShellCmd) -> Self {
+        match s {
+            ShellCmd::Bash => Self::Bash,
+            ShellCmd::Zsh => Self::Zsh,
+            ShellCmd::Fish => Self::Fish,
+            ShellCmd::Powershell => Self::PowerShell,
+            ShellCmd::Elvish => Self::Elvish,
+        }
+    }
 }
 
 #[tokio::main]
@@ -162,7 +193,7 @@ async fn main() -> Result<()> {
         Commands::Secret { cmd } => commands::secret::run(cmd)?,
         Commands::Profile { cmd } => commands::profile::run(cmd)?,
         Commands::Completion { shell } => {
-            clap_complete::generate(shell, &mut Cli::command(), "cbox", &mut std::io::stdout())
+            clap_complete::generate(clap_complete::Shell::from(shell), &mut Cli::command(), "cbox", &mut std::io::stdout())
         }
     }
     Ok(())
