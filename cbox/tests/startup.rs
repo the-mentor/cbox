@@ -56,6 +56,7 @@ fn completion_without_a_shell_prints_help_and_a_known_shell_prints_a_script() {
     let out = run(&["completion"]);
     let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success() && text.contains("Usage:"), "{out:?}");
+    assert!(text.contains("Usage: cbox completion <SHELL>"), "{text}");
     for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
         assert!(text.contains(shell), "{shell} missing: {text}");
     }
@@ -69,11 +70,17 @@ fn completion_without_a_shell_prints_help_and_a_known_shell_prints_a_script() {
     let fish = String::from_utf8_lossy(&run(&["completion", "fish"]).stdout).to_string();
     let pwsh = String::from_utf8_lossy(&run(&["completion", "powershell"]).stdout).to_string();
     for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
-        let f = format!("__fish_cbox_using_subcommand completion; and not __fish_seen_subcommand_from bash zsh fish powershell elvish help\" -f -a \"{shell}\"");
-        assert!(fish.contains(&f), "fish: {shell} not offered");
-        let p = format!("[CompletionResult]::new('{shell}', '{shell}', [CompletionResultType]::ParameterValue, 'Print the");
-        assert!(pwsh.contains(&p), "powershell: {shell} not offered");
+        assert!(
+            fish.lines().any(|l| l.contains("using_subcommand completion") && l.contains(&format!("-a \"{shell}\""))),
+            "fish: {shell} not offered"
+        );
+        assert!(pwsh.contains(&format!("'{shell}', '{shell}'")), "powershell: {shell} not offered");
     }
+    assert!(
+        !fish.lines().any(|l| l.contains("using_subcommand completion") && l.contains("-a \"help\"")),
+        "fish: help offered as a shell"
+    );
+    assert_eq!(run(&["completion", "help"]).status.code(), Some(2));
     assert_eq!(run(&["completion", "nosuchshell"]).status.code(), Some(2));
     std::fs::remove_dir_all(&d).ok();
 }

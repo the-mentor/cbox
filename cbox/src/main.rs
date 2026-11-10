@@ -120,6 +120,8 @@ enum Commands {
     #[command(
         arg_required_else_help = true,
         subcommand_required = true,
+        disable_help_subcommand = true,
+        subcommand_value_name = "SHELL",
         after_help = "Supported shells and how to load the script:\n  bash        source <(cbox completion bash)\n  zsh         source <(cbox completion zsh)   (in ~/.zshrc, after compinit)\n  fish        cbox completion fish > ~/.config/fish/completions/cbox.fish\n  powershell  cbox completion powershell | Out-String | Invoke-Expression\n  elvish      eval (cbox completion elvish | slurp)"
     )]
     Completion {
