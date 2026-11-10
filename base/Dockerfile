@@ -17,6 +17,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o 
     && apt install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
+# Build runs as root, so write the credential helper to /etc/gitconfig (not
+# /root/.gitconfig) for sandbox-user to inherit. --force: no login at build time.
+RUN GIT_CONFIG_GLOBAL=/etc/gitconfig gh auth setup-git --hostname github.com --force
+
 # npm keeps a ~100MB copy of the downloaded package in its cache, and node
 # leaves a compile cache in /tmp; neither is used at runtime.
 RUN npm install -g @anthropic-ai/claude-code \
