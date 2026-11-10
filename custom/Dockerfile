@@ -33,17 +33,15 @@ RUN set -eu; IFS=,; \
 
 # Private marketplaces/plugins, same format as above. Set via CBOX_PRIVATE_* in
 # .env, never here: this repo is public. `just build-image` passes a GitHub token
-# as a BuildKit secret, mounted for this RUN only. git reads it through a
-# credential helper set in env vars scoped to this RUN, so it never lands in
-# a layer, ~/.gitconfig, or the clone's remote URL. No-op when unset.
+# as a BuildKit secret, mounted for this RUN only. git reads it through the gh
+# credential helper (base image) from a GH_TOKEN scoped to this RUN, so it never
+# lands in a layer, ~/.gitconfig, or the clone's remote URL. No-op when unset.
 ARG CBOX_PRIVATE_MARKETPLACES=""
 ARG CBOX_PRIVATE_PLUGINS=""
 RUN --mount=type=secret,id=gh_token,uid=1000 set -eu; \
     [ -n "$CBOX_PRIVATE_MARKETPLACES" ] || exit 0; \
     [ -s /run/secrets/gh_token ] || { echo "CBOX_PRIVATE_MARKETPLACES set but no gh_token secret" >&2; exit 1; }; \
-    export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 \
-        GIT_CONFIG_KEY_0=credential.https://github.com.helper \
-        GIT_CONFIG_VALUE_0='!f() { test "$1" = get && echo username=x-access-token && echo "password=$(cat /run/secrets/gh_token)"; }; f'; \
+    export GIT_TERMINAL_PROMPT=0 GH_TOKEN="$(cat /run/secrets/gh_token)"; \
     IFS=,; \
     for m in $CBOX_PRIVATE_MARKETPLACES; do claude plugin marketplace add "$m"; done; \
     for p in $CBOX_PRIVATE_PLUGINS; do claude plugin install --scope user "$p"; done
