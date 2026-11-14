@@ -307,9 +307,9 @@ dependencies = [
 
 [[package]]
 name = "boxlite"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ce36a3ba65cc81bd83c31c2f1397d5e42735248754b3347c722f5d5c54a1f8a"
+checksum = "f6047bc1042efd7211234528f83e4dd64f3833dfe2b2ad29e56dba47ed61959d"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -383,9 +383,9 @@ dependencies = [
 
 [[package]]
 name = "boxlite-shared"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c5ce9532367f4d917c83b6e609557d6b95ade29b1e80ff2091b243793236564"
+checksum = "424ff9986d257d293d2e134ed5b3f653c7dd068863a2c9604ecb802efa7e9cac"
 dependencies = [
  "futures",
  "prost",
@@ -401,9 +401,9 @@ dependencies = [
 
 [[package]]
 name = "bubblewrap-sys"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5839581d996951646e745a0a6ccadd74ea98b23db0ed1d48e2941e41c27983a0"
+checksum = "c1eccaac94c6281ba49ae738edea728b71ee7458d9b8bc60dcaf5323145985ee"
 dependencies = [
  "num_cpus",
 ]
@@ -916,9 +916,9 @@ dependencies = [
 
 [[package]]
 name = "e2fsprogs-sys"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "078b4870bb3a137fbf309b589e6263ad3c190f705111c5e758dc07c368323346"
+checksum = "c3aaba653398f3c41d5617a270d5c7be84176cde8c1eb471b0096bc01b9b8bc2"
 dependencies = [
  "num_cpus",
 ]
@@ -981,7 +981,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1764,9 +1764,9 @@ checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "libkrun-sys"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afc9a79868f4a3ba112f340671230b13e33d39e65db557e978671f6419982e8d"
+checksum = "46d72b6641f94fa1379f96de10f5d70a8e9bdd1f5ea9c1f94e18394d5e7e7193"
 dependencies = [
  "libc",
  "num_cpus",
@@ -2408,7 +2408,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.5",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2747,7 +2747,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3204,10 +3204,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3954,7 +3954,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
