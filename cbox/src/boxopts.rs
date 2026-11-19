@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 use boxlite::{BoxOptions, RootfsSpec, Secret};
+use boxlite::runtime::advanced_options::AdvancedBoxOptions;
 use boxlite::runtime::options::VolumeSpec;
 
 /// Default disk size for a booted box, used when `--disk-size` is absent.
@@ -16,6 +17,15 @@ pub const DISK_SIZE_GB: u64 = 10;
 /// `cargo build` of cbox itself OOM-killed inside the box.
 pub const MEMORY_GB: u32 = 4;
 pub const CPUS: u8 = 2;
+
+/// Open-file limit for the box's host-side process (`boxlite-shim`), which
+/// serves the `-v` shares: every file the box opens on a share is a handle
+/// here, on top of the VM's own pipes and kqueues (~140 with one share, ~470
+/// with twenty). At BoxLite's default of 1024 a long-running box fails every
+/// share with "Too many open files" within hours. A handful of boxes at this
+/// limit still fit well under the host's system-wide one (`kern.maxfiles` on
+/// macOS).
+pub const MAX_OPEN_FILES: u64 = 16_384;
 
 /// The box's init process (PID 1 inside the container) -- never the user's
 /// command.
@@ -141,6 +151,10 @@ pub fn build(
     let memory_gb = flags.memory_gb.unwrap_or(MEMORY_GB);
     let memory_mib = memory_gb * 1024; // check_resources rejected overflow
 
+    // Only the limit changes; the rest of BoxLite's default security profile stays.
+    let mut advanced = AdvancedBoxOptions::default();
+    advanced.security.resource_limits.max_open_files = Some(MAX_OPEN_FILES);
+
     Ok(BoxOptions {
         rootfs: RootfsSpec::Image(flags.image.clone()),
         env,
@@ -177,6 +191,7 @@ pub fn build(
         //    collision. `cbox down` remains the only thing that removes a
         //    box either way.
         auto_delete: Some(0),
+        advanced,
         ..Default::default()
     })
 }
@@ -184,6 +199,7 @@ pub fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use boxlite::runtime::advanced_options::SecurityOptions;
 
     fn flags() -> UpFlags {
         UpFlags {
@@ -342,6 +358,16 @@ mod tests {
         // The point of the change: never BoxLite's own 1 GiB / 1 CPU.
         assert!(opts.memory_mib.unwrap() > 1024);
         assert!(opts.cpus.unwrap() > 1);
+    }
+
+    #[test]
+    fn the_open_file_limit_is_raised_and_the_rest_of_the_security_profile_kept() {
+        let opts = build(&flags(), vec![], vec![]).unwrap();
+        let mut expected = SecurityOptions::default();
+        expected.resource_limits.max_open_files = Some(MAX_OPEN_FILES);
+        assert_eq!(opts.advanced.security, expected);
+        // The point of the change: never BoxLite's own 1024.
+        assert!(MAX_OPEN_FILES > 1024);
     }
 
     #[test]
