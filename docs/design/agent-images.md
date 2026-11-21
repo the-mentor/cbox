@@ -68,7 +68,7 @@ agents). The output is the default, loaded into the local docker, with no push.
 | `custom/settings.json`: `statusLine` (oh-my-posh + `mojada-claude.omp.json`) | customize | A personal theme. |
 | `custom/settings.json`: `attribution` (empty) | customize | A personal or project policy. |
 | `custom/settings.json`: `permissions.defaultMode: auto` | removed | Dropped from `custom/` in this PR. Nothing else in the repo sets a permission mode. |
-| `custom/settings.json`: `hooks` → `cbox-hook`, `custom/cbox-hook.sh` | customize | They exist only for cbox's iTerm2 forwarding on the host. |
+| `custom/settings.json`: `hooks` → `cbox-hook`, `custom/cbox-hook.sh` | `claude` defaults (`images/claude/`, copied) | cbox's iTerm2 forwarding on the host. It does nothing outside iTerm2, and `CLAUDE_ITERM2_INTEGRATION=0` turns it off. Hooks merge across scopes, so a customize image can add hooks but not remove these. |
 | `custom/mojada-claude.omp.json` | customize | Goes with `statusLine`. |
 | `custom/`: `awscli`, plugin marketplaces/plugins, private plugins | customize | Per person, per repo. |
 | Codex `check_for_update_on_startup = false`, `/workspace` `trust_level = "trusted"` | `codex` defaults (`images/codex/config.toml`) | Same reasons as `DISABLE_AUTOUPDATER` and the Claude trust entry. |
@@ -176,9 +176,10 @@ At runtime, each agent merges its own config scopes:
   defaults out (onboarding, trust and the auto-updater are already in `claude`); (4) port
   `base-rust/` onto `base`; (5) remove `base/`, update `docs/design/images.md`,
   `docs/design/general.md` and `AGENTS.md`.
-- **File duplication.** `images/base/bashrc.d/boxlite.sh` and `images/claude/claude-wrapper.sh`
-  are copies of the files in `base/`, because the build context is `images/` and `base/` must
-  not change in this PR. They can drift until `base/` is removed.
+- **File duplication.** `images/base/bashrc.d/boxlite.sh`, `images/claude/claude-wrapper.sh` and
+  `images/claude/cbox-hook.sh` are copies of files in `base/` (and `custom/` for the hook),
+  because the build context is `images/`. `base/` and `custom/` stay in use until they are
+  removed, so the copies can drift until then.
 
 ### Unverified
 

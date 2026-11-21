@@ -69,6 +69,10 @@ RUN mv /usr/local/bin/claude /usr/local/bin/claude-real \
     && ln -sf /usr/local/bin/claude-wrapper /usr/local/bin/claude \
     && ln -sf /usr/local/bin/claude-wrapper /usr/local/bin/cc
 
+# Forwards Claude Code hook events to cbox on the host (iTerm2 integration),
+# wired up as hooks in settings.json below.
+COPY --chmod=0755 claude/cbox-hook.sh /usr/local/bin/cbox-hook
+
 USER sandbox-user
 # User scope: the lowest-precedence settings, so anything above can override them.
 COPY --chown=sandbox-user:sandbox-user claude/claude.json /home/sandbox-user/.claude.json
