@@ -132,24 +132,28 @@ At runtime, each agent merges its own config scopes:
    with three thin layers it is more files and more indirection for the same graph. It is still
    the obvious move if one agent's layer grows large or needs its own build context.
 
+## Decisions
+
+- **One user and home layout for all agents.** Decided: every agent shares the single
+  `sandbox-user` (uid 1000, `/home/sandbox-user`, `/workspace`). `cbox` assumes these paths
+  today (for example, `exec` runs `claude --continue`).
+- **One customize image per agent.** Decided. Most overrides are agent config (settings, MCP
+  entries, hooks), which does not carry across agents. Parts shared by all agents (apt
+  packages, dotfiles) can still use a single `ARG BASE_IMAGE` Dockerfile.
+- **Node and oh-my-posh stay in `base`.** Decided. All three agents install with npm, and
+  oh-my-posh is a small shell tool. Revisit if a non-npm agent shows up or the Claude status
+  line stays the only user. `permissions.defaultMode: auto` stays in customize. If cbox wants it
+  as a sandbox-wide default, it belongs in `images/claude/settings.json`.
+- **The `cc` link stays in `claude`.** Decided: same as `base/`. It still shadows the C
+  compiler, which matters for a future Rust variant (see `base-rust/`'s `CC=gcc`); dropping it
+  remains the cleaner option if that bites.
+
 ## Not done / open questions
 
-- **One user and home layout for all agents?** The draft keeps the single `sandbox-user`
-  (uid 1000, `/home/sandbox-user`, `/workspace`) for every agent. `cbox` assumes these paths
-  today (for example, `exec` runs `claude --continue`).
 - **Where each agent's default config lives:** baked into the image (the draft), mounted at
   `cbox up`, or passed as env vars. Codex has no default yet. The candidates (update checks,
   approval mode, sandbox mode) need checking against the Codex docs first, and the right file
   is probably `/etc/codex/config.toml`.
-- **One customize image per agent, or one layer over any agent?** Most overrides are agent
-  config, so a per-agent customize image looks likelier. A single Dockerfile with
-  `ARG BASE_IMAGE` works only for the parts shared by all agents (apt packages, dotfiles).
-- **Ambiguous pieces kept in `base`:** oh-my-posh (only the Claude status line uses it today)
-  and Node (needed for npm installs, but a non-npm agent would not need it).
-  `permissions.defaultMode: auto` went to customize. If cbox wants it as a sandbox-wide default,
-  it belongs in `images/claude/settings.json`.
-- **The `cc` link.** It is kept in `claude` as in `base/`. It still shadows the C compiler, which
-  matters for a future Rust variant (see `base-rust/`'s `CC=gcc`). Dropping it is cleaner.
 - **How `cbox up` / `just build` switch over.** Not done. The image names, the
   `-- <cmd>`/`exec` default command per agent (`claude` vs `codex` vs `opencode`), and a
   profile `image` field are all candidates. `base/` and `custom/` are deliberately left
