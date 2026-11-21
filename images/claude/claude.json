@@ -5,5 +5,11 @@
     "/workspace": {
       "hasTrustDialogAccepted": true
     }
+  },
+  "mcpServers": {
+    "agentgateway": {
+      "type": "http",
+      "url": "http://host.boxlite.internal:15003/mcp"
+    }
   }
 }

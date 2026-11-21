@@ -63,7 +63,7 @@ agents). The output is the default, loaded into the local docker, with no push.
 | `base/`: `npm install -g @anthropic-ai/claude-code` | `claude`, pinned with `CLAUDE_CODE_VERSION` | Agent. |
 | `base/claude-wrapper.sh`, `claude-real`, `cc` link | `claude` (copied to `images/claude/`) | It handles only `ANTHROPIC_API_KEY`. `cc` no longer shadows the C compiler in `base`, only in `claude`. |
 | `custom/claude.json`: `hasCompletedOnboarding`, `theme`, `/workspace` trust | `claude` defaults (`images/claude/claude.json`) | Any headless, ephemeral box needs them so Claude Code does not stop at first-run prompts. |
-| `custom/claude.json`: `mcpServers.agentgateway` | customize | cbox/gateway-specific: it points at `host.boxlite.internal:15003`. |
+| `custom/claude.json`: `mcpServers.agentgateway` | `claude` defaults, and the same entry in the `codex` and `opencode` defaults | Every cbox box reaches the host gateway at `host.boxlite.internal:15003`, whichever agent runs in it. |
 | `custom/settings.json`: `env.DISABLE_AUTOUPDATER` | `claude` defaults (`images/claude/settings.json`) | The image pins the version, and a self-update in an ephemeral box is lost on the next boot anyway. |
 | `custom/settings.json`: `statusLine` (oh-my-posh + `mojada-claude.omp.json`) | customize | A personal theme. |
 | `custom/settings.json`: `attribution` (empty) | customize | A personal or project policy. |
@@ -154,6 +154,10 @@ At runtime, each agent merges its own config scopes:
   at `cbox up`, not env vars, and not system or managed paths. Codex's file sets only the update check and
   `/workspace` trust. `approval_policy` and `sandbox_mode` are left at Codex's defaults, since
   they are risk choices for a customize image.
+
+- **agentgateway is a default MCP server for every agent.** Decided: the entry for
+  `http://host.boxlite.internal:15003/mcp` is baked into each agent's home config. An image
+  used outside cbox gets a dead entry, which a customize image can replace.
 
 ## Not done / open questions
 

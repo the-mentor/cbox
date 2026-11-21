@@ -1,3 +1,9 @@
 {
-  "update": "disable"
+  "update": "disable",
+  "mcp": {
+    "agentgateway": {
+      "type": "remote",
+      "url": "http://host.boxlite.internal:15003/mcp"
+    }
+  }
 }

@@ -6,3 +6,7 @@ check_for_update_on_startup = false
 # The box is single-purpose: trust /workspace so Codex does not stop at the first-run prompt.
 [projects."/workspace"]
 trust_level = "trusted"
+
+# The host-side agentgateway (see agentgateway/), same MCP endpoint as the other agents.
+[mcp_servers.agentgateway]
+url = "http://host.boxlite.internal:15003/mcp"
