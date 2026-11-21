@@ -24,8 +24,26 @@ pub const CPUS: u8 = 2;
 /// with twenty). At BoxLite's default of 1024 a long-running box fails every
 /// share with "Too many open files" within hours. A handful of boxes at this
 /// limit still fit well under the host's system-wide one (`kern.maxfiles` on
-/// macOS).
+/// macOS). See `open_files_limit` for what is actually requested.
 pub const MAX_OPEN_FILES: u64 = 16_384;
+
+/// `MAX_OPEN_FILES`, or this process's hard `RLIMIT_NOFILE` if that is lower.
+///
+/// BoxLite sets the shim's soft AND hard limit to the value we give it, and a
+/// non-root process cannot raise its hard limit. On a host whose hard limit is
+/// below `MAX_OPEN_FILES` (common on Linux/WSL: 4096) asking for the full
+/// amount makes the shim's spawn fail, so box startup would break instead of
+/// just getting fewer handles. The shim inherits our limits, so ours is the
+/// ceiling. `RLIM_INFINITY` is `u64::MAX` and leaves `MAX_OPEN_FILES` as is.
+pub fn open_files_limit() -> u64 {
+    let mut r = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    // SAFETY: getrlimit only writes into the struct we pass.
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut r) } == 0 {
+        MAX_OPEN_FILES.min(r.rlim_max as u64)
+    } else {
+        MAX_OPEN_FILES
+    }
+}
 
 /// The box's init process (PID 1 inside the container) -- never the user's
 /// command.
@@ -153,7 +171,7 @@ pub fn build(
 
     // Only the limit changes; the rest of BoxLite's default security profile stays.
     let mut advanced = AdvancedBoxOptions::default();
-    advanced.security.resource_limits.max_open_files = Some(MAX_OPEN_FILES);
+    advanced.security.resource_limits.max_open_files = Some(open_files_limit());
 
     Ok(BoxOptions {
         rootfs: RootfsSpec::Image(flags.image.clone()),
@@ -364,10 +382,18 @@ mod tests {
     fn the_open_file_limit_is_raised_and_the_rest_of_the_security_profile_kept() {
         let opts = build(&flags(), vec![], vec![]).unwrap();
         let mut expected = SecurityOptions::default();
-        expected.resource_limits.max_open_files = Some(MAX_OPEN_FILES);
+        expected.resource_limits.max_open_files = Some(open_files_limit());
         assert_eq!(opts.advanced.security, expected);
-        // The point of the change: never BoxLite's own 1024.
-        assert!(MAX_OPEN_FILES > 1024);
+    }
+
+    #[test]
+    fn the_open_file_limit_never_exceeds_the_cap_or_the_hosts_hard_limit() {
+        let mut r = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        // SAFETY: getrlimit only writes into the struct we pass.
+        assert_eq!(unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut r) }, 0);
+        let limit = open_files_limit();
+        assert!(limit <= MAX_OPEN_FILES);
+        assert!(limit <= r.rlim_max as u64, "asking above the hard limit makes the spawn fail");
     }
 
     #[test]

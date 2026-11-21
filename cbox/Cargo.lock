@@ -448,6 +448,7 @@ dependencies = [
  "crossterm",
  "futures",
  "keyring-core",
+ "libc",
  "rpassword",
  "serde",
  "serde_json",
