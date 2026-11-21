@@ -223,11 +223,11 @@ pub async fn run(args: UpArgs) -> Result<()> {
         } else {
             // A reused box keeps the open-file limit it was created with, and a
             // start under a lower hard limit than that fails (see `open_files_limit`).
-            format!(
-                "failed to start the box (a reused box keeps the open-file limit it was \
-                 created with; this shell allows {} -- see `ulimit -Hn`, or recreate it with -f)",
-                boxopts::open_files_limit()
-            )
+            // Worded as a possibility: any other start failure gets this hint too.
+            "failed to start the box (a reused box keeps the open-file limit it was created \
+             with; if this shell's hard limit, `ulimit -Hn`, is lower than that, raise it or \
+             recreate the box with -f)"
+                .to_string()
         }
     })?;
 
