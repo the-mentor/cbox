@@ -15,7 +15,7 @@ ARG BASE_IMAGE=node:26-trixie-slim
 FROM ${BASE_IMAGE} AS base
 RUN apt update \
     && apt upgrade -y \
-    && apt install -y --no-install-recommends sudo git curl wget ca-certificates python3 python3-pip just unzip jq yq bash-completion lazygit \
+    && apt install -y --no-install-recommends sudo git curl wget ca-certificates python3 python3-pip just unzip jq yq procps bash-completion lazygit \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-login shells skip /etc/profile.d, so source our own file from bash.bashrc.
