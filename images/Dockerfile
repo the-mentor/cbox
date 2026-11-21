@@ -75,7 +75,7 @@ COPY --chown=sandbox-user:sandbox-user claude/claude.json /home/sandbox-user/.cl
 COPY --chown=sandbox-user:sandbox-user claude/settings.json /home/sandbox-user/.claude/settings.json
 
 # ---------------------------------------------------------------------------
-# codex: base + OpenAI Codex CLI. No default config yet (open question).
+# codex: base + OpenAI Codex CLI + user-scope config (update check off, /workspace trusted).
 # ---------------------------------------------------------------------------
 FROM base AS codex
 USER root
@@ -85,6 +85,8 @@ RUN npm install -g "@openai/codex@${CODEX_VERSION}" \
     && npm cache clean --force \
     && rm -rf /tmp/node-compile-cache
 USER sandbox-user
+# User scope: Codex's user file outranks the system one, so a customize image replaces it.
+COPY --chown=sandbox-user:sandbox-user codex/config.toml /home/sandbox-user/.codex/config.toml
 
 # ---------------------------------------------------------------------------
 # opencode: base + opencode CLI + global config (update checks off).

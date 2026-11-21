@@ -71,7 +71,7 @@ agents). The output is the default, loaded into the local docker, with no push.
 | `custom/settings.json`: `hooks` → `cbox-hook`, `custom/cbox-hook.sh` | customize | They exist only for cbox's iTerm2 forwarding on the host. |
 | `custom/mojada-claude.omp.json` | customize | Goes with `statusLine`. |
 | `custom/`: `awscli`, plugin marketplaces/plugins, private plugins | customize | Per person, per repo. |
-| Codex config | none yet | No default is clearly generic. See open questions. |
+| Codex `check_for_update_on_startup = false`, `/workspace` `trust_level = "trusted"` | `codex` defaults (`images/codex/config.toml`) | Same reasons as `DISABLE_AUTOUPDATER` and the Claude trust entry. |
 | opencode `~/.config/opencode/opencode.json` `{"update": "disable"}` | `opencode` defaults | Same reason as `DISABLE_AUTOUPDATER`. The opencode docs say `update` is read only from the global config. |
 
 ### Install sources
@@ -151,9 +151,9 @@ At runtime, each agent merges its own config scopes:
 - **Agent config lives in the sandbox user's home.** Decided: each agent's defaults are plain
   files under `/home/sandbox-user` (`~/.claude.json`, `~/.claude/settings.json`,
   `~/.config/opencode/opencode.json`, `~/.codex/config.toml`), baked into the image. Not mounted
-  at `cbox up`, not env vars, and not system or managed paths. Codex has no default file yet:
-  the candidates (update checks, approval mode, sandbox mode) need checking against the Codex
-  docs first.
+  at `cbox up`, not env vars, and not system or managed paths. Codex's file sets only the update check and
+  `/workspace` trust. `approval_policy` and `sandbox_mode` are left at Codex's defaults, since
+  they are risk choices for a customize image.
 
 ## Not done / open questions
 

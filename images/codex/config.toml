@@ -1,0 +1,8 @@
+# User-scope Codex defaults (~/.codex/config.toml). Keys per
+# https://github.com/openai/codex/blob/main/codex-rs/core/config.schema.json
+# The image pins the version, so skip the update prompt in an ephemeral box.
+check_for_update_on_startup = false
+
+# The box is single-purpose: trust /workspace so Codex does not stop at the first-run prompt.
+[projects."/workspace"]
+trust_level = "trusted"

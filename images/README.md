@@ -12,10 +12,10 @@ which are still what `just build` and `cbox up` use. Design and open questions:
     `sandbox-user` user. No agent.
   - `claude`: `base` + Claude Code, its wrapper and the `cc` link, and default
     user-scope settings from `claude/`.
-  - `codex`: `base` + the Codex CLI.
+  - `codex`: `base` + the Codex CLI, with its user config from `codex/`.
   - `opencode`: `base` + opencode, with its global config from `opencode/`.
 - `docker-bake.hcl`: builds `base` and each agent as `cbox-agent-<name>:dev`.
-- `base/`, `claude/`, `opencode/`: files the stages copy in.
+- `base/`, `claude/`, `codex/`, `opencode/`: files the stages copy in.
 
 ## Build locally
 
