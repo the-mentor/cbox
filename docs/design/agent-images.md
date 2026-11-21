@@ -67,7 +67,7 @@ agents). The output is the default, loaded into the local docker, with no push.
 | `custom/settings.json`: `env.DISABLE_AUTOUPDATER` | `claude` defaults (`images/claude/settings.json`) | The image pins the version, and a self-update in an ephemeral box is lost on the next boot anyway. |
 | `custom/settings.json`: `statusLine` (oh-my-posh + `mojada-claude.omp.json`) | customize | A personal theme. |
 | `custom/settings.json`: `attribution` (empty) | customize | A personal or project policy. |
-| `custom/settings.json`: `permissions.defaultMode: auto` | customize (ambiguous) | An opinion about risk, even in a sandbox. See open questions. |
+| `custom/settings.json`: `permissions.defaultMode: auto` | removed | Dropped from `custom/` in this PR. Nothing else in the repo sets a permission mode. |
 | `custom/settings.json`: `hooks` → `cbox-hook`, `custom/cbox-hook.sh` | customize | They exist only for cbox's iTerm2 forwarding on the host. |
 | `custom/mojada-claude.omp.json` | customize | Goes with `statusLine`. |
 | `custom/`: `awscli`, plugin marketplaces/plugins, private plugins | customize | Per person, per repo. |
@@ -142,8 +142,9 @@ At runtime, each agent merges its own config scopes:
   packages, dotfiles) can still use a single `ARG BASE_IMAGE` Dockerfile.
 - **Node and oh-my-posh stay in `base`.** Decided. All three agents install with npm, and
   oh-my-posh is a small shell tool. Revisit if a non-npm agent shows up or the Claude status
-  line stays the only user. `permissions.defaultMode: auto` stays in customize. If cbox wants it
-  as a sandbox-wide default, it belongs in `images/claude/settings.json`.
+  line stays the only user.
+- **`permissions.defaultMode: auto` is removed** from `custom/settings.json`. The default
+  permission mode applies.
 - **The `cc` link stays in `claude`.** Decided: same as `base/`. It still shadows the C
   compiler, which matters for a future Rust variant (see `base-rust/`'s `CC=gcc`); dropping it
   remains the cleaner option if that bites.
