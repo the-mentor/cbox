@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.30](https://github.com/the-mentor/cbox/compare/v0.1.29...v0.1.30) (2026-11-21)
+
+
+### Bug Fixes
+
+* raise the box's host-side open-file limit to 16384 ([#169](https://github.com/the-mentor/cbox/issues/169)) ([74abdaf](https://github.com/the-mentor/cbox/commit/74abdaff5fe8f300a2932a808f52d50cf08d2bcd))
+
 ## [0.1.29](https://github.com/the-mentor/cbox/compare/v0.1.28...v0.1.29) (2026-11-10)
 
 
