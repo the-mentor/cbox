@@ -15,7 +15,7 @@ ARG BASE_IMAGE=node:26-trixie-slim
 FROM ${BASE_IMAGE} AS base
 RUN apt update \
     && apt upgrade -y \
-    && apt install -y --no-install-recommends sudo git curl wget ca-certificates python3 python3-pip just unzip jq bash-completion lazygit \
+    && apt install -y --no-install-recommends sudo git curl wget ca-certificates python3 python3-pip just unzip jq yq bash-completion lazygit \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-login shells skip /etc/profile.d, so source our own file from bash.bashrc.
@@ -32,17 +32,6 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o 
 ENV POSH_THEMES_PATH=/usr/local/share/oh-my-posh/themes
 RUN curl -s https://ohmyposh.dev/install.sh | bash -s -- -d /usr/local/bin -t "$POSH_THEMES_PATH" \
     && rm -rf /root/.cache/oh-my-posh
-
-# mikefarah/yq (Go), not Debian's `yq` package, which is a Python wrapper around jq.
-# Pinned and checked per arch against the release's checksums file.
-ARG YQ_VERSION=4.54.3
-ARG YQ_SHA256_AMD64=129534601871538efe0ba4c5e62a34fb1d5f469bcb975c4fddeb467d82974973
-ARG YQ_SHA256_ARM64=89f69310b61b68d1245065a1241d1fc843f7a36cd6103ffd77ad987613bd1b67
-RUN arch="$(dpkg --print-architecture)" \
-    && case "$arch" in amd64) sha="$YQ_SHA256_AMD64" ;; arm64) sha="$YQ_SHA256_ARM64" ;; *) echo "unsupported arch $arch" >&2; exit 1 ;; esac \
-    && curl -fsSL -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${arch}" \
-    && echo "${sha}  /usr/local/bin/yq" | sha256sum -c - \
-    && chmod 0755 /usr/local/bin/yq
 
 ARG UV_VERSION=0.13.7
 RUN pip install --no-cache-dir --break-system-packages "uv==${UV_VERSION}"

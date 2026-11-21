@@ -56,7 +56,7 @@ agents). The output is the default, loaded into the local docker, with no push.
 
 | Piece today | Goes to | Why |
 | --- | --- | --- |
-| `base/`: apt packages, `gh`, `uv`, `pre-commit`, the `sandbox-user` rename, `/workspace` | `base` (`yq` is new in `images/`) | Not agent-specific. |
+| `base/`: apt packages, `gh`, `uv`, `pre-commit`, the `sandbox-user` rename, `/workspace` | `base` (`yq` is new in `images/`, from apt: the Python jq-wrapper, v3.4.3 on trixie) | Not agent-specific. |
 | `base/`: Node (the `node:` base image) | `base` | Codex, opencode and Claude Code all install with npm here. It is also a general runtime. |
 | `base/`: oh-my-posh and `POSH_THEMES_PATH` | `base` (ambiguous) | A shell tool. Today only the Claude status line uses it. See open questions. |
 | `base/bashrc.d/boxlite.sh` (bash-completion, `lg` alias) | `base` (copied to `images/base/`) | Nothing Claude-specific in it. |
