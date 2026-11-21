@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 use boxlite::{BoxOptions, RootfsSpec, Secret};
+use boxlite::runtime::advanced_options::AdvancedBoxOptions;
 use boxlite::runtime::options::VolumeSpec;
 
 /// Default disk size for a booted box, used when `--disk-size` is absent.
@@ -16,6 +17,40 @@ pub const DISK_SIZE_GB: u64 = 10;
 /// `cargo build` of cbox itself OOM-killed inside the box.
 pub const MEMORY_GB: u32 = 4;
 pub const CPUS: u8 = 2;
+
+/// Open-file limit wanted for the box's host-side process (`boxlite-shim`).
+/// It holds a handle for every file the box opens on a `-v` share, on top of
+/// the VM's own pipes (measured on BoxLite 0.11: ~140 with one share, ~470
+/// with twenty), so BoxLite's default of 1024 runs out on a long-running box
+/// with many shares ("Too many open files"). See `open_files_limit` for what
+/// is actually requested.
+pub const MAX_OPEN_FILES: u64 = 16_384;
+
+/// `MAX_OPEN_FILES`, or this process's hard `RLIMIT_NOFILE` if that is lower.
+///
+/// BoxLite 0.11 sets the shim's soft AND hard limit to the value we give it.
+/// An unprivileged process cannot raise its hard limit, so on a host whose
+/// hard limit is below `MAX_OPEN_FILES` (e.g. 4096 on some Linux/WSL setups)
+/// asking for the full amount fails the shim's spawn. The shim inherits our
+/// limits, so for an unprivileged cbox ours is the ceiling. An unlimited hard
+/// limit (`RLIM_INFINITY`, a huge value) leaves `MAX_OPEN_FILES` unchanged.
+///
+/// Not covered: macOS also caps `setrlimit(RLIMIT_NOFILE)` at
+/// `kern.maxfilesperproc`, which can be lower than the hard limit it reports
+/// (check with `sysctl kern.maxfilesperproc`).
+pub fn open_files_limit() -> u64 {
+    let mut r = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    // SAFETY: getrlimit only writes into the struct we pass.
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut r) } == 0 {
+        clamp_to_hard_limit(r.rlim_max as u64)
+    } else {
+        MAX_OPEN_FILES
+    }
+}
+
+fn clamp_to_hard_limit(hard: u64) -> u64 {
+    MAX_OPEN_FILES.min(hard)
+}
 
 /// The box's init process (PID 1 inside the container) -- never the user's
 /// command.
@@ -141,6 +176,10 @@ pub fn build(
     let memory_gb = flags.memory_gb.unwrap_or(MEMORY_GB);
     let memory_mib = memory_gb * 1024; // check_resources rejected overflow
 
+    // Only the limit changes; the rest of BoxLite's default security profile stays.
+    let mut advanced = AdvancedBoxOptions::default();
+    advanced.security.resource_limits.max_open_files = Some(open_files_limit());
+
     Ok(BoxOptions {
         rootfs: RootfsSpec::Image(flags.image.clone()),
         env,
@@ -177,6 +216,7 @@ pub fn build(
         //    collision. `cbox down` remains the only thing that removes a
         //    box either way.
         auto_delete: Some(0),
+        advanced,
         ..Default::default()
     })
 }
@@ -184,6 +224,7 @@ pub fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use boxlite::runtime::advanced_options::SecurityOptions;
 
     fn flags() -> UpFlags {
         UpFlags {
@@ -342,6 +383,35 @@ mod tests {
         // The point of the change: never BoxLite's own 1 GiB / 1 CPU.
         assert!(opts.memory_mib.unwrap() > 1024);
         assert!(opts.cpus.unwrap() > 1);
+    }
+
+    #[test]
+    fn the_open_file_limit_is_raised_and_the_rest_of_the_security_profile_kept() {
+        let opts = build(&flags(), vec![], vec![]).unwrap();
+        let mut expected = SecurityOptions::default();
+        expected.resource_limits.max_open_files = Some(open_files_limit());
+        assert_eq!(opts.advanced.security, expected);
+    }
+
+    #[test]
+    fn the_clamp_takes_the_lower_of_the_cap_and_the_hard_limit() {
+        // Host-independent: fails if the `min` is removed or inverted, which
+        // the host-dependent test below only catches on a low-limit host.
+        assert_eq!(clamp_to_hard_limit(4096), 4096);
+        assert_eq!(clamp_to_hard_limit(MAX_OPEN_FILES), MAX_OPEN_FILES);
+        assert_eq!(clamp_to_hard_limit(u64::MAX), MAX_OPEN_FILES);
+        assert_eq!(clamp_to_hard_limit(i64::MAX as u64), MAX_OPEN_FILES); // macOS RLIM_INFINITY
+        assert_eq!(clamp_to_hard_limit(0), 0);
+    }
+
+    #[test]
+    fn the_open_file_limit_never_exceeds_the_cap_or_the_hosts_hard_limit() {
+        let mut r = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        // SAFETY: getrlimit only writes into the struct we pass.
+        assert_eq!(unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut r) }, 0);
+        let limit = open_files_limit();
+        assert!(limit <= MAX_OPEN_FILES);
+        assert!(limit <= r.rlim_max as u64, "asking above the hard limit makes the spawn fail");
     }
 
     #[test]

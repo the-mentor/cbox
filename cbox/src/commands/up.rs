@@ -217,7 +217,19 @@ pub async fn run(args: UpArgs) -> Result<()> {
     // Idempotent on an already-Running box (the SDK's own doc on `start()`),
     // so this is correct whether the box above was just created, resumed
     // from Stopped, or was already Running.
-    litebox.start().await.context("failed to start the box")?;
+    litebox.start().await.with_context(|| {
+        if created {
+            "failed to start the box".to_string()
+        } else {
+            // A reused box keeps the open-file limit it was created with, and a
+            // start under a lower hard limit than that fails (see `open_files_limit`).
+            // Worded as a possibility: any other start failure gets this hint too.
+            "failed to start the box (a reused box keeps the open-file limit it was created \
+             with; if this shell's hard limit, `ulimit -Hn`, is lower than that, raise it or \
+             recreate the box with -f)"
+                .to_string()
+        }
+    })?;
 
     // Only now, with the new box's disk created, can we tell which cached
     // disk images are still in use. An unchanged image is shared by the new
