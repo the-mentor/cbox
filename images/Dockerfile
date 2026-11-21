@@ -77,6 +77,8 @@ USER sandbox-user
 # User scope: the lowest-precedence settings, so anything above can override them.
 COPY --chown=sandbox-user:sandbox-user claude/claude.json /home/sandbox-user/.claude.json
 COPY --chown=sandbox-user:sandbox-user claude/settings.json /home/sandbox-user/.claude/settings.json
+# The status line in settings.json runs oh-my-posh (in base) with this theme.
+COPY --chown=sandbox-user:sandbox-user claude/mojada-claude.omp.json /home/sandbox-user/mojada-claude.omp.json
 
 # ---------------------------------------------------------------------------
 # codex: base + OpenAI Codex CLI + user-scope config (update check off, /workspace trusted).

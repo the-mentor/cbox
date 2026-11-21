@@ -65,11 +65,11 @@ agents). The output is the default, loaded into the local docker, with no push.
 | `custom/claude.json`: `hasCompletedOnboarding`, `theme`, `/workspace` trust | `claude` defaults (`images/claude/claude.json`) | Any headless, ephemeral box needs them so Claude Code does not stop at first-run prompts. |
 | `custom/claude.json`: `mcpServers.agentgateway` | `claude` defaults, and the same entry in the `codex` and `opencode` defaults | Every cbox box reaches the host gateway at `host.boxlite.internal:15003`, whichever agent runs in it. |
 | `custom/settings.json`: `env.DISABLE_AUTOUPDATER` | `claude` defaults (`images/claude/settings.json`) | The image pins the version, and a self-update in an ephemeral box is lost on the next boot anyway. |
-| `custom/settings.json`: `statusLine` (oh-my-posh + `mojada-claude.omp.json`) | customize | A personal theme. |
-| `custom/settings.json`: `attribution` (empty) | customize | A personal or project policy. |
+| `custom/settings.json`: `statusLine` (oh-my-posh + `mojada-claude.omp.json`) | `claude` defaults (`images/claude/`, theme file copied) | A default status line. A customize image overrides it (see below). |
+| `custom/settings.json`: `attribution` (empty) | `claude` defaults | A default, overridable in a customize image. |
 | `custom/settings.json`: `permissions.defaultMode: auto` | removed | Dropped from `custom/` in this PR. Nothing else in the repo sets a permission mode. |
 | `custom/settings.json`: `hooks` → `cbox-hook`, `custom/cbox-hook.sh` | `claude` defaults (`images/claude/`, copied) | cbox's iTerm2 forwarding on the host. It does nothing outside iTerm2, and `CLAUDE_ITERM2_INTEGRATION=0` turns it off. Hooks merge across scopes, so a customize image can add hooks but not remove these. |
-| `custom/mojada-claude.omp.json` | customize | Goes with `statusLine`. |
+| `custom/mojada-claude.omp.json` | `claude` defaults (copied to `~/mojada-claude.omp.json`) | Goes with `statusLine`. |
 | `custom/`: `awscli`, plugin marketplaces/plugins, private plugins | customize | Per person, per repo. |
 | Codex `check_for_update_on_startup = false`, `/workspace` `trust_level = "trusted"` | `codex` defaults (`images/codex/config.toml`) | Same reasons as `DISABLE_AUTOUPDATER` and the Claude trust entry. |
 | opencode `~/.config/opencode/opencode.json` `{"update": "disable"}` | `opencode` defaults | Same reason as `DISABLE_AUTOUPDATER`. The opencode docs say `update` is read only from the global config. |
@@ -116,6 +116,22 @@ At runtime, each agent merges its own config scopes:
   then system/managed (`/etc/opencode/opencode.json`), which wins. Keys that do not conflict
   are kept (https://opencode.ai/docs/config). As with Claude Code, image defaults go in the
   global file, never in the managed one.
+
+### Overriding the claude defaults
+
+A customize image should merge its overrides into `~/.claude/settings.json` with `jq` (in `base`),
+not replace the file, so it only states what it changes:
+
+```dockerfile
+COPY overrides.json /tmp/overrides.json
+RUN f=$HOME/.claude/settings.json \
+    && jq -s '.[0] * .[1]' "$f" /tmp/overrides.json > /tmp/merged.json \
+    && mv /tmp/merged.json "$f" && rm /tmp/overrides.json
+```
+
+`jq`'s `*` merges objects recursively and **replaces arrays**, so overriding `hooks` or
+`permissions.allow` replaces that whole list. To drop a default key, replace the file (`COPY`)
+instead of merging.
 
 ## Build options considered
 

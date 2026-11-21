@@ -27,10 +27,14 @@ docker buildx bake -f images/docker-bake.hcl agent-claude    # just one
 docker buildx build --target claude -f images/Dockerfile images/
 ```
 
-Override defaults with a separate image:
+Override defaults with a separate image. Merge a small `overrides.json` into the default
+settings so you only state what changes (arrays such as `hooks` are replaced, not merged):
 
 ```dockerfile
 ARG BASE_IMAGE=cbox-agent-claude:dev
 FROM ${BASE_IMAGE}
-COPY --chown=sandbox-user:sandbox-user settings.json /home/sandbox-user/.claude/settings.json
+COPY overrides.json /tmp/overrides.json
+RUN f=$HOME/.claude/settings.json \
+    && jq -s '.[0] * .[1]' "$f" /tmp/overrides.json > /tmp/merged.json \
+    && mv /tmp/merged.json "$f" && rm /tmp/overrides.json
 ```
