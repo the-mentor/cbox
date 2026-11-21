@@ -109,9 +109,9 @@ At runtime, each agent merges its own config scopes:
 - **Codex.** Precedence, highest first: CLI flags / `--config` > project `.codex/config.toml`
   (trusted projects only) > `--profile` file > user `~/.codex/config.toml` > cloud-managed >
   system `/etc/codex/config.toml` > built-in defaults
-  (https://learn.chatgpt.com/docs/config-file/config-basic). Image defaults could go in
-  `/etc/codex/config.toml`, which ranks below the user file, so a customize image or the user
-  can still override them.
+  (https://learn.chatgpt.com/docs/config-file/config-basic). Image defaults go in the user file
+  `~/.codex/config.toml`, like the other agents (see Decisions). It outranks the system file, so
+  a customize image overrides it by replacing the file.
 - **opencode.** Lowest to highest: global `~/.config/opencode/opencode.json`, then project files,
   then system/managed (`/etc/opencode/opencode.json`), which wins. Keys that do not conflict
   are kept (https://opencode.ai/docs/config). As with Claude Code, image defaults go in the
@@ -148,12 +148,15 @@ At runtime, each agent merges its own config scopes:
   compiler, which matters for a future Rust variant (see `base-rust/`'s `CC=gcc`); dropping it
   remains the cleaner option if that bites.
 
+- **Agent config lives in the sandbox user's home.** Decided: each agent's defaults are plain
+  files under `/home/sandbox-user` (`~/.claude.json`, `~/.claude/settings.json`,
+  `~/.config/opencode/opencode.json`, `~/.codex/config.toml`), baked into the image. Not mounted
+  at `cbox up`, not env vars, and not system or managed paths. Codex has no default file yet:
+  the candidates (update checks, approval mode, sandbox mode) need checking against the Codex
+  docs first.
+
 ## Not done / open questions
 
-- **Where each agent's default config lives:** baked into the image (the draft), mounted at
-  `cbox up`, or passed as env vars. Codex has no default yet. The candidates (update checks,
-  approval mode, sandbox mode) need checking against the Codex docs first, and the right file
-  is probably `/etc/codex/config.toml`.
 - **How `cbox up` / `just build` switch over.** Not done. The image names, the
   `-- <cmd>`/`exec` default command per agent (`claude` vs `codex` vs `opencode`), and a
   profile `image` field are all candidates. `base/` and `custom/` are deliberately left
