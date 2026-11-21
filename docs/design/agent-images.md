@@ -211,6 +211,7 @@ Checked on amd64 with Docker Desktop (default builder), from the repo root:
   on amd64 and its binary resolves.
 - The baked config is in the home directory: the claude JSON files parse, the theme file and
   `cbox-hook` are installed, and the codex and opencode files carry the agentgateway entry.
+- `cbox-hook` run with `TERM_PROGRAM=iTerm.app` prints the `terminalSequence` line.
 - `opencode` is large (about 2.3GB on disk, 708MB of content, against about 380MB for the
   other agents).
 
@@ -219,8 +220,8 @@ Checked on amd64 with Docker Desktop (default builder), from the repo root:
 - arm64: the opencode install and its platform binary, and the other stages under emulation.
 - That codex and opencode load their baked config (update check, trust, MCP entry). Only the
   key names were checked, against their published schemas.
-- That the agentgateway entry works from inside a box, and that the hook and status line work
-  in iTerm2 (run in a real box with `cbox up -i`).
+- That the agentgateway entry works from inside a box, and that the status line and the hook
+  events reach iTerm2 (run in a real box with `cbox up -i`).
 - That the image works for `cbox up` and exec, and that codex runs without further setup.
 - The codex and opencode docs list a `curl` script and npm side by side, and neither says
   which one it prefers. npm was a choice, not a documented recommendation.
