@@ -84,8 +84,8 @@ agents). The output is the default, loaded into the local docker, with no push.
 
 npm was picked for all three because Node is already in `base`, `ARG` pins the version, and
 nothing is piped from `curl` into `sh`. The pins were the npm registry's `latest` on the day this
-was written. They have no `# renovate:` comment yet, so Renovate does not open PRs against a
-draft.
+was written. Each pin has a `# renovate:` comment (npm datasource), as `base/` does for uv and
+pre-commit. The node image tag in `BASE_IMAGE` has none, same as `base/`.
 
 ## Defaults and overrides
 

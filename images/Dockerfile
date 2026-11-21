@@ -33,10 +33,12 @@ ENV POSH_THEMES_PATH=/usr/local/share/oh-my-posh/themes
 RUN curl -s https://ohmyposh.dev/install.sh | bash -s -- -d /usr/local/bin -t "$POSH_THEMES_PATH" \
     && rm -rf /root/.cache/oh-my-posh
 
-ARG UV_VERSION=0.13.7
+# renovate: datasource=pypi depName=uv
+ARG UV_VERSION=0.13.9
 RUN pip install --no-cache-dir --break-system-packages "uv==${UV_VERSION}"
 
 # uv tool venv keeps pre-commit's deps away from Debian's; shared dirs for sandbox-user.
+# renovate: datasource=pypi depName=pre-commit
 ARG PRE_COMMIT_VERSION=4.7.0
 RUN UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin \
     uv tool install --no-cache "pre-commit==${PRE_COMMIT_VERSION}"
@@ -58,6 +60,7 @@ WORKDIR /workspace
 FROM base AS claude
 USER root
 # https://code.claude.com/docs/en/setup#install-with-npm
+# renovate: datasource=npm depName=@anthropic-ai/claude-code
 ARG CLAUDE_CODE_VERSION=2.1.330
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     && npm cache clean --force \
@@ -86,6 +89,7 @@ COPY --chown=sandbox-user:sandbox-user claude/mojada-claude.omp.json /home/sandb
 FROM base AS codex
 USER root
 # https://github.com/openai/codex#quickstart (npm install -g @openai/codex)
+# renovate: datasource=npm depName=@openai/codex
 ARG CODEX_VERSION=0.171.0
 RUN npm install -g "@openai/codex@${CODEX_VERSION}" \
     && npm cache clean --force \
@@ -100,6 +104,7 @@ COPY --chown=sandbox-user:sandbox-user codex/config.toml /home/sandbox-user/.cod
 FROM base AS opencode
 USER root
 # https://opencode.ai/docs/ (npm install -g @opencode/cli)
+# renovate: datasource=npm depName=@opencode/cli
 ARG OPENCODE_VERSION=2.3.2
 RUN npm install -g "@opencode/cli@${OPENCODE_VERSION}" \
     && npm cache clean --force \
