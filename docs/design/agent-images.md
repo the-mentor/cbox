@@ -78,9 +78,9 @@ agents). The output is the default, loaded into the local docker, with no push.
 
 | Agent | Method | Pin | Source |
 | --- | --- | --- | --- |
-| Claude Code | `npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}` | `2.1.322` | https://code.claude.com/docs/en/setup#install-with-npm |
-| Codex | `npm install -g @openai/codex@${CODEX_VERSION}` | `0.167.0` | https://github.com/openai/codex (README: npm, a `curl` install script, or Homebrew) |
-| opencode | `npm install -g @opencode/cli@${OPENCODE_VERSION}` | `2.2.6` | https://opencode.ai/docs/ (npm, a `curl` install script, Homebrew, and others) |
+| Claude Code | `npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}` | `2.1.330` | https://code.claude.com/docs/en/setup#install-with-npm |
+| Codex | `npm install -g @openai/codex@${CODEX_VERSION}` | `0.171.0` | https://github.com/openai/codex (README: npm, a `curl` install script, or Homebrew) |
+| opencode | `npm install -g @opencode/cli@${OPENCODE_VERSION}` | `2.3.2` | https://opencode.ai/docs/ (npm, a `curl` install script, Homebrew, and others) |
 
 npm was picked for all three because Node is already in `base`, `ARG` pins the version, and
 nothing is piped from `curl` into `sh`. The pins were the npm registry's `latest` on the day this
@@ -175,7 +175,7 @@ At runtime, each agent merges its own config scopes:
   `docker buildx build --check` was run. Downloading a standalone `buildx` binary to run
   `--print` was blocked. The only checks were static: every `COPY` source exists, and the JSON
   files parse.
-- Whether `@opencode/cli`'s npm install works as root with `npm install -g` (its pnpm/bun
+- (The package name is confirmed: opencode.ai/docs lists `npm install -g @opencode/cli`.) Whether `@opencode/cli`'s npm install works as root with `npm install -g` (its pnpm/bun
   instructions mention allowing its build/postinstall step), and whether its platform binary
   resolves on both amd64 and arm64.
 - Whether Bake resolves `context = "images"` relative to the current directory, as the README

@@ -58,7 +58,7 @@ WORKDIR /workspace
 FROM base AS claude
 USER root
 # https://code.claude.com/docs/en/setup#install-with-npm
-ARG CLAUDE_CODE_VERSION=2.1.322
+ARG CLAUDE_CODE_VERSION=2.1.330
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     && npm cache clean --force \
     && rm -rf /tmp/node-compile-cache
@@ -80,7 +80,7 @@ COPY --chown=sandbox-user:sandbox-user claude/settings.json /home/sandbox-user/.
 FROM base AS codex
 USER root
 # https://github.com/openai/codex#quickstart (npm install -g @openai/codex)
-ARG CODEX_VERSION=0.167.0
+ARG CODEX_VERSION=0.171.0
 RUN npm install -g "@openai/codex@${CODEX_VERSION}" \
     && npm cache clean --force \
     && rm -rf /tmp/node-compile-cache
@@ -92,7 +92,7 @@ USER sandbox-user
 FROM base AS opencode
 USER root
 # https://opencode.ai/docs/ (npm install -g @opencode/cli)
-ARG OPENCODE_VERSION=2.2.6
+ARG OPENCODE_VERSION=2.3.2
 RUN npm install -g "@opencode/cli@${OPENCODE_VERSION}" \
     && npm cache clean --force \
     && rm -rf /tmp/node-compile-cache
