@@ -207,8 +207,9 @@ instead of merging.
 - (The package name is confirmed: opencode.ai/docs lists `npm install -g @opencode/cli`.) Whether `@opencode/cli`'s npm install works as root with `npm install -g` (its pnpm/bun
   instructions mention allowing its build/postinstall step), and whether its platform binary
   resolves on both amd64 and arm64.
-- Whether Bake resolves `context = "images"` relative to the current directory, as the README
-  assumes (run from the repo root), or relative to the bake file.
+- (Checked: `docker buildx bake -f images/docker-bake.hcl --print` from the repo root resolves
+  `context = "images"` and prints all four targets and both groups. Bake resolves it relative to
+  the current directory, as the README says.)
 - Whether Codex's npm package still runs `codex` in this image without further setup.
 - The codex and opencode docs list a `curl` script and npm side by side, and neither says
   which one it prefers. npm was a choice, not a documented recommendation.
