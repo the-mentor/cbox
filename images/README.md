@@ -8,7 +8,7 @@ which are still what `just build` and `cbox up` use. Design and open questions:
 ## Layout
 
 - `Dockerfile`: one multi-stage file. Stages:
-  - `base`: OS, shell, git, Node, `gh`, `uv`, `pre-commit`, oh-my-posh, the
+  - `base`: OS, shell, git, Node, `gh`, `jq`, `yq`, `uv`, `pre-commit`, oh-my-posh, the
     `sandbox-user` user. No agent.
   - `claude`: `base` + Claude Code, its wrapper and the `cc` link, and default
     user-scope settings from `claude/`.
