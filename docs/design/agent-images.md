@@ -78,9 +78,9 @@ agents). The output is the default, loaded into the local docker, with no push.
 
 | Agent | Method | Pin | Source |
 | --- | --- | --- | --- |
-| Claude Code | `npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}` | `2.1.330` | https://code.claude.com/docs/en/setup#install-with-npm |
-| Codex | `npm install -g @openai/codex@${CODEX_VERSION}` | `0.171.0` | https://github.com/openai/codex (README: npm, a `curl` install script, or Homebrew) |
-| opencode | `npm install -g @opencode/cli@${OPENCODE_VERSION}` | `2.3.2` | https://opencode.ai/docs/ (npm, a `curl` install script, Homebrew, and others) |
+| Claude Code | `npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}` | `CLAUDE_CODE_VERSION` in `images/Dockerfile` | https://code.claude.com/docs/en/setup#install-with-npm |
+| Codex | `npm install -g @openai/codex@${CODEX_VERSION}` | `CODEX_VERSION` in `images/Dockerfile` | https://github.com/openai/codex (README: npm, a `curl` install script, or Homebrew) |
+| opencode | `npm install -g @opencode/cli@${OPENCODE_VERSION}` | `OPENCODE_VERSION` in `images/Dockerfile` | https://opencode.ai/docs/ (npm, a `curl` install script, Homebrew, and others) |
 
 npm was picked for all three because Node is already in `base`, `ARG` pins the version, and
 nothing is piped from `curl` into `sh`. The pins were the npm registry's `latest` on the day this
