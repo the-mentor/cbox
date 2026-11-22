@@ -29,11 +29,7 @@ pub async fn run(
     let cwd = std::env::current_dir().context("cannot read current directory")?;
     let resolved = naming::resolve(name.as_deref(), &cwd);
     let home = config::box_home(&resolved.name);
-    let cmd = if cmd.is_empty() {
-        vec!["claude".to_string(), "--continue".to_string()]
-    } else {
-        cmd
-    };
+    let cmd = if cmd.is_empty() { super::default_agent_cmd(&["--continue"]) } else { cmd };
 
     match client::route(&home).await? {
         client::Route::Socket(stream) => {

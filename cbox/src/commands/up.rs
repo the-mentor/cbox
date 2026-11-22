@@ -120,13 +120,15 @@ pub async fn run(args: UpArgs) -> Result<()> {
         let _ = runtime.remove(&name, true).await;
     }
 
-    let cmd = if args.cmd.is_empty() { vec!["claude".into()] } else { args.cmd };
+    // The default command starts claude in today's default image, so it gets the warning too.
+    let runs_claude = args.cmd.first().is_none_or(|c| c == "claude");
+    let cmd = if args.cmd.is_empty() { super::default_agent_cmd(&[]) } else { args.cmd };
 
     // The one line that turns a multi-hour "why did Claude just exit"
     // diagnosis into something visible immediately: warn, don't fail — the
     // user launching a non-`claude` command, or one that authenticates some
     // other way, is not this function's business.
-    if cmd.first().map(String::as_str) == Some("claude") && !env::any_anthropic_credential_set() {
+    if runs_claude && !env::any_anthropic_credential_set() {
         let looked = match &env_file_path {
             Some(loc) => format!("cbox looked for an env file at {}", loc.path.display()),
             None => "cbox could not determine an env file location (no $HOME)".to_string(),

@@ -52,14 +52,14 @@ above BoxLite's own 1 GiB / 1, which is too little to `cargo build` in the box),
 session so `cbox exec` can reach it later; without it, the default, closing the terminal stops
 the VM — the disk and box record survive, and running `cbox up` again resumes it, a real
 restart rather than a suspend), and `-- <cmd>` (override the executable launched in the box;
-defaults to `claude`, e.g. `just up -- bash`). Without `-f`, running `up` again against a name
+defaults to the image's `sandbox-agent` launcher, or `claude` in an image without one, e.g. `just up -- bash`). Without `-f`, running `up` again against a name
 that already exists **resumes** that box (starting it if it's `Stopped`) rather than erroring
 — but its configuration dates from when it was first created, credentials included, so `cbox up`
 says so and names any secret that has since changed (a stored secret's value, hosts or env name;
 the flag form's value); `-f` is how to pick up today's
 settings. `exec` takes the same optional box name and `-- <cmd>`
-override (e.g. `just exec -- bash`) to exec something other than `claude --continue` (its
-default) in the running box; against a `Stopped` box it says so and starts it (a ~2s cold boot)
+override (e.g. `just exec -- bash`) to exec something other than `sandbox-agent --continue`
+(its default, `claude --continue` in an image without the launcher) in the running box; against a `Stopped` box it says so and starts it (a ~2s cold boot)
 before attaching, rather than either failing or doing that silently.
 
 Secrets live in the OS secret store and are managed with `cbox secret create|list|edit|delete`
