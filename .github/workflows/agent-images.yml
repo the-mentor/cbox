@@ -96,9 +96,10 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "tags=$(echo "$tags" | tr '\n' ' ') push=$push no-cache=$no_cache ref=${ref:-<trigger>}"
 
-  # The agent-free base. The agent images below are stages of the same
-  # Dockerfile, so each rebuilds this stage itself (no tag handoff, and none
-  # of them waits on this job).
+  # The agent-free base. When it was pushed, the agent images below build on
+  # it (BASE_IMAGE), so all four share the exact same base. When nothing was
+  # pushed (fork/Dependabot PRs) they build the base stage themselves, so a
+  # PR's change to it is still checked.
   base:
     needs: [prep, smoke]
     uses: ./.github/workflows/image.yml
@@ -115,11 +116,12 @@ jobs:
   # Not in the matrix below: custom-image builds on this image, so ci.yml needs
   # this job's output, and a matrix job's outputs can't be read per row.
   claude:
-    needs: [prep, smoke]
+    needs: [prep, smoke, base]
     uses: ./.github/workflows/image.yml
     with:
       context: images
       target: claude
+      base-image: ${{ needs.base.outputs.image }}
       key: agent-claude
       image: ghcr.io/the-mentor/cbox-agent-claude
       tags: ${{ needs.prep.outputs.tags }}
@@ -128,7 +130,7 @@ jobs:
       ref: ${{ needs.prep.outputs.ref }}
 
   agents:
-    needs: [prep, smoke]
+    needs: [prep, smoke, base]
     strategy:
       fail-fast: false
       matrix:
@@ -137,6 +139,7 @@ jobs:
     with:
       context: images
       target: ${{ matrix.agent }}
+      base-image: ${{ needs.base.outputs.image }}
       key: agent-${{ matrix.agent }}
       image: ghcr.io/the-mentor/cbox-agent-${{ matrix.agent }}
       tags: ${{ needs.prep.outputs.tags }}

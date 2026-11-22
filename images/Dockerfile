@@ -4,17 +4,20 @@
 # with docker-bake.hcl. custom/ builds on the claude stage. See
 # docs/design/agent-images.md.
 
-# The OS + Node image the agent-free base starts from. A customize image is a
-# separate Dockerfile with its own `ARG BASE_IMAGE=cbox-agent-claude:dev`.
+# The OS + Node image the agent-free base starts from.
 # Pin a tag or @sha256 digest here once the design is final.
-ARG BASE_IMAGE=node:26-trixie-slim
+ARG NODE_IMAGE=node:26-trixie-slim
+# What the agent stages build on: the `base` stage below by default. CI sets it to the
+# cbox-agent-base it just published, so all four images share one base. A customize
+# image is a separate Dockerfile with its own `ARG BASE_IMAGE=cbox-agent-claude:dev`.
+ARG BASE_IMAGE=base
 
 # ---------------------------------------------------------------------------
 # base: OS, shell, git, runtimes, the non-root user, common tooling. NO agent.
 # Same as base/Dockerfile minus Claude Code, its wrapper and the `cc` link, plus yq,
 # procps (Codex needs `ps`) and the sandbox-agent launcher.
 # ---------------------------------------------------------------------------
-FROM ${BASE_IMAGE} AS base
+FROM ${NODE_IMAGE} AS base
 RUN apt update \
     && apt upgrade -y \
     && apt install -y --no-install-recommends sudo git curl wget ca-certificates python3 python3-pip just unzip jq yq procps bash-completion lazygit \
@@ -70,7 +73,7 @@ WORKDIR /workspace
 # claude: base + Claude Code + its default user-scope config, including the cbox
 # iTerm2 hook, the status line and the agentgateway MCP entry (see the design doc).
 # ---------------------------------------------------------------------------
-FROM base AS claude
+FROM ${BASE_IMAGE} AS claude
 USER root
 # https://code.claude.com/docs/en/setup#install-with-npm
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
@@ -99,7 +102,7 @@ COPY --chown=sandbox-user:sandbox-user claude/mojada-claude.omp.json /home/sandb
 # ---------------------------------------------------------------------------
 # codex: base + OpenAI Codex CLI + user-scope config (update check off, /workspace trusted).
 # ---------------------------------------------------------------------------
-FROM base AS codex
+FROM ${BASE_IMAGE} AS codex
 USER root
 # https://github.com/openai/codex#quickstart (npm install -g @openai/codex)
 # renovate: datasource=npm depName=@openai/codex
@@ -114,7 +117,7 @@ COPY --chown=sandbox-user:sandbox-user codex/config.toml /home/sandbox-user/.cod
 # ---------------------------------------------------------------------------
 # opencode: base + opencode CLI + global config (update checks off).
 # ---------------------------------------------------------------------------
-FROM base AS opencode
+FROM ${BASE_IMAGE} AS opencode
 USER root
 # https://opencode.ai/docs/ (npm install -g @opencode/cli)
 # renovate: datasource=npm depName=@opencode/cli

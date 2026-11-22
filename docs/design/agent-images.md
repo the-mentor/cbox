@@ -45,8 +45,9 @@ base            OS, shell, git, runtimes, the non-root user, common tooling. NO 
 ## Layout
 
 `images/Dockerfile` has four stages: `base`, `claude`, `codex` and `opencode`. The global
-`ARG BASE_IMAGE` (default `node:26-trixie-slim`, the same image `base/` uses) picks the OS image
-the `base` stage starts from. A customize image is its own Dockerfile with its own
+`ARG NODE_IMAGE` (default `node:26-trixie-slim`, the same image `base/` uses) picks the OS image
+the `base` stage starts from, and `ARG BASE_IMAGE` (default `base`, the stage) is what the agent
+stages build on; CI sets it to the `cbox-agent-base` it just pushed. A customize image is its own Dockerfile with its own
 `ARG BASE_IMAGE=cbox-agent-<agent>:dev` / `FROM ${BASE_IMAGE}`, the same pattern
 `custom/Dockerfile` uses (its default is `ghcr.io/the-mentor/cbox-agent-claude:latest`). Nothing is pinned by digest yet. A comment marks where the tag or
 digest goes.
@@ -92,7 +93,7 @@ nothing is piped from `curl` into `sh`. The pins were the npm registry's `latest
 was written. Each pin has a `# renovate:` comment (npm datasource for the agents, github-releases for
 oh-my-posh), as `base/` does for uv and pre-commit. oh-my-posh is pinned with the installer's
 `-v` (the tag keeps its `v`); its themes still come from `latest`, because the script hard-codes
-that. The node image tag in `BASE_IMAGE` has none, same as `base/`.
+that. The node image tag in `NODE_IMAGE` has none, same as `base/`.
 
 ## Defaults and overrides
 
@@ -154,10 +155,14 @@ runners, the merge step that refuses a tag missing an architecture).
   for this: `target`, and `key`, which names the digest artifacts and cache scope so several
   images can come from one directory.
 - **Why `image.yml` and not the bake action.** It already has the digest-and-merge step that
-  guards the tags; the bake action has no merge step. The cost is that each image rebuilds the
-  shared `base` stage itself, so the four images do not share layers in the registry. If that
-  matters, one job per architecture running `docker/bake-action` over the bake file would build
-  the base stage once, at the price of writing the digest collection and merge by hand.
+  guards the tags; the bake action has no merge step.
+- **The agents build on the published base.** When `base` was pushed, the agent jobs wait for it
+  and get its first tag as `BASE_IMAGE`, so all four images share the same base layers. Without
+  that, a no-cache release would build the base four times, and an apt update landing in between
+  would make `cbox-agent-base:<tag>` differ from the base inside `cbox-agent-claude:<tag>`. The
+  cost is that the agent builds start after the base merge (on a cached PR run, well under a
+  minute). When nothing is pushed (fork and Dependabot PRs) the agents build the `base` stage
+  themselves.
 - **Smoke test.** A `smoke` job runs `images/test-sandbox-agent.sh` (the launcher against stub
   agents, no docker), builds the four images into the runner's docker (so it also runs for
   fork PRs, which push nothing) and runs `images/smoke-test.sh`. It runs on a native amd64 and
