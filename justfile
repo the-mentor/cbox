@@ -158,7 +158,7 @@ build-local *args: (build-base args)
 build-agents *args: registry-up
     #!/usr/bin/env sh
     set -eu
-    docker buildx bake -f images/docker-bake.hcl --load {{args}}
+    docker buildx bake -f images/docker-bake.hcl {{args}}
     for a in claude codex opencode; do
         docker tag "cbox-agent-$a:dev" "{{registry}}/library/cbox-agent-$a"
         docker push "{{registry}}/library/cbox-agent-$a"

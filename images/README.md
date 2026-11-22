@@ -24,7 +24,7 @@ From the repo root:
 ```bash
 docker buildx bake -f images/docker-bake.hcl agents          # claude, codex, opencode
 docker buildx bake -f images/docker-bake.hcl agent-claude    # just one
-docker buildx build --target claude -f images/Dockerfile images/
+docker buildx build --load -t cbox-agent-claude:dev --target claude -f images/Dockerfile images/
 ```
 
 Override defaults with a separate image. Merge a small `overrides.json` into the default

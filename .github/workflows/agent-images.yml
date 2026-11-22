@@ -142,6 +142,6 @@ jobs:
           flags=""
           [ "$NO_CACHE" = true ] && flags="--no-cache"
           # shellcheck disable=SC2086 # $flags is empty or one flag
-          docker buildx bake -f images/docker-bake.hcl --load $flags
+          docker buildx bake -f images/docker-bake.hcl $flags
 
       - run: sh images/smoke-test.sh

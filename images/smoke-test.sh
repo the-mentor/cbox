@@ -37,6 +37,7 @@ check "base: no agent installed" base '! command -v claude && ! command -v codex
 check "claude: version matches the pin" claude "claude --version | grep -F '$(pin CLAUDE_CODE_VERSION)'"
 check "claude: wrapper, cc and hook are installed" claude 'command -v claude-real && command -v cc && command -v cbox-hook'
 check "claude: config files parse" claude 'jq -e . ~/.claude.json ~/.claude/settings.json >/dev/null'
+check "claude: wrapper approves ANTHROPIC_API_KEY" claude 'ANTHROPIC_API_KEY=abcdefghijklmnopqrstuvwxyz claude --version >/dev/null && jq -e ".customApiKeyResponses.approved | length == 1" ~/.claude.json >/dev/null'
 check "claude: gateway MCP entry and theme file" claude 'jq -e ".mcpServers.agentgateway.url" ~/.claude.json >/dev/null && [ -f ~/mojada-claude.omp.json ]'
 check "claude: cbox-hook prints a terminalSequence" claude 'echo "{\"hook_event_name\":\"Stop\"}" | TERM_PROGRAM=iTerm.app cbox-hook | grep -q terminalSequence'
 

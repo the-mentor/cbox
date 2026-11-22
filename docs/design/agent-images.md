@@ -51,7 +51,8 @@ digest goes.
 `images/docker-bake.hcl` builds `base` (`cbox-agent-base:dev`) and a matrix target,
 `agent-${a}` for `a` in `claude`, `codex`, `opencode`, each with `target = a` and tag
 `cbox-agent-${a}:dev`. The groups are `agents` (the three agents) and `default` (base plus
-agents). The output is the default, loaded into the local docker, with no push.
+agents). Each target sets `output = type=docker`, so the images load into the local docker with no push,
+with the default driver and with `docker-container` builders alike.
 
 ### What went where
 
