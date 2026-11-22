@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.31](https://github.com/the-mentor/cbox/compare/v0.1.30...v0.1.31) (2026-11-22)
+
+
+### Features
+
+* **cbox:** run the image's sandbox-agent by default, falling back to claude ([#173](https://github.com/the-mentor/cbox/issues/173)) ([b6ed2b4](https://github.com/the-mentor/cbox/commit/b6ed2b485127ac349c22438703a9dffa7bd67042))
+
 ## [0.1.30](https://github.com/the-mentor/cbox/compare/v0.1.29...v0.1.30) (2026-11-21)
 
 
