@@ -181,7 +181,7 @@ either. In practice this rarely matters locally: the Claude Code version is pinn
 `images/Dockerfile` (Renovate bumps it) and `cbox-agent-claude` is rebuilt weekly by CI, so a
 plain `just build` picks up the newer pin and refreshed packages from the published `:latest`. `just build-local --no-cache` gets the same result without depending on the published
 image. Claude Code's in-box auto-updater is off either way (`DISABLE_AUTOUPDATER` in
-`custom/settings.json`), since the npm global prefix is root-owned and the box's disk would lose
+`images/claude/settings.json`), since the npm global prefix is root-owned and the box's disk would lose
 the update on the next `-f` anyway.
 
 Other recipes: `just registry-up` / `just registry-down` manage the local registry directly,
@@ -253,7 +253,7 @@ without ever touching the tracked `registries.json`.
 iTerm2's own Claude Code integration (the tab status, dot and detail line) is a Claude Code
 hook, `~/.config/iterm2/cc-status`, that iTerm2 installs on your Mac. It is a macOS binary
 driving iTerm2 through its API socket, so it can't run in the box. Instead the image bakes
-hooks (`custom/settings.json`) that run `custom/cbox-hook.sh` for every event. The script
+hooks (`images/claude/settings.json`) that run `images/claude/cbox-hook.sh` for every event. The script
 returns the event to Claude Code as a hook `terminalSequence` (an `OSC 777;cbox-hook`
 sequence), so it travels out through the terminal stream. `cbox up`/`exec` strips those
 sequences out and pipes each event into `cc-status` on the host, so the status shows up in
@@ -351,9 +351,9 @@ proxy swaps the box's `GH_TOKEN` placeholder for the real value only on GitHub-b
   plus `gh`, `uv`, `pre-commit`, `lazygit` and oh-my-posh), running as a non-root
   `sandbox-user` with passwordless `sudo`. CI publishes it to `ghcr.io/the-mentor/cbox-base`
   on every release and weekly, so you normally never build it yourself. `custom/` layers
-  `cbox-custom` on top, baking `custom/claude.json` in as `/home/sandbox-user/.claude.json`
-  (theme, onboarding, and a user-scoped `agentgateway` MCP server) and installing the plugins
-  listed in `custom/Dockerfile`. Nothing is baked into `/workspace`, so mounting a host
+  `cbox-custom` on top, on the `cbox-agent-claude` image from `images/` (it bakes
+  `/home/sandbox-user/.claude.json`: theme, onboarding, and a user-scoped `agentgateway` MCP
+  server) and installing the plugins listed in `custom/Dockerfile`. Nothing is baked into `/workspace`, so mounting a host
   directory there clobbers no config. See `docs/design/images.md`.
 - **Rust variant.** `base-rust/` builds `cbox-base-rust`: `cbox-base` plus Rust (pinned to
   ci.yml's version, with `rustfmt`/`clippy`), `protoc` and a C toolchain, which is everything

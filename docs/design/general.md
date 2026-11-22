@@ -16,8 +16,9 @@ runtime, the CLIs — are slow to build and rarely need to change, while the cus
 where per-repo configuration lives and gets rebuilt often. Keeping them separate means a config
 tweak (a new plugin, a `claude.json` change) rebuilds only the fast layer.
 
-The custom layer bakes `custom/claude.json` in as `/home/sandbox-user/.claude.json` — the theme, the
-onboarding-complete flag, and the user-scoped `agentgateway` MCP server entry — and installs
+The custom layer now builds on the claude agent image (`images/`, `docs/design/agent-images.md`), which bakes
+`/home/sandbox-user/.claude.json` — the theme, the onboarding-complete flag, and the user-scoped
+`agentgateway` MCP server entry — and `custom/` installs
 whatever plugin marketplaces and plugins are listed in its `CBOX_MARKETPLACES`/`CBOX_PLUGINS` build args;
 setting the same names in `.env` replaces those defaults for `just build-image`.
 Private ones go in `CBOX_PRIVATE_MARKETPLACES`/`CBOX_PRIVATE_PLUGINS` in the gitignored `.env`

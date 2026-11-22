@@ -70,8 +70,8 @@ with the default driver and with `docker-container` builders alike.
 | `custom/settings.json`: `statusLine` (oh-my-posh + `mojada-claude.omp.json`) | `claude` defaults (`images/claude/`, theme file copied) | A default status line. A customize image overrides it (see below). |
 | `custom/settings.json`: `attribution` (empty) | `claude` defaults | A default, overridable in a customize image. |
 | `custom/settings.json`: `permissions.defaultMode: auto` | removed | Dropped from `custom/` in this PR. Nothing else in the repo sets a permission mode. |
-| `custom/settings.json`: `hooks` → `cbox-hook`, `custom/cbox-hook.sh` | `claude` defaults (`images/claude/`, copied) | cbox's iTerm2 forwarding on the host. It does nothing outside iTerm2, and `CLAUDE_ITERM2_INTEGRATION=0` turns it off. Hooks merge across scopes, so a customize image can add hooks but not remove these. |
-| `custom/mojada-claude.omp.json` | `claude` defaults (copied to `~/mojada-claude.omp.json`) | Goes with `statusLine`. |
+| `custom/settings.json`: `hooks` → `cbox-hook`, `custom/cbox-hook.sh` | `claude` defaults (`images/claude/`; `custom/` no longer has its own copy) | cbox's iTerm2 forwarding on the host. It does nothing outside iTerm2, and `CLAUDE_ITERM2_INTEGRATION=0` turns it off. Hooks merge across scopes, so a customize image can add hooks but not remove these. |
+| `custom/mojada-claude.omp.json` | `claude` defaults (installed as `~/mojada-claude.omp.json`; `custom/` no longer has its own copy) | Goes with `statusLine`. |
 | `custom/`: `awscli`, plugin marketplaces/plugins, private plugins | customize | Per person, per repo. |
 | Codex `check_for_update_on_startup = false`, `/workspace` `trust_level = "trusted"` | `codex` defaults (`images/codex/config.toml`) | Same reasons as `DISABLE_AUTOUPDATER` and the Claude trust entry. |
 | opencode `~/.config/opencode/opencode.json` `{"update": "disable"}` | `opencode` defaults | Same reason as `DISABLE_AUTOUPDATER`. The opencode docs say `update` is read only from the global config. |
@@ -231,15 +231,17 @@ runners, the merge step that refuses a tag missing an architecture).
   untouched here.
 - **Migration from `base/` + `custom/`:** (1) accept this design (CI for `images/` exists);
   (2) publish `cbox-agent-claude` (first release or a manual run of `agent-images.yml`); (3) rebase `custom/` onto it. The default base of `just build`,
-  `custom/Dockerfile` and the CI `custom-image` job is now `cbox-agent-claude`; what is left is
-  deleting the files `custom/` still duplicates from `images/claude/` (see the PR description's
-  TODO), since `custom/` keeps copying its own over the baked ones; (4) port
+  `custom/Dockerfile` and the CI `custom-image` job is now `cbox-agent-claude`; the four files
+  `custom/` duplicated (`claude.json`, `settings.json`, `cbox-hook.sh`, `mojada-claude.omp.json`)
+  are deleted, so `custom/` is now only awscli and plugins on top of the image, and on the old
+  `cbox-base` (`CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest`, `just build-local`) it
+  has none of the defaults; (4) port
   `base-rust/` onto `base`; (5) remove `base/`, update `docs/design/images.md`,
   `docs/design/general.md` and `AGENTS.md`.
-- **File duplication.** `images/base/bashrc.d/boxlite.sh`, `images/claude/claude-wrapper.sh` and
-  `images/claude/cbox-hook.sh` are copies of files in `base/` (and `custom/` for the hook),
-  because the build context is `images/`. `base/` and `custom/` stay in use until they are
-  removed, so the copies can drift until then.
+- **File duplication.** `images/base/bashrc.d/boxlite.sh`, and `images/claude/claude-wrapper.sh`
+  are copies of files in `base/`, because the build context is `images/`. `base/` stays in use
+  until it is removed, so the copies can drift until then (the wrapper here already differs: it
+  writes the config atomically).
 
 ### Verified
 

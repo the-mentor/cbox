@@ -3,7 +3,7 @@
 //! iTerm2's Claude Code integration is a hook, `~/.config/iterm2/cc-status`:
 //! a signed macOS binary that drives iTerm2 through `it2` and its API socket.
 //! Neither can run in (or reach from) the Linux guest, so the in-box hook
-//! (`custom/cbox-hook.sh`) instead hands each event back to Claude Code as a
+//! (`images/claude/cbox-hook.sh`) instead hands each event back to Claude Code as a
 //! hook `terminalSequence` -- `OSC 777 ; cbox-hook ; <base64 JSON> BEL`. Claude
 //! writes that to its terminal, so it rides the stdout stream cbox already
 //! pumps. `Forwarder::filter` strips it back out and feeds the JSON to the
