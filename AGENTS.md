@@ -19,6 +19,7 @@ just up                # boot the box without rebuilding (images and the cbox bi
 just build              # start the local registry, build custom on the published base, push custom
 just build --no-cache   # same, bypassing the Docker layer cache (see below)
 just build-local          # build base/ locally too (the published base is the default), for changing base/ itself
+just build-agents         # draft: build images/ (base + claude, codex, opencode) and push the agents to the local registry, see images/README.md
 just build-cbox          # build the cbox binary (cbox/target/release/cbox); up/exec/down/list all hard-fail without it
 just install-cbox [tag]  # download a prebuilt cbox binary (latest release, or a pinned tag) instead of compiling it
 just version            # print the installed cbox binary's version (e.g. `cbox 0.1.1`)

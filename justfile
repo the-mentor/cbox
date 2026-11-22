@@ -150,6 +150,20 @@ build *args: (build-image args)
 build-local *args: (build-base args)
     CBOX_BASE_IMAGE={{base_tag}} just build-image {{args}}
 
+# Build the agent images (images/, a draft) and push them to the local registry as
+# library/cbox-agent-<name>, so a box can boot one: `just up -i cbox-agent-codex -- codex`.
+# Nothing else uses them yet: build, up-dev and the default image still use cbox-custom.
+# Extra arguments go to `docker buildx bake` (e.g. --no-cache). See images/README.md.
+# Usage: just build-agents [docker-buildx-bake-args...]
+build-agents *args: registry-up
+    #!/usr/bin/env sh
+    set -eu
+    docker buildx bake -f images/docker-bake.hcl --load {{args}}
+    for a in claude codex opencode; do
+        docker tag "cbox-agent-$a:dev" "{{registry}}/library/cbox-agent-$a"
+        docker push "{{registry}}/library/cbox-agent-$a"
+    done
+
 # Build the cbox binary. Requires protoc >= 3.12 (brew install protobuf).
 build-cbox:
     cd cbox && cargo build --release

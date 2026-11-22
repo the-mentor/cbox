@@ -39,6 +39,19 @@ RUN f=$HOME/.claude/settings.json \
     && mv /tmp/merged.json "$f" && rm /tmp/overrides.json
 ```
 
+## Boot a box from one
+
+`just build-agents` builds the images and pushes the agents to the local registry (`localhost:5551`,
+started for you), then boot one by name. The default command is `claude`, so pass the agent's own:
+
+```bash
+just build-agents
+just up -i cbox-agent-codex -f -- codex
+just up -i cbox-agent-opencode -f -- opencode
+```
+
+The images CI publishes can be used directly too: `just up -i ghcr.io/the-mentor/cbox-agent-codex:latest`.
+
 ## Smoke test
 
 After building the `:dev` tags, `sh images/smoke-test.sh` checks the user, tools, pinned
