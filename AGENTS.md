@@ -18,7 +18,8 @@ just up-dev            # build custom on the published base (pushed to local reg
 just up                # boot the box without rebuilding (images and the cbox binary must already be built)
 just build              # start the local registry, build custom on the published base, push custom
 just build --no-cache   # same, bypassing the Docker layer cache (see below)
-just build-local          # build base/ locally too (the published base is the default), for changing base/ itself
+just build-local          # build the claude agent image (images/) locally too (the published one is the default), for changing images/ itself
+just build-agents         # draft: build images/ (base + claude, codex, opencode) and push the agents to the local registry, see images/README.md
 just build-cbox          # build the cbox binary (cbox/target/release/cbox); up/exec/down/list all hard-fail without it
 just install-cbox [tag]  # download a prebuilt cbox binary (latest release, or a pinned tag) instead of compiling it
 just version            # print the installed cbox binary's version (e.g. `cbox 0.1.1`)
@@ -83,13 +84,14 @@ profile has changed since creation or no longer validates (a new box fails on an
 `build`, `build-image`, `build-base`, and `build-local` are variadic: everything after the recipe name is
 forwarded verbatim to `docker build` (`--pull`, `--progress=plain` and friends all work). `build`
 and `build-image` build only `custom/`, on top of `CBOX_BASE_IMAGE` (default
-`ghcr.io/the-mentor/cbox-base:latest`, the published base, re-pulled on every build), so `just
+`ghcr.io/the-mentor/cbox-agent-claude:latest`, the published claude agent image, re-pulled on every build), so `just
 build --no-cache` now only rebuilds `custom/` cache-free; `just build-local --no-cache` is how to
-rebuild both layers without the cache. `--no-cache` is the one flag that matters in practice: the
-version-fetching `RUN` steps (`npm install -g @anthropic-ai/claude-code`, the oh-my-posh
-installer, `apt upgrade`) have fixed command text, so Docker keeps replaying their cached layers
-no matter how stale they get. Claude Code updates now mostly come from the weekly published
-base rather than a local rebuild — see `docs/design/images.md`.
+rebuild both layers (the claude agent image and `custom/`) without the cache. `--no-cache` is the one flag that matters in practice: the
+version-fetching `RUN` steps (the oh-my-posh installer, `apt upgrade`) have fixed command text,
+so Docker keeps replaying their cached layers no matter how stale they get. The Claude Code
+version is pinned by `CLAUDE_CODE_VERSION` in `images/Dockerfile` (Renovate bumps it, which
+invalidates the layer), and the rest comes from the weekly published `cbox-agent-claude`
+rather than a local rebuild — see `docs/design/agent-images.md`.
 
 `just` only looks for a justfile in the current or a parent directory, so these recipes only
 work from inside the repo by default. `just install` symlinks `bin/cb` — a
@@ -126,8 +128,10 @@ still attached and, for whatever reason, its control socket didn't come up).
 - **Box side.** The two-layer image, the local-registry image handoff (and why a rebuild needs
   no cache invalidation since BoxLite 0.10.7), and authenticated-registry (ECR) support are all documented in
   `docs/design/general.md` — read it before touching the Dockerfiles or the `justfile`'s
-  image/registry recipes. How `cbox-base` (and its Rust variant `cbox-base-rust`) gets built and published by CI, its tags, and
-  `build-local` are in `docs/design/images.md`. Environment-variable passthrough and GitHub secret substitution are
+  image/registry recipes. How `cbox-base` (and its Rust variant `cbox-base-rust`) gets built and published by CI, and its
+  tags, are in `docs/design/images.md`. The agent images (`cbox-agent-*`, which `custom/` builds
+  on), `build-local`, `build-agents` and the `sandbox-agent` launcher are in
+  `docs/design/agent-images.md`. Environment-variable passthrough and GitHub secret substitution are
   `cbox`'s own model, not the justfile's: `env::passthrough_vars()` (a Rust function in
   `cbox/src/env.rs`, not a justfile variable) and `cbox/src/secrets.rs`, documented in
   `docs/design/cbox.md`.

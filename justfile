@@ -2,10 +2,11 @@ set dotenv-load
 
 base_tag   := "cbox-base"
 custom_tag := "cbox-custom"
-# Base for custom/: the published multi-arch image by default. Override per
-# command, e.g. CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:pr-67 just build
-# to try a PR's base, or use `just build-local` to build base/ locally.
-base_image := env_var_or_default("CBOX_BASE_IMAGE", "ghcr.io/the-mentor/cbox-base:latest")
+# Base for custom/: the published claude agent image (images/) by default. Override per
+# command, e.g. CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-agent-claude:pr-160 just build
+# to try a PR's image, CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest for the old
+# Claude-bundled base, or use `just build-local` to build the claude agent image locally.
+base_image := env_var_or_default("CBOX_BASE_IMAGE", "ghcr.io/the-mentor/cbox-agent-claude:latest")
 registry   := "localhost:5551"
 compose    := "docker compose -f local-development/registry/docker-compose.yml"
 # Appends agentgateway/docker-compose.override.yml when it exists: an untracked,
@@ -99,19 +100,20 @@ registry-login *args:
 
 # The four build recipes (build, build-image, build-base, build-local) forward extra
 # arguments straight to `docker build`, so `--no-cache` (the reason this exists: Docker
-# caches `RUN` layers by command text, so a `curl | sh` installer or an unpinned `npm i -g`
+# caches `RUN` layers by command text, so a `curl | sh` installer or `apt upgrade`
 # keeps serving a stale version until the
 # cache is bypassed) reaches whichever image is being built. `build`/`build-image` build only
-# `custom/`, on the published base, so `just build --no-cache` rebuilds only that layer from
-# scratch; `just build-local --no-cache` rebuilds base/ too. Any other `docker build` flag
-# works the same way (e.g. `--pull`, `--progress=plain`).
+# `custom/`, on the published claude agent image, so `just build --no-cache` rebuilds only that layer from
+# scratch; `just build-local --no-cache` rebuilds the claude agent image (images/) too. Any
+# other flag both `docker build` and `docker buildx bake` accept works the same way
+# (e.g. `--pull`, `--progress=plain`).
 # Usage: just build-base [docker-build-args...]
 build-base *args:
     docker build {{args}} -t {{base_tag}} base/
 
 # Build custom/ on top of base_image and push it to the local registry.
 # --pull re-fetches a registry base (docker build never refreshes a base it
-# already has, so :latest would go stale); a bare local tag like cbox-base is
+# already has, so :latest would go stale); a bare local tag like cbox-agent-claude:dev is
 # built as-is, since --pull would look for it on Docker Hub.
 # CBOX_PRIVATE_MARKETPLACES/CBOX_PRIVATE_PLUGINS (in .env) bake in plugins from
 # private repos. The token (GH_TOKEN, else `gh auth token`) goes to docker as a
@@ -144,11 +146,29 @@ build-image *args: registry-up
 # Usage: just build [docker-build-args...]
 build *args: (build-image args)
 
-# Build base/ locally and custom/ on top of it: the pre-published flow, for
-# changing base/ itself.
+# Build the claude agent image (images/) locally as cbox-agent-claude:dev and custom/ on
+# top of it, for changing images/ itself: a change there has nothing to test against
+# until it is built. Ignores any CBOX_BASE_IMAGE already set in the environment. The
+# arguments go to both `docker buildx bake` and `docker build`, so use flags both accept.
 # Usage: just build-local [docker-build-args...]
-build-local *args: (build-base args)
-    CBOX_BASE_IMAGE={{base_tag}} just build-image {{args}}
+build-local *args:
+    docker buildx bake -f images/docker-bake.hcl {{args}} agent-claude
+    CBOX_BASE_IMAGE=cbox-agent-claude:dev just build-image {{args}}
+
+# Build the agent images (images/) and push them to the local registry as
+# library/cbox-agent-<name>, so a box can boot one: `just up -i cbox-agent-codex`.
+# build and up-dev use the published claude agent image as the base of cbox-custom, which is
+# still the default box image.
+# Extra arguments go to `docker buildx bake` (e.g. --no-cache). See images/README.md.
+# Usage: just build-agents [docker-buildx-bake-args...]
+build-agents *args: registry-up
+    #!/usr/bin/env sh
+    set -eu
+    docker buildx bake -f images/docker-bake.hcl {{args}}
+    for a in claude codex opencode; do
+        docker tag "cbox-agent-$a:dev" "{{registry}}/library/cbox-agent-$a"
+        docker push "{{registry}}/library/cbox-agent-$a"
+    done
 
 # Build the cbox binary. Requires protoc >= 3.12 (brew install protobuf).
 build-cbox:

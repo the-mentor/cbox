@@ -1,7 +1,8 @@
 # Base image: build and publish
 
 This covers `.github/workflows/base-image.yml` (and the `image.yml` it calls for `base/` and
-`base-rust/`) and how it's called from `ci.yml` and
+`base-rust/`; `image.yml` also builds the agent images from `images/`, see
+`docs/design/agent-images.md`) and how it's called from `ci.yml` and
 `release.yml`, plus the local-build side in `custom/Dockerfile` and the `justfile`. For the
 two-layer image itself (why it's split, what each layer bakes in), see `docs/design/general.md`.
 This is not a change log — it doesn't track who did what or when, only what the setup is and why.
@@ -19,7 +20,7 @@ rebuild keeps `:latest` no more than a week behind.
 
 `cbox-base`, to `ghcr.io/the-mentor/cbox-base`, and its Rust variant `cbox-base-rust` (below),
 both public. `cbox-custom` stays per-person: it
-bakes in per-repo config (plugins, `claude.json`) and is cheap to build, so there's nothing to
+bakes in per-repo config (plugins, awscli) on top of the `cbox-agent-claude` image and is cheap to build, so there's nothing to
 gain by publishing it, and every consumer building it themselves keeps its contents auditable
 without trusting a shared image.
 
@@ -40,9 +41,9 @@ move first, though, so if the `rust` job fails the two drift until it's re-run. 
 | Tag | Written by | For |
 | --- | --- | --- |
 | `vX.Y.Z` | `release.yml`, after `release-please` cuts a release | pinning the exact base a release shipped with |
-| `latest` | every release, and the weekly rebuild | what `custom/Dockerfile` and `just build` use by default |
+| `latest` | every release, and the weekly rebuild | what the old base-based flows use (`CBOX_BASE_IMAGE=…/cbox-base:latest`); `custom/` and `just build` now default to `cbox-agent-claude:latest` |
 | `YYYY-MM-DD` | the weekly scheduled rebuild | pinning a known-good base from before a bad upstream release, without waiting for the next `vX.Y.Z` |
-| `pr-<n>` | `ci.yml`, for a same-repo PR that changes `base/`, `base-rust/`, `base-image.yml`, `image.yml`, or `ci.yml` | trying that PR's base before merge, including in `custom-image`'s own build |
+| `pr-<n>` | `ci.yml`, for a same-repo PR that changes `base/`, `base-rust/`, `base-image.yml`, `image.yml`, or `ci.yml` | trying that PR's base before merge (`custom-image` builds on `cbox-agent-claude:pr-<n>` instead, see `docs/design/agent-images.md`) |
 
 ## `base-image.yml`
 
@@ -85,7 +86,7 @@ leaves `:latest` (or a release tag) pointing at an amd64-only or arm64-only imag
 runs `imagetools inspect` on the first tag and fails the run unless both `amd64` and `arm64` show
 up in the manifest list, so a bug in the merge step itself can't silently publish a single-arch tag.
 
-The build cache (`type=gha`, scoped per image directory and architecture) is used on PR builds, and skipped
+The build cache (`type=gha`, scoped per `key` input, which defaults to the image directory, and per architecture) is used on PR builds, and skipped
 (`no-cache: true`) on the weekly and release builds. `base/`'s install steps — `npm install -g
 @anthropic-ai/claude-code`, the oh-my-posh installer, `apt upgrade` — have fixed command text, so
 Docker's cache would keep serving them from before even when upstream has moved on. PR builds
@@ -98,9 +99,11 @@ upstream turn it off.
 `ci.yml`'s `base-image` job runs only on `pull_request`, when the `changes` job's `base` output is
 true (paths under `base/` or `base-rust/`, or `base-image.yml`, `image.yml` or `ci.yml`). It always builds, but only pushes
 `pr-<n>` when the PR is same-repo and not from Dependabot — fork and Dependabot tokens can't write
-packages. `custom-image` then builds `custom/` on top: on `pr-<n>` when `base-image` pushed one,
-otherwise on `:latest`. Both jobs feed into the `CI` gate alongside `build`, so a broken `base/`,
-`base-rust/` or `custom/` blocks merge the same way a broken `cbox/` does.
+packages. `custom-image` builds `custom/` on `cbox-agent-claude` instead (from `agent-images`, not
+`base-image`): on `pr-<n>` when `agent-images` pushed one, otherwise on `:latest`. A `base/` change
+no longer triggers it; an `images/` change does. All of these feed into the `CI` gate alongside
+`build`, so a broken `base/`, `base-rust/`, `images/` or `custom/` blocks merge the same way a
+broken `cbox/` does.
 
 `release.yml`'s `base-image` job runs after `release-please`, only when it just created a release,
 tagging `<release tag>` and `latest`. It builds `ref: github.event.workflow_run.head_sha` — the
@@ -109,24 +112,28 @@ the time this job runs.
 
 ## Local builds
 
-`custom/Dockerfile` starts `ARG BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest` /
-`FROM ${BASE_IMAGE}`. The `justfile` exposes that arg as `CBOX_BASE_IMAGE` (default the same
+`custom/Dockerfile` starts `ARG BASE_IMAGE=ghcr.io/the-mentor/cbox-agent-claude:latest` /
+`FROM ${BASE_IMAGE}` (the agent image from `images/`, `docs/design/agent-images.md`; it replaced
+`cbox-base` as the default). The `justfile` exposes that arg as `CBOX_BASE_IMAGE` (default the same
 `:latest`), so `just build`/`just build-image` build only `custom/`, on the published base,
 pulling a fresh copy of it each time (`--pull`). That `--pull` is conditional on the base
 reference containing a `/` — a registry reference like `ghcr.io/the-mentor/cbox-base:latest` — and
 not applied to a bare local tag like `cbox-base`, because Docker would otherwise try to pull that
 tag from Docker Hub instead of using the one just built locally.
 
-`just build-local` is the pre-published flow: it runs `build-base` (building `base/` locally),
-then `build-image` with `CBOX_BASE_IMAGE` forced to that local tag — it always uses the locally
-built base, ignoring any `CBOX_BASE_IMAGE` already set in the environment. Reach for it when
-changing `base/` itself, since a change there has nothing to test against until it's built.
+`just build-local` builds the claude agent image from `images/` locally (`agent-claude` in
+`images/docker-bake.hcl`, tagged `cbox-agent-claude:dev`), then runs `build-image` with
+`CBOX_BASE_IMAGE` forced to that local tag — it always uses the locally built image, ignoring any
+`CBOX_BASE_IMAGE` already set in the environment. Reach for it when changing `images/` itself,
+since a change there has nothing to test against until it's built. (Before the agent images it
+built `base/` into `cbox-base`; `just build-base` still does that, for `base/` and `base-rust/`.)
 
 `just build`/`just build-image` do honor an environment `CBOX_BASE_IMAGE`, so
-`CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:pr-67 just build` tries a PR's published base before
-it merges.
+`CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-agent-claude:pr-<n> just build` tries a PR's published
+agent image before it merges, and `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest just build`
+builds on the old Claude-bundled base.
 
-To boot a box on a locally built base rather than the published one: `just build-local && just
+To boot a box on a locally built image rather than the published one: `just build-local && just
 build-cbox && just up` (`just up-dev` always builds against the published base).
 
 ## Errors and recovery
@@ -134,19 +141,19 @@ build-cbox && just up` (`just up-dev` always builds against the published base).
 | Case | Behaviour |
 | --- | --- |
 | Weekly build fails | The failing image's `:latest` is left alone (if only `base-rust/` failed, `cbox-base`'s has already moved — see below), and GitHub emails the failure. Re-run through `workflow_dispatch`. |
-| A bad upstream release gets baked into `:latest` | Pin a dated tag with `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:<date> just build`. |
+| A bad upstream release gets baked into `:latest` | Pin a dated tag with `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-agent-claude:<date> just build` (`agent-images.yml` writes dated tags too; `cbox-base:<date>` for the old base). |
 | The release's image job fails | The release and binaries exist without `:vX.Y.Z`. Re-run the failed job. |
 | One architecture fails | That image's `merge` doesn't run, so none of its tags move. The architecture that did build leaves an untagged image behind. |
 | `base-rust/` fails after `base/` pushed | `cbox-base`'s tags have already moved; `cbox-base-rust`'s haven't. Re-run the failed `rust` jobs. |
-| Fork or Dependabot PR | The base builds without pushing, and `custom-image` builds on `:latest`. |
+| Fork or Dependabot PR | The base and agent images build without pushing, and `custom-image` builds on `cbox-agent-claude:latest`. |
 | Weekly and release runs overlap | Both push `:latest`, and the last one wins. Both build commits on `main`. This is accepted. |
 | Stale PR tags, dated tags, untagged images | Not cleaned up. A cleanup workflow can come later if storage matters. |
 
 ## One-time setup
 
 GHCR creates a new package as private on its first push. After that first push, make `cbox-base`
-and `cbox-base-rust` public in each package's own settings, so pulls need no login and fork PRs
-can still build `custom/` against `cbox-base`.
+and `cbox-base-rust` public in each package's own settings, so pulls need no login. Make `cbox-agent-claude` (and the other agent images) public too, so
+fork PRs can still build `custom/` against it.
 
 Rollout, in order:
 1. On the implementation PR, confirm `:pr-<n>` built multi-arch and `custom-image` passed.
@@ -154,7 +161,7 @@ Rollout, in order:
 3. Right after merge, run `base-image.yml` via `workflow_dispatch` to publish `latest` and a
    dated tag — nothing has pushed `:latest` yet at this point.
 4. Until `:latest` exists, `just build`/`just up-dev` can't pull a base to build against; use
-   `just build-local` instead.
+   `just build-local` instead (for the agent images, see `docs/design/agent-images.md`).
 
 ## Not covered
 

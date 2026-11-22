@@ -8,9 +8,6 @@
     "commit": "",
     "pr": ""
   },
-  "permissions": {
-    "defaultMode": "auto"
-  },
   "env": {
     "DISABLE_AUTOUPDATER": "1"
   },

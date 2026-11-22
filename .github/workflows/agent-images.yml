@@ -1,0 +1,177 @@
+name: agent-images
+
+# Builds images/ (an agent-free base plus one image per coding agent) as
+# multi-arch images via image.yml, and smoke-tests them. ci.yml calls it for
+# PRs, release.yml after a release; the weekly schedule refreshes :latest
+# between releases, because the base installs the newest gh, oh-my-posh and
+# apt packages at build time and nothing else would pick those up. The agent
+# CLIs themselves are pinned in images/Dockerfile (Renovate bumps them).
+# Modeled on base-image.yml. See docs/design/agent-images.md.
+on:
+  workflow_call:
+    inputs:
+      tags:
+        description: Tags to publish (no repository), comma- or newline-separated, e.g. "v0.1.4,latest"
+        type: string
+        required: true
+      push:
+        type: boolean
+        required: true
+      no-cache:
+        type: boolean
+        default: false
+      ref:
+        description: Git ref to build; empty means the triggering commit
+        type: string
+        default: ''
+    outputs:
+      claude-image:
+        description: Full reference of cbox-agent-claude's first pushed tag; empty when not pushed
+        value: ${{ jobs.claude.outputs.image }}
+  schedule:
+    - cron: '47 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: 'Comma-separated tags, e.g. "v0.1.4,latest". Empty: today''s date + latest'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Normalizes the three triggers into one set of values; same rules as
+  # base-image.yml (scheduled and manual runs are the weekly refresh, always
+  # built from the default branch with the cache skipped).
+  prep:
+    runs-on: ubuntu-26.04
+    outputs:
+      tags: ${{ steps.v.outputs.tags }}
+      push: ${{ steps.v.outputs.push }}
+      no-cache: ${{ steps.v.outputs.no-cache }}
+      ref: ${{ steps.v.outputs.ref }}
+    steps:
+      - id: v
+        env:
+          EVENT: ${{ github.event_name }}
+          IN_TAGS: ${{ inputs.tags }}
+          IN_PUSH: ${{ inputs.push }}
+          IN_NO_CACHE: ${{ inputs.no-cache }}
+          IN_REF: ${{ inputs.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -f  # tags are data: no globbing when splitting them below
+          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
+            raw="${IN_TAGS:-$(date -u +%F),latest}"
+            push=true
+            no_cache=true
+            ref="$DEFAULT_BRANCH"
+          else
+            raw="$IN_TAGS"
+            push="$IN_PUSH"
+            no_cache="$IN_NO_CACHE"
+            ref="$IN_REF"
+          fi
+          tags=""
+          for t in ${raw//,/ }; do
+            if ! [[ "$t" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+              echo "::error::invalid image tag '$t': use letters, digits, '_', '.', '-' (max 128), without the repository"
+              exit 1
+            fi
+            tags="$tags$t"$'\n'
+          done
+          if [ -z "$tags" ]; then
+            echo "::error::no image tags given"
+            exit 1
+          fi
+          {
+            echo "tags<<EOF"
+            printf '%s' "$tags"
+            echo "EOF"
+            echo "push=$push"
+            echo "no-cache=$no_cache"
+            echo "ref=$ref"
+          } >> "$GITHUB_OUTPUT"
+          echo "tags=$(echo "$tags" | tr '\n' ' ') push=$push no-cache=$no_cache ref=${ref:-<trigger>}"
+
+  # The agent-free base. When it was pushed, the agent images below build on
+  # it (BASE_IMAGE), so all four share the exact same base. When nothing was
+  # pushed (fork/Dependabot PRs) they build the base stage themselves, so a
+  # PR's change to it is still checked.
+  base:
+    needs: [prep, smoke]
+    uses: ./.github/workflows/image.yml
+    with:
+      context: images
+      target: base
+      key: agent-base
+      image: ghcr.io/the-mentor/cbox-agent-base
+      tags: ${{ needs.prep.outputs.tags }}
+      push: ${{ needs.prep.outputs.push == 'true' }}
+      no-cache: ${{ needs.prep.outputs.no-cache == 'true' }}
+      ref: ${{ needs.prep.outputs.ref }}
+
+  # Not in the matrix below: custom-image builds on this image, so ci.yml needs
+  # this job's output, and a matrix job's outputs can't be read per row.
+  claude:
+    needs: [prep, smoke, base]
+    uses: ./.github/workflows/image.yml
+    with:
+      context: images
+      target: claude
+      base-image: ${{ needs.base.outputs.image }}
+      key: agent-claude
+      image: ghcr.io/the-mentor/cbox-agent-claude
+      tags: ${{ needs.prep.outputs.tags }}
+      push: ${{ needs.prep.outputs.push == 'true' }}
+      no-cache: ${{ needs.prep.outputs.no-cache == 'true' }}
+      ref: ${{ needs.prep.outputs.ref }}
+
+  agents:
+    needs: [prep, smoke, base]
+    strategy:
+      fail-fast: false
+      matrix:
+        agent: [codex, opencode]
+    uses: ./.github/workflows/image.yml
+    with:
+      context: images
+      target: ${{ matrix.agent }}
+      base-image: ${{ needs.base.outputs.image }}
+      key: agent-${{ matrix.agent }}
+      image: ghcr.io/the-mentor/cbox-agent-${{ matrix.agent }}
+      tags: ${{ needs.prep.outputs.tags }}
+      push: ${{ needs.prep.outputs.push == 'true' }}
+      no-cache: ${{ needs.prep.outputs.no-cache == 'true' }}
+      ref: ${{ needs.prep.outputs.ref }}
+
+  # Builds the four images for the runner's own architecture into its docker (so it
+  # works for fork PRs, which push nothing) and runs images/smoke-test.sh on them,
+  # on amd64 and on arm64 (native runners, as in image.yml). The jobs that publish
+  # wait for it, so a broken image never gets a tag.
+  smoke:
+    needs: prep
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-26.04, ubuntu-26.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prep.outputs.ref }}
+          persist-credentials: false
+
+      - env:
+          NO_CACHE: ${{ needs.prep.outputs.no-cache }}
+        run: |
+          flags=""
+          [ "$NO_CACHE" = true ] && flags="--no-cache"
+          # shellcheck disable=SC2086 # $flags is empty or one flag
+          docker buildx bake -f images/docker-bake.hcl $flags
+
+      - run: sh images/test-sandbox-agent.sh
+
+      - run: sh images/smoke-test.sh

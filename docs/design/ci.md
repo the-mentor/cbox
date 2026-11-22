@@ -84,10 +84,17 @@ The macOS binary is not explicitly codesigned. The linker's ad-hoc signature was
 `boxlite`'s macOS backend on the one Apple Silicon machine tested. If a released binary fails
 there on another Mac, add a `codesign --sign - --entitlements ...` step at that point.
 
-`ci.yml` also has two image jobs, `base-image` and `custom-image`, gated by the `changes` job's
-own `base`/`custom` outputs the same way `build` is gated by `rust`. `CI` now needs both of them
-too. They're covered in `docs/design/images.md`, along with the reusable `base-image.yml`
-workflow they both call and its use from `release.yml`.
+`ci.yml` also has three image jobs, `base-image`, `agent-images` and `custom-image`, gated by the
+`changes` job's own `base`/`images`/`custom` outputs the same way `build` is gated by `rust`. `CI`
+needs all of them too. `base-image` and `custom-image` are covered in `docs/design/images.md`,
+along with the reusable `base-image.yml` workflow and its use from `release.yml`; `agent-images`
+and its `agent-images.yml` workflow are covered in `docs/design/agent-images.md`. Both call the
+shared `image.yml`.
+
+There is also an `actionlint` job on pull requests: it lints every workflow, with shellcheck on
+their `run:` scripts, using the config in `.github/actionlint.yaml`. It is the only thing that
+checks `needs`/`outputs` wiring and expression names before a workflow first runs, which matters
+for `release.yml` and the weekly schedule. `CI` needs it too.
 
 ## `.github/workflows/release.yml`
 
