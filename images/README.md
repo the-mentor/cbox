@@ -50,8 +50,8 @@ just up -i cbox-agent-codex -f -- sandbox-agent
 just up -i cbox-agent-opencode -f -- sandbox-agent
 ```
 
-`sandbox-agent` is a small launcher each agent image ships: it starts that image's agent, and
-`--continue` resumes its last session. `cbox` still defaults to `claude`, hence the `--`.
+`sandbox-agent` is a small launcher in the base image: it starts whichever agent the image has
+(set `SANDBOX_AGENT` if there are several), and `--continue` resumes its last session. `cbox` still defaults to `claude`, hence the `--`.
 
 The images CI publishes can be used directly too: `just up -i ghcr.io/the-mentor/cbox-agent-codex:latest`.
 

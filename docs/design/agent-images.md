@@ -205,13 +205,16 @@ runners, the merge step that refuses a tag missing an architecture).
   `http://host.boxlite.internal:15003/mcp` is baked into each agent's home config. An image
   used outside cbox gets a dead entry, which a customize image can replace.
 
-- **`sandbox-agent` starts the image's agent.** Each agent image installs
-  `/usr/local/bin/sandbox-agent`. With no arguments it starts that image's agent, `--continue`
-  means "the last session" (`claude --continue`, `codex resume --last`, `opencode --continue`),
-  and any other arguments go to the agent. `cbox` does not call it yet: `up` still defaults to
-  `claude` and `exec` to `claude --continue`, so for now pass `-- sandbox-agent`. Planned:
-  those defaults become `sandbox-agent` and `sandbox-agent --continue`, with a fallback to
-  `claude` for images that lack it (`cbox-custom` and boxes already created from it).
+- **`sandbox-agent` starts the image's agent.** The `base` stage installs one launcher,
+  `/usr/local/bin/sandbox-agent`, so a customize image or a new agent needs no extra file. It
+  runs `$SANDBOX_AGENT` when that is set, otherwise the one of `claude`, `codex` or `opencode`
+  it finds on `PATH`. With none, or with several and no `SANDBOX_AGENT`, it exits 1 with a
+  message. With no arguments it starts the agent, `--continue` means "the last session"
+  (`claude --continue`, `codex resume --last`, `opencode --continue`), and any other arguments
+  go to the agent. `cbox` does not call it yet: `up` still defaults to `claude` and `exec` to
+  `claude --continue`, so for now pass `-- sandbox-agent`. Planned: those defaults become
+  `sandbox-agent` and `sandbox-agent --continue`, with a fallback to `claude` for images that
+  lack it (`cbox-custom` and boxes already created from it).
 
 ## Not done / open questions
 

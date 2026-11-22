@@ -32,9 +32,10 @@ check() {
 
 check "base: user and directory" base '[ "$(id -un)" = sandbox-user ] && [ "$PWD" = /workspace ]'
 check "base: tools run" base 'jq --version && yq --version && gh --version && uv --version && pre-commit --version && oh-my-posh version && ps --version && git --version'
-check "base: no agent installed" base '! command -v claude && ! command -v codex && ! command -v opencode && ! command -v sandbox-agent'
+check "base: no agent installed" base '! command -v claude && ! command -v codex && ! command -v opencode'
 
 check "claude: sandbox-agent starts claude (version matches the pin)" claude "sandbox-agent --version | grep -F '$(pin CLAUDE_CODE_VERSION)'"
+check "base: sandbox-agent fails clearly with no agent installed" base 'out=$(sandbox-agent 2>&1); rc=$?; [ "$rc" -ne 0 ] && echo "$out" | grep -q "no agent"'
 check "claude: version matches the pin" claude "claude --version | grep -F '$(pin CLAUDE_CODE_VERSION)'"
 check "claude: wrapper, cc and hook are installed" claude 'command -v claude-real && command -v cc && command -v cbox-hook'
 check "claude: config files parse" claude 'jq -e . ~/.claude.json ~/.claude/settings.json >/dev/null'

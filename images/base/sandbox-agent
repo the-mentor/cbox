@@ -1,0 +1,28 @@
+#!/bin/sh
+# Starts the coding agent installed in this image. cbox runs `sandbox-agent` instead of
+# naming an agent, and `sandbox-agent --continue` to pick up the last session; any other
+# arguments go to the agent. The agent is $SANDBOX_AGENT when set, otherwise the one of
+# claude, codex or opencode found on PATH (an image with several must set SANDBOX_AGENT).
+agent=${SANDBOX_AGENT:-}
+if [ -z "$agent" ]; then
+    for a in claude codex opencode; do
+        command -v "$a" >/dev/null 2>&1 || continue
+        if [ -n "$agent" ]; then
+            echo "sandbox-agent: $agent and $a are both installed; set SANDBOX_AGENT to pick one" >&2
+            exit 1
+        fi
+        agent=$a
+    done
+fi
+if [ -z "$agent" ]; then
+    echo "sandbox-agent: no agent (claude, codex or opencode) is installed in this image" >&2
+    exit 1
+fi
+if [ "${1:-}" = --continue ]; then
+    shift
+    case "$agent" in
+        codex) exec codex resume --last "$@" ;;
+        *) exec "$agent" --continue "$@" ;;
+    esac
+fi
+exec "$agent" "$@"

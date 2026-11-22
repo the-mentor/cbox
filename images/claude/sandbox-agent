@@ -1,8 +1,0 @@
-#!/bin/sh
-# Starts this image's agent. cbox runs `sandbox-agent` instead of naming an agent, and
-# `sandbox-agent --continue` to pick up the last session; any other arguments go to the agent.
-if [ "${1:-}" = --continue ]; then
-    shift
-    exec claude --continue "$@"
-fi
-exec claude "$@"
