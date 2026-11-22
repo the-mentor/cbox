@@ -25,6 +25,7 @@ jobs:
       rust: ${{ steps.diff.outputs.rust }}
       base: ${{ steps.diff.outputs.base }}
       custom: ${{ steps.diff.outputs.custom }}
+      images: ${{ steps.diff.outputs.images }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -37,7 +38,7 @@ jobs:
       # fork) skips: release.yml auto-merges it within seconds without waiting
       # for checks, so this build would only finish after the merge. The push
       # to main that follows still builds.
-      # base/custom follow the same rules and gate the image jobs.
+      # base/custom/images follow the same rules and gate the image jobs.
       - id: diff
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -48,17 +49,18 @@ jobs:
           changed="$(git diff --name-only "$BASE" HEAD 2>/dev/null || true)"
           match() { grep -qE "$1" <<< "$changed"; }
           if [ "$RELEASE_PR" = true ]; then
-            rust=false base=false custom=false
+            rust=false base=false custom=false images=false
           elif [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            rust=true base=true custom=true
+            rust=true base=true custom=true images=true
           else
             match '^(cbox/|\.github/workflows/ci\.yml$|CHANGELOG\.md$)' && rust=true || rust=false
             match '^(base/|base-rust/|\.github/workflows/(base-image|image|ci)\.yml$)' && base=true || base=false
             match '^(custom/|\.github/workflows/ci\.yml$)' && custom=true || custom=false
+            match '^(images/|\.github/workflows/(agent-images|image|ci)\.yml$)' && images=true || images=false
             # A new base can break custom/, so check them together.
             [ "$base" = true ] && custom=true
           fi
-          printf 'rust=%s\nbase=%s\ncustom=%s\n' "$rust" "$base" "$custom" | tee -a "$GITHUB_OUTPUT"
+          printf 'rust=%s\nbase=%s\ncustom=%s\nimages=%s\n' "$rust" "$base" "$custom" "$images" | tee -a "$GITHUB_OUTPUT"
 
   build:
     needs: changes
@@ -147,6 +149,26 @@ jobs:
       tags: pr-${{ github.event.pull_request.number }}
       push: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
 
+  # Same-repo PRs publish the agent images (images/) as :pr-<number>, so a
+  # change to images/ can be tried before merge
+  # (cbox up -i cbox-agent-claude after pulling :pr-<n>). Fork and Dependabot
+  # tokens can't write packages, so those only build. Publishing from main
+  # happens in release.yml and the weekly schedule. See
+  # docs/design/agent-images.md.
+  agent-images:
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.images == 'true'
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: agent-images-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    uses: ./.github/workflows/agent-images.yml
+    with:
+      tags: pr-${{ github.event.pull_request.number }}
+      push: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+
   # Builds custom/ (amd64 only: its steps are architecture-independent) on the
   # PR's own base when one was published, else on :latest. Never pushed:
   # cbox-custom is built per person. always() lets it run when base-image was
@@ -196,12 +218,12 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [changes, build, base-image, custom-image]
+    needs: [changes, build, base-image, agent-images, custom-image]
     runs-on: ubuntu-latest
     steps:
       - env:
           CHANGES: ${{ needs.changes.result }}
-          RESULTS: ${{ needs.build.result }} ${{ needs.base-image.result }} ${{ needs.custom-image.result }}
+          RESULTS: ${{ needs.build.result }} ${{ needs.base-image.result }} ${{ needs.agent-images.result }} ${{ needs.custom-image.result }}
         run: |
           [ "$CHANGES" = success ] || { echo "changes: $CHANGES"; exit 1; }
           for r in $RESULTS; do

@@ -124,3 +124,20 @@ jobs:
       push: true
       no-cache: true
       ref: ${{ github.event.workflow_run.head_sha }}
+
+  # Publishes the agent images (images/) as :<release tag> and moves :latest,
+  # the same way base-image does: built from the released commit, cache skipped.
+  agent-images:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/agent-images.yml
+    with:
+      tags: |
+        ${{ needs.release-please.outputs.tag_name }}
+        latest
+      push: true
+      no-cache: true
+      ref: ${{ github.event.workflow_run.head_sha }}

@@ -1,8 +1,8 @@
 # images/ (draft)
 
-Draft of an agent-free base image plus one thin image per coding agent. **CI does
-not build this directory yet**, and nothing here replaces `base/` or `custom/`,
-which are still what `just build` and `cbox up` use. Design and open questions:
+Draft of an agent-free base image plus one thin image per coding agent. CI builds and
+publishes these as `ghcr.io/the-mentor/cbox-agent-<name>`, but nothing here replaces `base/`
+or `custom/`, which are still what `just build` and `cbox up` use. Design and open questions:
 `docs/design/agent-images.md`.
 
 ## Layout
@@ -38,3 +38,8 @@ RUN f=$HOME/.claude/settings.json \
     && jq -s '.[0] * .[1]' "$f" /tmp/overrides.json > /tmp/merged.json \
     && mv /tmp/merged.json "$f" && rm /tmp/overrides.json
 ```
+
+## Smoke test
+
+After building the `:dev` tags, `sh images/smoke-test.sh` checks the user, tools, pinned
+versions and baked config in each image. CI runs the same script.

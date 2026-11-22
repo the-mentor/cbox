@@ -1,6 +1,7 @@
 # Agent images (draft)
 
-Status: **draft, not accepted.** The files are in `images/`. CI does not build them, and
+Status: **draft, not accepted.** The files are in `images/`. CI builds, smoke-tests and
+publishes them (see "CI and publishing"), but `cbox` and the `justfile` do not use them, and
 `base/`, `base-rust/`, `custom/`, the `justfile` and `cbox` still build and boot the current
 images. Once this design is accepted, `docs/design/images.md`, `docs/design/general.md` and
 `AGENTS.md` need updating, since they describe the current two layers.
@@ -32,7 +33,7 @@ base            OS, shell, git, runtimes, the non-root user, common tooling. NO 
 
 ## Non-goals (in this PR)
 
-- CI builds or publishing. No workflow changes, no registry tags.
+- Switching anything that boots a box to the published images (see the migration plan).
 - Switching `just build`, `cbox up` or the default image over to these images.
 - Changing or removing `base/`, `base-rust/` or `custom/`.
 - A customize image in the repo. The README shows only a minimal example.
@@ -133,6 +134,33 @@ RUN f=$HOME/.claude/settings.json \
 `permissions.allow` replaces that whole list. To drop a default key, replace the file (`COPY`)
 instead of merging.
 
+## CI and publishing
+
+`.github/workflows/agent-images.yml` builds `images/` and is modeled on `base-image.yml`
+(`docs/design/images.md` has the details the two share: tag rules, the weekly refresh, native
+runners, the merge step that refuses a tag missing an architecture).
+
+- **Images.** `ghcr.io/the-mentor/cbox-agent-base`, `cbox-agent-claude`, `cbox-agent-codex` and
+  `cbox-agent-opencode`. Each is one `target` of `images/Dockerfile`, built by `image.yml`
+  (native amd64 and arm64 runners, push by digest, then one merge). `image.yml` got two inputs
+  for this: `target`, and `key`, which names the digest artifacts and cache scope so several
+  images can come from one directory.
+- **Why `image.yml` and not the bake action.** It already has the digest-and-merge step that
+  guards the tags; the bake action has no merge step. The cost is that each image rebuilds the
+  shared `base` stage itself, so the four images do not share layers in the registry. If that
+  matters, one job per architecture running `docker/bake-action` over the bake file would build
+  the base stage once, at the price of writing the digest collection and merge by hand.
+- **Smoke test.** A `smoke` job builds the four images for amd64 into the runner's docker
+  (so it also runs for fork PRs, which push nothing) and runs `images/smoke-test.sh`.
+- **Callers.** `ci.yml` runs it on pull requests when the new `images` filter matches
+  (`images/`, `agent-images.yml`, `image.yml` or `ci.yml`), tagging `pr-<n>` and pushing only
+  for same-repo, non-Dependabot PRs; `CI` now needs it. `release.yml` runs it after a release
+  with `<release tag>` and `latest`, built from the released commit with the cache skipped.
+  A weekly schedule (Monday 06:47 UTC) and `workflow_dispatch` refresh `latest` and a dated tag.
+- **One-time setup.** GHCR creates each new package private on its first push. After the first
+  run, make the four packages public in their package settings, as for `cbox-base`.
+- **Not covered.** The smoke test checks the images, not a booted box. Cleaning up old tags.
+
 ## Build options considered
 
 1. **One multi-stage Dockerfile, `--target` per image.** (Chosen.) The base and the agent
@@ -141,8 +169,8 @@ instead of merging.
    `docker buildx build --target <name>`.
 2. **Bake with a `matrix` target.** (Chosen, on top of 1.) One command builds every agent,
    and BuildKit builds the shared `base` stage once. Adding an agent means adding a stage and
-   a name in the matrix list. Bake is also a natural fit for CI later, through
-   `docker/bake-action`.
+   a name in the matrix list. CI does not use Bake to build (see "CI and publishing"); the
+   bake file is for local builds and the smoke job.
 3. **Separate Dockerfiles per agent, with Bake `contexts = { base = "target:base" }`.** Not
    chosen, for now. It keeps files small and lets an agent's Dockerfile live on its own, but
    with three thin layers it is more files and more indirection for the same graph. It is still
@@ -182,13 +210,8 @@ instead of merging.
   `-- <cmd>`/`exec` default command per agent (`claude` vs `codex` vs `opencode`), and a
   profile `image` field are all candidates. `base/` and `custom/` are deliberately left
   untouched here.
-- **Releases and CI.** Not done. Possible shape: a `changes` filter for `^images/`, a
-  `docker/bake-action` job on the existing native amd64/arm64 runners, and push-by-digest plus
-  `imagetools create`, as `image.yml` does now, under names such as
-  `ghcr.io/the-mentor/cbox-agent-<name>`. Tags, the weekly refresh and cache rules would follow
-  `docs/design/images.md`.
-- **Migration from `base/` + `custom/`:** (1) accept this design and add CI for `images/`;
-  (2) publish `cbox-agent-claude`; (3) rebase `custom/` onto it (`CBOX_BASE_IMAGE`), moving its
+- **Migration from `base/` + `custom/`:** (1) accept this design (CI for `images/` exists);
+  (2) publish `cbox-agent-claude` (first release or a manual run of `agent-images.yml`); (3) rebase `custom/` onto it (`CBOX_BASE_IMAGE`), moving its
   defaults out (onboarding, trust and the auto-updater are already in `claude`); (4) port
   `base-rust/` onto `base`; (5) remove `base/`, update `docs/design/images.md`,
   `docs/design/general.md` and `AGENTS.md`.
