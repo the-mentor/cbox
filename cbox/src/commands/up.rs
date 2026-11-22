@@ -136,7 +136,7 @@ pub async fn run(args: UpArgs) -> Result<()> {
         eprintln!(
             "cbox: warning: no Anthropic credential found (checked ANTHROPIC_API_KEY, \
              ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL, CLAUDE_CODE_OAUTH_TOKEN). \
-             Claude will not be able to authenticate. {looked} \
+             If this box runs Claude, it will not be able to authenticate. {looked} \
              (override with --env-file or $CBOX_ENV_FILE)."
         );
     }
