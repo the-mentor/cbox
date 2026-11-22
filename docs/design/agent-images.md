@@ -242,12 +242,17 @@ Checked on amd64 with Docker Desktop (default builder), from the repo root:
   baked `update` setting is read. opencode 2.x lists MCP servers only after its first
   request in a directory loads the config, so the first `mcp list` can be empty.
 - Codex needs `ps` (the `procps` package, added to `base`) to start its background server.
+- CI on PR 160: `agent-images.yml` built base, claude, codex and opencode for amd64 and arm64
+  on native runners, the merge step found both architectures for each, the `smoke` job passed,
+  and `CI` was green with `base-image` and `custom-image`.
 - `opencode` is large (about 2.3GB on disk, 708MB of content, against about 380MB for the
   other agents).
 
 ### Unverified
 
-- arm64: the opencode install and its platform binary, and the other stages under emulation.
+- arm64: the images build on a native arm64 runner and the merge finds both architectures, but
+  nothing runs an arm64 image yet (the smoke test is amd64 only), so the opencode platform binary
+  is untested there.
 - That codex loads its baked update-check and trust settings (its MCP entry is read).
 - That the status line and the hook events reach iTerm2, and that the claude first run shows
   no theme or trust prompt (run in a real box with `cbox up -i`).
