@@ -218,10 +218,11 @@ runners, the merge step that refuses a tag missing an architecture).
   it finds on `PATH`. With none, or with several and no `SANDBOX_AGENT`, it exits 1 with a
   message. With no arguments it starts the agent, `--continue` means "the last session"
   (`claude --continue`, `codex resume --last`, `opencode --continue`), and any other arguments
-  go to the agent. `cbox` does not call it yet: `up` still defaults to `claude` and `exec` to
-  `claude --continue`, so for now pass `-- sandbox-agent`. Planned: those defaults become
-  `sandbox-agent` and `sandbox-agent --continue`, with a fallback to `claude` for images that
-  lack it (`cbox-custom` and boxes already created from it).
+  go to the agent. `cbox up` runs it by default and `cbox exec` runs
+  `sandbox-agent --continue`, with no fallback: an image without it (an old `cbox-custom` built
+  on `cbox-base`, or a box created from one) fails with `executable 'sandbox-agent' not found`,
+  so pass `-- claude` there. The missing-credential warning in `cbox up` still fires only for
+  an explicit `claude` command, so it no longer fires for the default.
 
 ## Not done / open questions
 
