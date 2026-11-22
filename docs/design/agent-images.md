@@ -2,8 +2,8 @@
 
 Status: **draft, not accepted.** The files are in `images/`. CI builds, smoke-tests and
 publishes them (see "CI and publishing"). Already switched over in the same PR: `custom/`,
-`just build` and `just build-local` build on `cbox-agent-claude`, and `cbox up` / `cbox exec`
-run the image's `sandbox-agent`. Still on the old layers: `base/` and `base-rust/` (built by
+`just build` and `just build-local` build on `cbox-agent-claude`. `cbox up` / `cbox exec` still
+run `claude` by default; #173 makes them run the image's `sandbox-agent`. Still on the old layers: `base/` and `base-rust/` (built by
 `just build-base` and `base-image.yml`), and the default box image, which stays `cbox-custom`.
 `docs/design/images.md`, `docs/design/general.md` and `AGENTS.md` are updated where they name
 the default base, but still describe `cbox-base` as the Claude-bundled base.
@@ -198,8 +198,7 @@ runners, the merge step that refuses a tag missing an architecture).
 
 - **One user and home layout for all agents.** Decided: every agent shares the single
   `sandbox-user` (uid 1000, `/home/sandbox-user`, `/workspace`). `cbox` assumes these paths
-  today (for example, `exec` runs `sandbox-agent --continue`, and the in-box hook and config
-  live under `/home/sandbox-user`).
+  today (for example, the in-box hook and config live under `/home/sandbox-user`).
 - **One customize image per agent.** Decided. Most overrides are agent config (settings, MCP
   entries, hooks), which does not carry across agents. Parts shared by all agents (apt
   packages, dotfiles) can still use a single `ARG BASE_IMAGE` Dockerfile.
@@ -229,15 +228,13 @@ runners, the merge step that refuses a tag missing an architecture).
   it finds on `PATH`. With none, or with several and no `SANDBOX_AGENT`, it exits 1 with a
   message. With no arguments it starts the agent, `--continue` means "the last session"
   (`claude --continue`, `codex resume --last`, `opencode --continue`), and any other arguments
-  go to the agent. `cbox up` runs it by default and `cbox exec` runs
-  `sandbox-agent --continue`, with no fallback: an image without it (an old `cbox-custom` built
-  on `cbox-base`, or a box created from one) fails with `executable 'sandbox-agent' not found`,
-  so pass `-- claude` there. The missing-credential warning in `cbox up` still fires only for
-  an explicit `claude` command, so it no longer fires for the default.
+  go to the agent. #173 makes `cbox up` run it by default and `cbox exec` run
+  `sandbox-agent --continue`, falling back to `claude` in an image without it. Until then,
+  pass `-- sandbox-agent` to boot a codex or opencode image.
 
 ## Not done / open questions
 
-- **How `cbox up` picks the image.** The default command is done (`sandbox-agent`, above) and
+- **How `cbox up` picks the image.** The default command is #173 (`sandbox-agent`, above) and
   `custom/` is on `cbox-agent-claude`. Open: choosing an agent image per profile (the profile
   `image` field already works), and whether the default box image should stop being
   `cbox-custom`.
@@ -299,8 +296,6 @@ Checked on amd64 with Docker Desktop (default builder), from the repo root:
 - That codex loads its baked update-check and trust settings (its MCP entry is read).
 - That the status line and the hook events reach iTerm2, and that the claude first run shows
   no theme or trust prompt (run in a real box with `cbox up -i`).
-- `cbox up` with no `-- <cmd>` reaching the agent through `sandbox-agent` was reported working,
-  but no per-image result is recorded for the direct (no shell) launch, and `cbox exec` resuming
-  a session is untested for every agent.
+- `cbox exec -- sandbox-agent --continue` resuming a session is untested for every agent.
 - The codex and opencode docs list a `curl` script and npm side by side, and neither says
   which one it prefers. npm was a choice, not a documented recommendation.

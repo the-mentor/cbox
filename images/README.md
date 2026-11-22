@@ -2,8 +2,9 @@
 
 Draft of an agent-free base image plus one thin image per coding agent. CI builds and
 publishes these as `ghcr.io/the-mentor/cbox-agent-<name>`. `custom/` builds on
-`cbox-agent-claude`, and `cbox up` / `cbox exec` run this directory's `sandbox-agent`; `cbox
-up` still boots `cbox-custom` by default, and `base/` and `base-rust/` are unchanged. Design
+`cbox-agent-claude`. `cbox up` still boots `cbox-custom` and runs `claude` by default (#173
+switches the command to this directory's `sandbox-agent`), and `base/` and `base-rust/` are
+unchanged. Design
 and open questions: `docs/design/agent-images.md`.
 
 ## Layout
@@ -44,18 +45,19 @@ RUN f=$HOME/.claude/settings.json \
 ## Boot a box from one
 
 `just build-agents` builds the images and pushes the agents to the local registry (`localhost:5551`,
-started for you), then boot one by name. `cbox` runs the image's `sandbox-agent` by default:
+started for you), then boot one by name with `-- sandbox-agent` (the default once #173 lands):
 
 ```bash
 just build-agents
-just up -i cbox-agent-codex -f
-just up -i cbox-agent-opencode -f
+just up -i cbox-agent-codex -f -- sandbox-agent
+just up -i cbox-agent-opencode -f -- sandbox-agent
 ```
 
 `sandbox-agent` is a small launcher in the base image: it starts whichever agent the image has
-(set `SANDBOX_AGENT` if there are several), and `--continue` resumes its last session. `cbox up` runs it by default and `cbox exec` runs `sandbox-agent --continue`.
+(set `SANDBOX_AGENT` if there are several), and `--continue` resumes its last session
+(`just exec -- sandbox-agent --continue`).
 
-The images CI publishes can be used directly too: `just up -i ghcr.io/the-mentor/cbox-agent-codex:latest`.
+The images CI publishes can be used directly too: `just up -i ghcr.io/the-mentor/cbox-agent-codex:latest -- sandbox-agent`.
 
 ## Smoke test
 

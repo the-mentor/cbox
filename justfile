@@ -219,7 +219,7 @@ ci-local *args:
       rm -f "$keep"
     done
 
-# Build images and the cbox binary, then boot the box and launch the image's agent.
+# Build images and the cbox binary, then boot the box and launch Claude Code.
 # Usage: just up-dev [box-name] [-f] [-c] [-v host:box ...] [-e KEY[=VALUE] ...] [-i image] [--profile NAME] [--secret NAME ...] [-d] [-- cmd...]
 # Positional arguments keep every argument whole (`-e "A=b c"`, `-- sh -c 'a; b'`). A dependency
 # `(up args)` would hand `up` one space-joined string, so re-invoke just from the caller's directory.
@@ -232,7 +232,7 @@ up-dev *args: build build-cbox
 
 cbox_bin := justfile_directory() + "/cbox/target/release/cbox"
 
-# Boot the box and launch the image's agent (sandbox-agent; claude in cbox-custom).
+# Boot the box and launch Claude Code.
 # Usage: just up [box-name] [-f] [-c] [-v host:box ...] [-e KEY[=VALUE] ...] [-i image] [--profile NAME] [--secret NAME ...] [-d] [-- cmd...]
 #
 # The `cd` is load-bearing: `just` sets the working directory to the justfile's
