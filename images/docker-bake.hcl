@@ -1,6 +1,7 @@
-# DRAFT: local builds only. Nothing publishes these images yet (no registry,
-# no CI job); tags are local names and `output = type=docker` loads each image into
-# the local docker, whichever builder is active (docker or docker-container driver).
+# For local builds and CI's smoke job. CI's published images are built from
+# images/Dockerfile by image.yml, not by bake. Tags are local names and
+# `output = type=docker` loads each image into the local docker, whichever builder is
+# active (docker or docker-container driver).
 # Run from the repo root: docker buildx bake -f images/docker-bake.hcl [agents]
 
 group "default" {

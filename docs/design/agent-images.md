@@ -1,10 +1,12 @@
 # Agent images (draft)
 
 Status: **draft, not accepted.** The files are in `images/`. CI builds, smoke-tests and
-publishes them (see "CI and publishing"), but `cbox` and the `justfile` do not use them, and
-`base/`, `base-rust/`, `custom/`, the `justfile` and `cbox` still build and boot the current
-images. Once this design is accepted, `docs/design/images.md`, `docs/design/general.md` and
-`AGENTS.md` need updating, since they describe the current two layers.
+publishes them (see "CI and publishing"). Already switched over in the same PR: `custom/`,
+`just build` and `just build-local` build on `cbox-agent-claude`, and `cbox up` / `cbox exec`
+run the image's `sandbox-agent`. Still on the old layers: `base/` and `base-rust/` (built by
+`just build-base` and `base-image.yml`), and the default box image, which stays `cbox-custom`.
+`docs/design/images.md`, `docs/design/general.md` and `AGENTS.md` are updated where they name
+the default base, but still describe `cbox-base` as the Claude-bundled base.
 
 ## Intent
 
@@ -33,11 +35,12 @@ base            OS, shell, git, runtimes, the non-root user, common tooling. NO 
 
 ## Non-goals (in this PR)
 
-- Switching anything that boots a box to the published images (see the migration plan).
-- Switching `just build`, `cbox up` or the default image over to these images.
-- Changing or removing `base/`, `base-rust/` or `custom/`.
+- Removing `base/` or porting `base-rust/` onto the new base (see the migration plan).
+- Changing the default box image: `cbox up` still boots `cbox-custom`, now built on
+  `cbox-agent-claude`.
 - A customize image in the repo. The README shows only a minimal example.
 - A Rust variant (`base-rust/` today).
+- Routing Codex or opencode model traffic through the gateway (it only has Anthropic routes).
 
 ## Layout
 
@@ -45,7 +48,7 @@ base            OS, shell, git, runtimes, the non-root user, common tooling. NO 
 `ARG BASE_IMAGE` (default `node:26-trixie-slim`, the same image `base/` uses) picks the OS image
 the `base` stage starts from. A customize image is its own Dockerfile with its own
 `ARG BASE_IMAGE=cbox-agent-<agent>:dev` / `FROM ${BASE_IMAGE}`, the same pattern
-`custom/Dockerfile` uses today. Nothing is pinned by digest yet. A comment marks where the tag or
+`custom/Dockerfile` uses (its default is `ghcr.io/the-mentor/cbox-agent-claude:latest`). Nothing is pinned by digest yet. A comment marks where the tag or
 digest goes.
 
 `images/docker-bake.hcl` builds `base` (`cbox-agent-base:dev`) and a matrix target,
@@ -131,8 +134,10 @@ RUN f=$HOME/.claude/settings.json \
     && mv /tmp/merged.json "$f" && rm /tmp/overrides.json
 ```
 
-`jq`'s `*` merges objects recursively and **replaces arrays**, so overriding `hooks` or
-`permissions.allow` replaces that whole list. To drop a default key, replace the file (`COPY`)
+`jq`'s `*` merges objects recursively and **replaces arrays**. `hooks` is an object keyed by
+event, so an override can add a new event and keep the others, but one that sets `hooks.Stop`
+replaces that event's whole array (and with it the `cbox-hook` entry), and one that sets
+`permissions.allow` replaces that list. To drop a default key, replace the file (`COPY`)
 instead of merging.
 
 ## CI and publishing
@@ -151,8 +156,11 @@ runners, the merge step that refuses a tag missing an architecture).
   shared `base` stage itself, so the four images do not share layers in the registry. If that
   matters, one job per architecture running `docker/bake-action` over the bake file would build
   the base stage once, at the price of writing the digest collection and merge by hand.
-- **Smoke test.** A `smoke` job builds the four images for amd64 into the runner's docker
-  (so it also runs for fork PRs, which push nothing) and runs `images/smoke-test.sh`.
+- **Smoke test.** A `smoke` job runs `images/test-sandbox-agent.sh` (the launcher against stub
+  agents, no docker), builds the four images into the runner's docker (so it also runs for
+  fork PRs, which push nothing) and runs `images/smoke-test.sh`. It runs on a native amd64 and
+  a native arm64 runner, and the jobs that publish wait for it, so a broken image never gets a
+  tag.
 - **Callers.** `ci.yml` runs it on pull requests when the new `images` filter matches
   (`images/`, `agent-images.yml`, `image.yml` or `ci.yml`), tagging `pr-<n>` and pushing only
   for same-repo, non-Dependabot PRs; `CI` now needs it. `release.yml` runs it after a release
@@ -177,8 +185,8 @@ runners, the merge step that refuses a tag missing an architecture).
    `docker buildx build --target <name>`.
 2. **Bake with a `matrix` target.** (Chosen, on top of 1.) One command builds every agent,
    and BuildKit builds the shared `base` stage once. Adding an agent means adding a stage and
-   a name in the matrix list. CI does not use Bake to build (see "CI and publishing"); the
-   bake file is for local builds and the smoke job.
+   a name in the matrix list. CI's published images do not go through Bake (see "CI and
+   publishing"); the bake file serves local builds and CI's smoke job.
 3. **Separate Dockerfiles per agent, with Bake `contexts = { base = "target:base" }`.** Not
    chosen, for now. It keeps files small and lets an agent's Dockerfile live on its own, but
    with three thin layers it is more files and more indirection for the same graph. It is still
@@ -188,7 +196,8 @@ runners, the merge step that refuses a tag missing an architecture).
 
 - **One user and home layout for all agents.** Decided: every agent shares the single
   `sandbox-user` (uid 1000, `/home/sandbox-user`, `/workspace`). `cbox` assumes these paths
-  today (for example, `exec` runs `claude --continue`).
+  today (for example, `exec` runs `sandbox-agent --continue`, and the in-box hook and config
+  live under `/home/sandbox-user`).
 - **One customize image per agent.** Decided. Most overrides are agent config (settings, MCP
   entries, hooks), which does not carry across agents. Parts shared by all agents (apt
   packages, dotfiles) can still use a single `ARG BASE_IMAGE` Dockerfile.
@@ -204,8 +213,8 @@ runners, the merge step that refuses a tag missing an architecture).
 - **Agent config lives in the sandbox user's home.** Decided: each agent's defaults are plain
   files under `/home/sandbox-user` (`~/.claude.json`, `~/.claude/settings.json`,
   `~/.config/opencode/opencode.json`, `~/.codex/config.toml`), baked into the image. Not mounted
-  at `cbox up`, not env vars, and not system or managed paths. Codex's file sets only the update check and
-  `/workspace` trust. `approval_policy` and `sandbox_mode` are left at Codex's defaults, since
+  at `cbox up`, not env vars, and not system or managed paths. Codex's file sets the update check, `/workspace`
+  trust and the agentgateway MCP entry. `approval_policy` and `sandbox_mode` are left at Codex's defaults, since
   they are risk choices for a customize image.
 
 - **agentgateway is a default MCP server for every agent.** Decided: the entry for
@@ -226,19 +235,23 @@ runners, the merge step that refuses a tag missing an architecture).
 
 ## Not done / open questions
 
-- **How `cbox up` / `just build` switch over.** Not done. The image names, the
-  `-- <cmd>`/`exec` default command per agent (`claude` vs `codex` vs `opencode`), and a
-  profile `image` field are all candidates. `base/` and `custom/` are deliberately left
-  untouched here.
-- **Migration from `base/` + `custom/`:** (1) accept this design (CI for `images/` exists);
-  (2) publish `cbox-agent-claude` (first release or a manual run of `agent-images.yml`); (3) rebase `custom/` onto it. The default base of `just build`,
-  `custom/Dockerfile` and the CI `custom-image` job is now `cbox-agent-claude`; the four files
-  `custom/` duplicated (`claude.json`, `settings.json`, `cbox-hook.sh`, `mojada-claude.omp.json`)
-  are deleted, so `custom/` is now only awscli and plugins on top of the image, and on the old
-  `cbox-base` (`CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest`) it has none of the
-  defaults (`just build-local` now builds the claude image locally instead); (4) port
-  `base-rust/` onto `base`; (5) remove `base/`, update `docs/design/images.md`,
-  `docs/design/general.md` and `AGENTS.md`.
+- **How `cbox up` picks the image.** The default command is done (`sandbox-agent`, above) and
+  `custom/` is on `cbox-agent-claude`. Open: choosing an agent image per profile (the profile
+  `image` field already works), and whether the default box image should stop being
+  `cbox-custom`.
+- **Migration from `base/` + `custom/`:**
+  1. Accept this design. *Open.*
+  2. Publish `cbox-agent-claude`: the first release, or a manual run of `agent-images.yml`.
+     *Needed right after merge, see "Rollout".*
+  3. Rebase `custom/` onto it. *Done in this PR:* `just build`, `custom/Dockerfile` and the CI
+     `custom-image` job default to `cbox-agent-claude`, and the four files `custom/` duplicated
+     (`claude.json`, `settings.json`, `cbox-hook.sh`, `mojada-claude.omp.json`) are deleted, so
+     `custom/` is only awscli and plugins on top of the image. On the old `cbox-base`
+     (`CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest`) it has none of the defaults.
+     `just build-local` now builds the claude image locally.
+  4. Port `base-rust/` onto `base`. *Open.*
+  5. Remove `base/`, and update `docs/design/images.md` and `docs/design/general.md` to
+     describe the new layers instead of `cbox-base`. *Open.*
 - **File duplication.** `images/base/bashrc.d/boxlite.sh`, and `images/claude/claude-wrapper.sh`
   are copies of files in `base/`, because the build context is `images/`. `base/` stays in use
   until it is removed, so the copies can drift until then (the wrapper here already differs: it
@@ -266,22 +279,26 @@ Checked on amd64 with Docker Desktop (default builder), from the repo root:
   baked `update` setting is read. opencode 2.x lists MCP servers only after its first
   request in a directory loads the config, so the first `mcp list` can be empty.
 - Codex needs `ps` (the `procps` package, added to `base`) to start its background server.
-- `images/smoke-test.sh` passes (17 checks) on locally built `:dev` images, including
-  `sandbox-agent --version` for each agent and the wrapper's atomic config write.
-- CI on PR 160: `agent-images.yml` built base, claude, codex and opencode for amd64 and arm64
-  on native runners, the merge step found both architectures for each, the `smoke` job passed,
-  and `CI` was green with `base-image` and `custom-image`.
+- `images/smoke-test.sh` passed (17 checks, 18 since the hook check was split) on locally
+  built `:dev` images, including `sandbox-agent --version` for each agent and the wrapper's
+  config write. `images/test-sandbox-agent.sh` (14 launcher cases against stub agents) passes
+  and fails when the codex `--continue` mapping is broken on purpose.
+- CI on an earlier commit of PR 160: `agent-images.yml` built base, claude, codex and opencode
+  for amd64 and arm64 on native runners, the merge step found both architectures for each, the
+  `smoke` job passed (amd64), and `CI` was green with `base-image` and `custom-image`.
 - `opencode` is large (about 2.3GB on disk, 708MB of content, against about 380MB for the
   other agents).
 
 ### Unverified
 
-- arm64: the images build on a native arm64 runner and the merge finds both architectures, but
-  nothing runs an arm64 image yet (the smoke test is amd64 only), so the opencode platform binary
-  is untested there.
+- arm64: the images build on a native arm64 runner and the merge finds both architectures.
+  The smoke test now also runs on an arm64 runner, but that job had not run when this was
+  written, so no arm64 image is known to run.
 - That codex loads its baked update-check and trust settings (its MCP entry is read).
 - That the status line and the hook events reach iTerm2, and that the claude first run shows
   no theme or trust prompt (run in a real box with `cbox up -i`).
-- That the image works for `cbox up` and exec, and that codex runs without further setup.
+- `cbox up` with no `-- <cmd>` reaching the agent through `sandbox-agent` was reported working,
+  but no per-image result is recorded for the direct (no shell) launch, and `cbox exec` resuming
+  a session is untested for every agent.
 - The codex and opencode docs list a `curl` script and npm side by side, and neither says
   which one it prefers. npm was a choice, not a documented recommendation.

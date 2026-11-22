@@ -86,8 +86,10 @@ there on another Mac, add a `codesign --sign - --entitlements ...` step at that 
 
 `ci.yml` also has three image jobs, `base-image`, `agent-images` and `custom-image`, gated by the
 `changes` job's own `base`/`images`/`custom` outputs the same way `build` is gated by `rust`. `CI`
-needs all of them too. `agent-images` is covered in `docs/design/agent-images.md`. They're covered in `docs/design/images.md`, along with the reusable `base-image.yml`
-workflow they both call and its use from `release.yml`.
+needs all of them too. `base-image` and `custom-image` are covered in `docs/design/images.md`,
+along with the reusable `base-image.yml` workflow and its use from `release.yml`; `agent-images`
+and its `agent-images.yml` workflow are covered in `docs/design/agent-images.md`. Both call the
+shared `image.yml`.
 
 ## `.github/workflows/release.yml`
 

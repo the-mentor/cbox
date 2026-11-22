@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
-# DRAFT, not built by CI. One file, one stage per image; pick with --target
-# (base, claude, codex, opencode) or build them all with docker-bake.hcl.
-# See docs/design/agent-images.md. base/ and custom/ are the images in use.
+# Built and published by CI (.github/workflows/agent-images.yml). One file, one stage
+# per image; pick with --target (base, claude, codex, opencode) or build them all
+# with docker-bake.hcl. custom/ builds on the claude stage. See
+# docs/design/agent-images.md.
 
 # The OS + Node image the agent-free base starts from. A customize image is a
 # separate Dockerfile with its own `ARG BASE_IMAGE=cbox-agent-claude:dev`.
@@ -10,7 +11,8 @@ ARG BASE_IMAGE=node:26-trixie-slim
 
 # ---------------------------------------------------------------------------
 # base: OS, shell, git, runtimes, the non-root user, common tooling. NO agent.
-# Same as base/Dockerfile minus Claude Code, its wrapper and the `cc` link.
+# Same as base/Dockerfile minus Claude Code, its wrapper and the `cc` link, plus yq,
+# procps (Codex needs `ps`) and the sandbox-agent launcher.
 # ---------------------------------------------------------------------------
 FROM ${BASE_IMAGE} AS base
 RUN apt update \
@@ -60,8 +62,8 @@ USER sandbox-user
 WORKDIR /workspace
 
 # ---------------------------------------------------------------------------
-# claude: base + Claude Code + its generic defaults (cbox/gateway bits are
-# left to a customize image, see the design doc).
+# claude: base + Claude Code + its default user-scope config, including the cbox
+# iTerm2 hook, the status line and the agentgateway MCP entry (see the design doc).
 # ---------------------------------------------------------------------------
 FROM base AS claude
 USER root

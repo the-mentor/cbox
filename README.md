@@ -39,8 +39,9 @@ MCP tools to the box.
   re-running `up` resumes a stopped box instead of starting over.
 - **🔌 MCP built in:** a user-scoped `agentgateway` MCP server (GitHub tools) is baked into the
   image and works in any mounted project.
-- **⚡ Prebuilt everything:** release binaries for `cbox`, and a `cbox-base` image republished
-  by CI on every release and weekly (plus a Rust variant).
+- **⚡ Prebuilt everything:** release binaries for `cbox`, and the `cbox-agent-*` images
+  (`claude`, `codex`, `opencode`) republished by CI on every release and weekly, plus the older
+  `cbox-base` and its Rust variant.
 - **🖥️ iTerm2 aware:** Claude Code's status hooks are forwarded out of the box to iTerm2's tab
   status on the host.
 
@@ -175,11 +176,12 @@ just build-local --no-cache            # rebuild the claude agent image + custom
 ```
 
 Reach for `--no-cache` when a build step whose command text never changes has gone stale.
-Docker keeps serving the cached layer for `npm install -g @anthropic-ai/claude-code` or the
-oh-my-posh `curl | sh` installer, so a plain `just build` will not pick up newer versions of
-either. In practice this rarely matters locally: the Claude Code version is pinned in
-`images/Dockerfile` (Renovate bumps it) and `cbox-agent-claude` is rebuilt weekly by CI, so a
-plain `just build` picks up the newer pin and refreshed packages from the published `:latest`. `just build-local --no-cache` gets the same result without depending on the published
+Docker keeps serving the cached layer for the oh-my-posh installer or `apt upgrade`, so a
+plain `just build-local` will not pick up newer versions of either. In practice this rarely
+matters locally: the Claude Code version is pinned in `images/Dockerfile` (Renovate bumps it,
+and a bump invalidates the layer), and `cbox-agent-claude` is rebuilt weekly by CI without the
+cache, so a plain `just build` pulls refreshed packages from the published `:latest`.
+`just build-local --no-cache` gets the same result without depending on the published
 image. Claude Code's in-box auto-updater is off either way (`DISABLE_AUTOUPDATER` in
 `images/claude/settings.json`), since the npm global prefix is root-owned and the box's disk would lose
 the update on the next `-f` anyway.
@@ -347,14 +349,16 @@ The microVM is the trust boundary. Real credentials stay on the host side of it:
 holds the Anthropic API key (keyed `/api` mode) and its own GitHub token, and the per-box MITM
 proxy swaps the box's `GH_TOKEN` placeholder for the real value only on GitHub-bound traffic.
 
-- **Two-layer image.** `base/` builds `cbox-base` (Debian trixie + Node 26 + Claude Code,
-  plus `gh`, `uv`, `pre-commit`, `lazygit` and oh-my-posh), running as a non-root
-  `sandbox-user` with passwordless `sudo`. CI publishes it to `ghcr.io/the-mentor/cbox-base`
-  on every release and weekly, so you normally never build it yourself. `custom/` layers
-  `cbox-custom` on top, on the `cbox-agent-claude` image from `images/` (it bakes
-  `/home/sandbox-user/.claude.json`: theme, onboarding, and a user-scoped `agentgateway` MCP
-  server) and installing the plugins listed in `custom/Dockerfile`. Nothing is baked into `/workspace`, so mounting a host
-  directory there clobbers no config. See `docs/design/images.md`.
+- **Two-layer image.** `images/` builds `cbox-agent-claude` (Debian trixie + Node 26 + Claude
+  Code, plus `gh`, `uv`, `pre-commit`, `lazygit` and oh-my-posh), running as a non-root
+  `sandbox-user` with passwordless `sudo`, with its defaults baked in: the theme, onboarding
+  flags, the iTerm2 hook and a user-scoped `agentgateway` MCP server. CI publishes it to
+  `ghcr.io/the-mentor/cbox-agent-claude` on every release and weekly, so you normally never
+  build it yourself. `custom/` layers `cbox-custom` on top and installs awscli and the plugins
+  listed in `custom/Dockerfile`. The same `images/` build also makes `cbox-agent-codex` and
+  `cbox-agent-opencode`. The older `cbox-base` (`base/`) is still published and is what
+  `base-rust/` builds on. Nothing is baked into `/workspace`, so mounting a host directory
+  there clobbers no config. See `docs/design/agent-images.md` and `docs/design/images.md`.
 - **Rust variant.** `base-rust/` builds `cbox-base-rust`: `cbox-base` plus Rust (pinned to
   ci.yml's version, with `rustfmt`/`clippy`), `protoc` and a C toolchain, which is everything
   needed to develop cbox itself in a box. Published alongside `cbox-base` with the same tags; use it with
@@ -534,6 +538,7 @@ See `docs/design/agentgateway.md` for the full credential and port model.
 |---|---|
 | [`docs/design/general.md`](docs/design/general.md) | the two-layer image, registry handoff, ECR, multiple boxes |
 | [`docs/design/images.md`](docs/design/images.md) | how `cbox-base` / `cbox-base-rust` are built, tagged and published |
+| [`docs/design/agent-images.md`](docs/design/agent-images.md) | the agent images (`cbox-agent-*`): layers, defaults, overriding them, CI and publishing |
 | [`docs/design/cbox.md`](docs/design/cbox.md) | the `cbox` binary: env passthrough, secrets, egress |
 | [`docs/design/secrets.md`](docs/design/secrets.md) | stored secrets: `cbox secret`, the OS stores, what is kept where |
 | [`docs/design/profiles.md`](docs/design/profiles.md) | profiles: `cbox profile`, `up --profile`, resume warnings |

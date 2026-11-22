@@ -100,10 +100,10 @@ registry-login *args:
 
 # The four build recipes (build, build-image, build-base, build-local) forward extra
 # arguments straight to `docker build`, so `--no-cache` (the reason this exists: Docker
-# caches `RUN` layers by command text, so a `curl | sh` installer or an unpinned `npm i -g`
+# caches `RUN` layers by command text, so a `curl | sh` installer or `apt upgrade`
 # keeps serving a stale version until the
 # cache is bypassed) reaches whichever image is being built. `build`/`build-image` build only
-# `custom/`, on the published base, so `just build --no-cache` rebuilds only that layer from
+# `custom/`, on the published claude agent image, so `just build --no-cache` rebuilds only that layer from
 # scratch; `just build-local --no-cache` rebuilds the claude agent image (images/) too. Any
 # other flag both `docker build` and `docker buildx bake` accept works the same way
 # (e.g. `--pull`, `--progress=plain`).
@@ -113,7 +113,7 @@ build-base *args:
 
 # Build custom/ on top of base_image and push it to the local registry.
 # --pull re-fetches a registry base (docker build never refreshes a base it
-# already has, so :latest would go stale); a bare local tag like cbox-base is
+# already has, so :latest would go stale); a bare local tag like cbox-agent-claude:dev is
 # built as-is, since --pull would look for it on Docker Hub.
 # CBOX_PRIVATE_MARKETPLACES/CBOX_PRIVATE_PLUGINS (in .env) bake in plugins from
 # private repos. The token (GH_TOKEN, else `gh auth token`) goes to docker as a
@@ -155,9 +155,10 @@ build-local *args:
     docker buildx bake -f images/docker-bake.hcl {{args}} agent-claude
     CBOX_BASE_IMAGE=cbox-agent-claude:dev just build-image {{args}}
 
-# Build the agent images (images/, a draft) and push them to the local registry as
-# library/cbox-agent-<name>, so a box can boot one: `just up -i cbox-agent-codex -- codex`.
-# Nothing else uses them yet: build, up-dev and the default image still use cbox-custom.
+# Build the agent images (images/) and push them to the local registry as
+# library/cbox-agent-<name>, so a box can boot one: `just up -i cbox-agent-codex`.
+# build and up-dev use the published claude agent image as the base of cbox-custom, which is
+# still the default box image.
 # Extra arguments go to `docker buildx bake` (e.g. --no-cache). See images/README.md.
 # Usage: just build-agents [docker-buildx-bake-args...]
 build-agents *args: registry-up
@@ -218,7 +219,7 @@ ci-local *args:
       rm -f "$keep"
     done
 
-# Build images and the cbox binary, then boot the box and launch Claude Code.
+# Build images and the cbox binary, then boot the box and launch the image's agent.
 # Usage: just up-dev [box-name] [-f] [-c] [-v host:box ...] [-e KEY[=VALUE] ...] [-i image] [--profile NAME] [--secret NAME ...] [-d] [-- cmd...]
 # Positional arguments keep every argument whole (`-e "A=b c"`, `-- sh -c 'a; b'`). A dependency
 # `(up args)` would hand `up` one space-joined string, so re-invoke just from the caller's directory.
@@ -231,7 +232,7 @@ up-dev *args: build build-cbox
 
 cbox_bin := justfile_directory() + "/cbox/target/release/cbox"
 
-# Boot the box and launch Claude Code.
+# Boot the box and launch the image's agent (sandbox-agent; claude in cbox-custom).
 # Usage: just up [box-name] [-f] [-c] [-v host:box ...] [-e KEY[=VALUE] ...] [-i image] [--profile NAME] [--secret NAME ...] [-d] [-- cmd...]
 #
 # The `cd` is load-bearing: `just` sets the working directory to the justfile's

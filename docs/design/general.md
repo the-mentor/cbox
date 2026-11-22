@@ -9,8 +9,10 @@ the host-side agentgateway service, see `docs/design/agentgateway.md`.
 
 ## Two-layer image
 
-`base/Dockerfile` builds `cbox-base` (Debian + Node + Claude Code + `gh` + `uv` + `pre-commit`) and
-`custom/Dockerfile` layers `cbox-custom` on top of it. The split exists because the
+`images/Dockerfile` builds `cbox-agent-claude` (Debian + Node + Claude Code + `gh` + `uv` +
+`pre-commit`, with its default config baked in) and `custom/Dockerfile` layers `cbox-custom` on
+top of it. (The older `base/Dockerfile` builds `cbox-base`, the Claude-bundled base that
+`base-rust/` still builds on; see `docs/design/agent-images.md` for the new layers.) The split exists because the
 two layers change at very different rates: the base layer's contents — the OS, the language
 runtime, the CLIs — are slow to build and rarely need to change, while the custom layer is
 where per-repo configuration lives and gets rebuilt often. Keeping them separate means a config
@@ -31,12 +33,13 @@ Nothing is baked into `/workspace` itself, which is a deliberate choice: it mean
 host directory there (`-c`/`-v`) never clobbers baked-in config, because there's no config
 sitting at that path to clobber.
 
-`cbox-base` is built and published by CI to `ghcr.io/the-mentor/cbox-base` — on every release,
-weekly, and for same-repo PRs that touch `base/` or `base-rust/` — alongside its Rust variant
-`cbox-base-rust`, so it no longer needs to be built locally by
-default. `custom/Dockerfile` builds on it via the `BASE_IMAGE` build arg (`CBOX_BASE_IMAGE` in the
-`justfile`), defaulting to `:latest`. See `docs/design/images.md` for the full design: tags, the
-build workflow, and the local-only `just build-local` fallback.
+`cbox-agent-claude` is built and published by CI to `ghcr.io/the-mentor/cbox-agent-claude` — on
+every release, weekly, and for same-repo PRs that touch `images/` — so it no longer needs to be
+built locally by default. `custom/Dockerfile` builds on it via the `BASE_IMAGE` build arg
+(`CBOX_BASE_IMAGE` in the `justfile`), defaulting to `:latest`. See
+`docs/design/agent-images.md` for the images, the tags and the local-only `just build-local`
+fallback (it builds the claude image locally), and `docs/design/images.md` for `cbox-base` and
+its Rust variant `cbox-base-rust`, which CI still builds and publishes the same way.
 
 ## Image handoff through a local registry
 

@@ -1,9 +1,10 @@
 # images/ (draft)
 
 Draft of an agent-free base image plus one thin image per coding agent. CI builds and
-publishes these as `ghcr.io/the-mentor/cbox-agent-<name>`, but nothing here replaces `base/`
-or `custom/`, which are still what `just build` and `cbox up` use. Design and open questions:
-`docs/design/agent-images.md`.
+publishes these as `ghcr.io/the-mentor/cbox-agent-<name>`. `custom/` builds on
+`cbox-agent-claude`, and `cbox up` / `cbox exec` run this directory's `sandbox-agent`; `cbox
+up` still boots `cbox-custom` by default, and `base/` and `base-rust/` are unchanged. Design
+and open questions: `docs/design/agent-images.md`.
 
 ## Layout
 
@@ -28,7 +29,8 @@ docker buildx build --load -t cbox-agent-claude:dev --target claude -f images/Do
 ```
 
 Override defaults with a separate image. Merge a small `overrides.json` into the default
-settings so you only state what changes (arrays such as `hooks` are replaced, not merged):
+settings so you only state what changes (an array you set, such as `hooks.Stop` or
+`permissions.allow`, replaces the default one rather than adding to it):
 
 ```dockerfile
 ARG BASE_IMAGE=cbox-agent-claude:dev

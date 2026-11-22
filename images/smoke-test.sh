@@ -2,7 +2,7 @@
 # Smoke test for the images built from images/Dockerfile. Each check runs a
 # short command inside the image and the script exits 1 if any fails.
 #
-#   docker buildx bake -f images/docker-bake.hcl --load   # build the :dev tags
+#   docker buildx bake -f images/docker-bake.hcl          # build the :dev tags
 #   sh images/smoke-test.sh [name-prefix] [tag]            # default: cbox-agent dev
 #
 # It needs docker and nothing else. It does not boot a box, so it cannot check
