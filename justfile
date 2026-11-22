@@ -2,10 +2,11 @@ set dotenv-load
 
 base_tag   := "cbox-base"
 custom_tag := "cbox-custom"
-# Base for custom/: the published multi-arch image by default. Override per
-# command, e.g. CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:pr-67 just build
-# to try a PR's base, or use `just build-local` to build base/ locally.
-base_image := env_var_or_default("CBOX_BASE_IMAGE", "ghcr.io/the-mentor/cbox-base:latest")
+# Base for custom/: the published claude agent image (images/) by default. Override per
+# command, e.g. CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-agent-claude:pr-160 just build
+# to try a PR's image, CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest for the old
+# Claude-bundled base, or use `just build-local` to build base/ locally.
+base_image := env_var_or_default("CBOX_BASE_IMAGE", "ghcr.io/the-mentor/cbox-agent-claude:latest")
 registry   := "localhost:5551"
 compose    := "docker compose -f local-development/registry/docker-compose.yml"
 # Appends agentgateway/docker-compose.override.yml when it exists: an untracked,

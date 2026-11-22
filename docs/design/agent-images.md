@@ -160,6 +160,13 @@ runners, the merge step that refuses a tag missing an architecture).
   A weekly schedule (Monday 06:47 UTC) and `workflow_dispatch` refresh `latest` and a dated tag.
 - **One-time setup.** GHCR creates each new package private on its first push. After the first
   run, make the four packages public in their package settings, as for `cbox-base`.
+- **Rollout.** `just build`, `custom/Dockerfile` and the CI `custom-image` job now default to
+  `cbox-agent-claude:latest`, which does not exist until the agent images are published. After
+  this merges, run `agent-images.yml` once from the Actions tab (`workflow_dispatch`) to publish
+  `latest`. Until then `just build` fails to pull its base; use
+  `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-agent-claude:pr-160 just build` or
+  `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest just build`, and a PR that touches only
+  `custom/` fails `custom-image` the same way.
 - **Not covered.** The smoke test checks the images, not a booted box. Cleaning up old tags.
 
 ## Build options considered
@@ -223,8 +230,10 @@ runners, the merge step that refuses a tag missing an architecture).
   profile `image` field are all candidates. `base/` and `custom/` are deliberately left
   untouched here.
 - **Migration from `base/` + `custom/`:** (1) accept this design (CI for `images/` exists);
-  (2) publish `cbox-agent-claude` (first release or a manual run of `agent-images.yml`); (3) rebase `custom/` onto it (`CBOX_BASE_IMAGE`), moving its
-  defaults out (onboarding, trust and the auto-updater are already in `claude`); (4) port
+  (2) publish `cbox-agent-claude` (first release or a manual run of `agent-images.yml`); (3) rebase `custom/` onto it. The default base of `just build`,
+  `custom/Dockerfile` and the CI `custom-image` job is now `cbox-agent-claude`; what is left is
+  deleting the files `custom/` still duplicates from `images/claude/` (see the PR description's
+  TODO), since `custom/` keeps copying its own over the baked ones; (4) port
   `base-rust/` onto `base`; (5) remove `base/`, update `docs/design/images.md`,
   `docs/design/general.md` and `AGENTS.md`.
 - **File duplication.** `images/base/bashrc.d/boxlite.sh`, `images/claude/claude-wrapper.sh` and

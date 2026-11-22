@@ -1,6 +1,7 @@
-# Published multi-arch base (see docs/design/images.md). `just build-local`
-# overrides this with a locally built cbox-base.
-ARG BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest
+# The published claude agent image (see docs/design/agent-images.md). It already
+# has the claude CLI and the defaults below; this layer adds awscli, plugins and
+# the personal theme. `just build-local` overrides this with a locally built cbox-base.
+ARG BASE_IMAGE=ghcr.io/the-mentor/cbox-agent-claude:latest
 FROM ${BASE_IMAGE}
 
 # The base image ends as USER sandbox-user; package installs need root.

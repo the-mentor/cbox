@@ -164,7 +164,7 @@ stopped box it starts it first.
 
 `build`, `build-image`, `build-base`, and `build-local` forward any extra arguments to `docker build`. `build`
 and `build-image` build only `custom/`, on top of `CBOX_BASE_IMAGE` (the published
-`ghcr.io/the-mentor/cbox-base:latest` by default, see `docs/design/images.md`):
+`ghcr.io/the-mentor/cbox-agent-claude:latest` by default, see `docs/design/agent-images.md`):
 
 ```bash
 just build                             # start the local registry, build custom, push it
@@ -177,9 +177,9 @@ just build-local --no-cache            # rebuild base + custom locally, ignoring
 Reach for `--no-cache` when a build step whose command text never changes has gone stale.
 Docker keeps serving the cached layer for `npm install -g @anthropic-ai/claude-code` or the
 oh-my-posh `curl | sh` installer, so a plain `just build` will not pick up newer versions of
-either. In practice this rarely matters locally: `cbox-base` is rebuilt weekly by CI and
-published, so a plain `just build` already picks up the newer Claude Code from the refreshed
-`:latest`. `just build-local --no-cache` gets the same result without depending on the published
+either. In practice this rarely matters locally: the Claude Code version is pinned in
+`images/Dockerfile` (Renovate bumps it) and `cbox-agent-claude` is rebuilt weekly by CI, so a
+plain `just build` picks up the newer pin and refreshed packages from the published `:latest`. `just build-local --no-cache` gets the same result without depending on the published
 image. Claude Code's in-box auto-updater is off either way (`DISABLE_AUTOUPDATER` in
 `custom/settings.json`), since the npm global prefix is root-owned and the box's disk would lose
 the update on the next `-f` anyway.
@@ -502,7 +502,7 @@ See `docs/design/agentgateway.md` for the full credential and port model.
   reachable from every box (see the warning above).
 - ❌ **No custody of subscription tokens:** in subscription mode the OAuth token is in the box,
   because Claude Code has to send it.
-- ❌ **No in-box auto-update of Claude Code:** updates arrive with the weekly `cbox-base` image.
+- ❌ **No in-box auto-update of Claude Code:** updates arrive when the pin in `images/Dockerfile` is bumped and `cbox-agent-claude` is republished.
 - ❌ **No native Windows:** use WSL2 with nested virtualization instead.
 
 ## Troubleshooting 🩺

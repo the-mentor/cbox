@@ -24,6 +24,10 @@ on:
         description: Git ref to build; empty means the triggering commit
         type: string
         default: ''
+    outputs:
+      claude-image:
+        description: Full reference of cbox-agent-claude's first pushed tag; empty when not pushed
+        value: ${{ jobs.claude.outputs.image }}
   schedule:
     - cron: '47 6 * * 1'
   workflow_dispatch:
@@ -108,12 +112,27 @@ jobs:
       no-cache: ${{ needs.prep.outputs.no-cache == 'true' }}
       ref: ${{ needs.prep.outputs.ref }}
 
+  # Not in the matrix below: custom-image builds on this image, so ci.yml needs
+  # this job's output, and a matrix job's outputs can't be read per row.
+  claude:
+    needs: prep
+    uses: ./.github/workflows/image.yml
+    with:
+      context: images
+      target: claude
+      key: agent-claude
+      image: ghcr.io/the-mentor/cbox-agent-claude
+      tags: ${{ needs.prep.outputs.tags }}
+      push: ${{ needs.prep.outputs.push == 'true' }}
+      no-cache: ${{ needs.prep.outputs.no-cache == 'true' }}
+      ref: ${{ needs.prep.outputs.ref }}
+
   agents:
     needs: prep
     strategy:
       fail-fast: false
       matrix:
-        agent: [claude, codex, opencode]
+        agent: [codex, opencode]
     uses: ./.github/workflows/image.yml
     with:
       context: images

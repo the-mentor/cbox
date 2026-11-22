@@ -84,7 +84,7 @@ profile has changed since creation or no longer validates (a new box fails on an
 `build`, `build-image`, `build-base`, and `build-local` are variadic: everything after the recipe name is
 forwarded verbatim to `docker build` (`--pull`, `--progress=plain` and friends all work). `build`
 and `build-image` build only `custom/`, on top of `CBOX_BASE_IMAGE` (default
-`ghcr.io/the-mentor/cbox-base:latest`, the published base, re-pulled on every build), so `just
+`ghcr.io/the-mentor/cbox-agent-claude:latest`, the published claude agent image, re-pulled on every build), so `just
 build --no-cache` now only rebuilds `custom/` cache-free; `just build-local --no-cache` is how to
 rebuild both layers without the cache. `--no-cache` is the one flag that matters in practice: the
 version-fetching `RUN` steps (`npm install -g @anthropic-ai/claude-code`, the oh-my-posh

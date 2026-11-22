@@ -57,8 +57,8 @@ jobs:
             match '^(base/|base-rust/|\.github/workflows/(base-image|image|ci)\.yml$)' && base=true || base=false
             match '^(custom/|\.github/workflows/ci\.yml$)' && custom=true || custom=false
             match '^(images/|\.github/workflows/(agent-images|image|ci)\.yml$)' && images=true || images=false
-            # A new base can break custom/, so check them together.
-            [ "$base" = true ] && custom=true
+            # A new claude agent image can break custom/ (built on it), so check them together.
+            [ "$images" = true ] && custom=true
           fi
           printf 'rust=%s\nbase=%s\ncustom=%s\nimages=%s\n' "$rust" "$base" "$custom" "$images" | tee -a "$GITHUB_OUTPUT"
 
@@ -170,21 +170,22 @@ jobs:
       push: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
 
   # Builds custom/ (amd64 only: its steps are architecture-independent) on the
-  # PR's own base when one was published, else on :latest. Never pushed:
-  # cbox-custom is built per person. always() lets it run when base-image was
-  # skipped; the result checks stop it on a failed or cancelled base.
+  # PR's own cbox-agent-claude when one was published, else on :latest. Never
+  # pushed: cbox-custom is built per person. always() lets it run when
+  # agent-images was skipped; the result checks stop it on a failed or cancelled
+  # one.
   #
   # GHCR creates a package private on its first push, so pulling a just-pushed
-  # :pr-<n> anonymously would fail: log in whenever base-image published one
-  # (same-repo, non-Dependabot PR, whose GITHUB_TOKEN can read the package).
-  # Forks and Dependabot PRs never get here with an image, so they stay
-  # anonymous and pull the public :latest.
+  # :pr-<n> anonymously would fail unless the package is public: log in whenever
+  # agent-images published one (same-repo, non-Dependabot PR, whose GITHUB_TOKEN
+  # can read the package). Forks and Dependabot PRs never get here with an image,
+  # so they stay anonymous and pull the public :latest.
   custom-image:
-    needs: [changes, base-image]
+    needs: [changes, agent-images]
     if: >-
       always() && github.event_name == 'pull_request' &&
       needs.changes.result == 'success' && needs.changes.outputs.custom == 'true' &&
-      (needs.base-image.result == 'success' || needs.base-image.result == 'skipped')
+      (needs.agent-images.result == 'success' || needs.agent-images.result == 'skipped')
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -196,7 +197,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - if: needs.base-image.outputs.image != ''
+      - if: needs.agent-images.outputs.claude-image != ''
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
@@ -209,7 +210,7 @@ jobs:
           platforms: linux/amd64
           pull: true
           push: false
-          build-args: BASE_IMAGE=${{ needs.base-image.outputs.image || 'ghcr.io/the-mentor/cbox-base:latest' }}
+          build-args: BASE_IMAGE=${{ needs.agent-images.outputs.claude-image || 'ghcr.io/the-mentor/cbox-agent-claude:latest' }}
 
   # The single check the ruleset requires. Passes if every job passed or was
   # skipped for having nothing to check, so jobs and matrices can change

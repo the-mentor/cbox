@@ -109,8 +109,9 @@ the time this job runs.
 
 ## Local builds
 
-`custom/Dockerfile` starts `ARG BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest` /
-`FROM ${BASE_IMAGE}`. The `justfile` exposes that arg as `CBOX_BASE_IMAGE` (default the same
+`custom/Dockerfile` starts `ARG BASE_IMAGE=ghcr.io/the-mentor/cbox-agent-claude:latest` /
+`FROM ${BASE_IMAGE}` (the agent image from `images/`, `docs/design/agent-images.md`; it replaced
+`cbox-base` as the default). The `justfile` exposes that arg as `CBOX_BASE_IMAGE` (default the same
 `:latest`), so `just build`/`just build-image` build only `custom/`, on the published base,
 pulling a fresh copy of it each time (`--pull`). That `--pull` is conditional on the base
 reference containing a `/` — a registry reference like `ghcr.io/the-mentor/cbox-base:latest` — and
@@ -123,8 +124,9 @@ built base, ignoring any `CBOX_BASE_IMAGE` already set in the environment. Reach
 changing `base/` itself, since a change there has nothing to test against until it's built.
 
 `just build`/`just build-image` do honor an environment `CBOX_BASE_IMAGE`, so
-`CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:pr-67 just build` tries a PR's published base before
-it merges.
+`CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-agent-claude:pr-<n> just build` tries a PR's published
+agent image before it merges, and `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest just build`
+builds on the old Claude-bundled base.
 
 To boot a box on a locally built base rather than the published one: `just build-local && just
 build-cbox && just up` (`just up-dev` always builds against the published base).
