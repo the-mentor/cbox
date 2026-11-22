@@ -91,6 +91,11 @@ along with the reusable `base-image.yml` workflow and its use from `release.yml`
 and its `agent-images.yml` workflow are covered in `docs/design/agent-images.md`. Both call the
 shared `image.yml`.
 
+There is also an `actionlint` job on pull requests: it lints every workflow, with shellcheck on
+their `run:` scripts, using the config in `.github/actionlint.yaml`. It is the only thing that
+checks `needs`/`outputs` wiring and expression names before a workflow first runs, which matters
+for `release.yml` and the weekly schedule. `CI` needs it too.
+
 ## `.github/workflows/release.yml`
 
 Trigger: `workflow_run` on `ci` completing for `main`. Both jobs are skipped unless that ci run

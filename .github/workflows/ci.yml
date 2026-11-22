@@ -212,6 +212,23 @@ jobs:
           push: false
           build-args: BASE_IMAGE=${{ needs.agent-images.outputs.claude-image || 'ghcr.io/the-mentor/cbox-agent-claude:latest' }}
 
+  # Lints the workflows (actionlint, with shellcheck on their run: scripts). It catches
+  # broken needs/outputs wiring, expression typos and shell mistakes that otherwise only
+  # show when a workflow first runs, which for release.yml and the weekly schedule is
+  # after merge. Pinned versions, in a venv because the runner's python is externally managed.
+  actionlint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          python3 -m venv "$RUNNER_TEMP/lint"
+          "$RUNNER_TEMP/lint/bin/pip" install --quiet actionlint-py==1.7.12.25 shellcheck-py==0.11.0.1
+          echo "$RUNNER_TEMP/lint/bin" >> "$GITHUB_PATH"
+      - run: actionlint -config-file .github/actionlint.yaml
+
   # The single check the ruleset requires. Passes if every job passed or was
   # skipped for having nothing to check, so jobs and matrices can change
   # without a ruleset change. (A skipped matrix job never reports its per-row
@@ -219,12 +236,12 @@ jobs:
   ci-ok:
     name: CI
     if: always()
-    needs: [changes, build, base-image, agent-images, custom-image]
+    needs: [changes, build, base-image, agent-images, custom-image, actionlint]
     runs-on: ubuntu-latest
     steps:
       - env:
           CHANGES: ${{ needs.changes.result }}
-          RESULTS: ${{ needs.build.result }} ${{ needs.base-image.result }} ${{ needs.agent-images.result }} ${{ needs.custom-image.result }}
+          RESULTS: ${{ needs.build.result }} ${{ needs.base-image.result }} ${{ needs.agent-images.result }} ${{ needs.custom-image.result }} ${{ needs.actionlint.result }}
         run: |
           [ "$CHANGES" = success ] || { echo "changes: $CHANGES"; exit 1; }
           for r in $RESULTS; do

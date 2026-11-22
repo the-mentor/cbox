@@ -152,7 +152,7 @@ jobs:
           for d in /tmp/digests/*; do srcs="$srcs $IMAGE@sha256:$(basename "$d")"; done
           # shellcheck disable=SC2086 # word-splitting the -t/source lists is intended
           docker buildx imagetools create $args $srcs
-          first="$IMAGE:$(echo $TAGS | awk '{print $1}')"
+          first="$IMAGE:$(printf '%s\n' "$TAGS" | awk 'NF{print $1; exit}')"
           # A tag missing either architecture would boot on one host type only.
           plats="$(docker buildx imagetools inspect "$first" --format '{{range .Manifest.Manifests}}{{.Platform.Architecture}} {{end}}')"
           echo "$first platforms: $plats"
