@@ -42,16 +42,16 @@ RUN f=$HOME/.claude/settings.json \
 ## Boot a box from one
 
 `just build-agents` builds the images and pushes the agents to the local registry (`localhost:5551`,
-started for you), then boot one by name. `cbox` starts the image's own agent by default:
+started for you), then boot one by name. The default command is `claude`, so pass the launcher:
 
 ```bash
 just build-agents
-just up -i cbox-agent-codex -f
-just up -i cbox-agent-opencode -f
+just up -i cbox-agent-codex -f -- sandbox-agent
+just up -i cbox-agent-opencode -f -- sandbox-agent
 ```
 
 `sandbox-agent` is a small launcher in the base image: it starts whichever agent the image has
-(set `SANDBOX_AGENT` if there are several), and `--continue` resumes its last session. `cbox up` runs it by default, and `cbox exec` runs `sandbox-agent --continue`. Images without it (the old `cbox-custom` built on `cbox-base`) fall back to `claude`.
+(set `SANDBOX_AGENT` if there are several), and `--continue` resumes its last session. `cbox` still defaults to `claude`, hence the `--`.
 
 The images CI publishes can be used directly too: `just up -i ghcr.io/the-mentor/cbox-agent-codex:latest`.
 

@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use boxlite::{BoxStatus, BoxliteOptions, BoxliteRuntime};
 
-use crate::{agentcmd, attach, client, config, naming};
+use crate::{attach, client, config, naming};
 
 /// `std::process::exit` truncates its argument to the low 8 bits on Unix, so
 /// any negative code must be normalized before reaching it. Negative codes

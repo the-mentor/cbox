@@ -1,4 +1,3 @@
-mod agentcmd;
 mod attach;
 mod boxopts;
 mod client;
