@@ -21,7 +21,8 @@ pin() { sed -n "s/^ARG $1=//p" "$here/Dockerfile" | head -n 1; }
 claude_pin=$(pin CLAUDE_CODE_VERSION)
 codex_pin=$(pin CODEX_VERSION)
 opencode_pin=$(pin OPENCODE_VERSION)
-for v in "$claude_pin" "$codex_pin" "$opencode_pin"; do
+omp_pin=$(pin OH_MY_POSH_VERSION)
+for v in "$claude_pin" "$codex_pin" "$opencode_pin" "$omp_pin"; do
     [ -n "$v" ] || { echo "smoke-test: a version ARG is missing from $here/Dockerfile" >&2; exit 2; }
 done
 
@@ -40,6 +41,7 @@ check() {
 
 check "base: user and directory" base '[ "$(id -un)" = sandbox-user ] && [ "$PWD" = /workspace ]'
 check "base: tools run" base 'jq --version && yq --version && gh --version && uv --version && pre-commit --version && oh-my-posh version && ps --version && git --version'
+check "base: oh-my-posh matches the pin" base "oh-my-posh version | grep -F '${omp_pin#v}'"
 check "base: no agent installed" base '! command -v claude && ! command -v codex && ! command -v opencode'
 
 check "claude: sandbox-agent starts claude (version matches the pin)" claude "sandbox-agent --version | grep -F '$claude_pin'"

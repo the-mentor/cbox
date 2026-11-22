@@ -36,8 +36,13 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o 
 # Shared themes path: root's cache is unreadable by sandbox-user.
 ENV POSH_THEMES_PATH=/usr/local/share/oh-my-posh/themes
 # Downloaded to a file first: `curl | bash` hides a failed download (no pipefail in RUN).
+# -v pins the binary (the tag keeps its leading v). The script always fetches the themes
+# from `latest`, whatever -v says; only an interactive `oh-my-posh init` uses them, the
+# Claude status line uses its own theme file.
+# renovate: datasource=github-releases depName=JanDeDobbeleer/oh-my-posh
+ARG OH_MY_POSH_VERSION=v33.2.0
 RUN curl -fsSL https://ohmyposh.dev/install.sh -o /tmp/omp-install.sh \
-    && bash /tmp/omp-install.sh -d /usr/local/bin -t "$POSH_THEMES_PATH" \
+    && bash /tmp/omp-install.sh -v "$OH_MY_POSH_VERSION" -d /usr/local/bin -t "$POSH_THEMES_PATH" \
     && rm -f /tmp/omp-install.sh \
     && rm -rf /root/.cache/oh-my-posh
 

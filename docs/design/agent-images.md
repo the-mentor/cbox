@@ -89,8 +89,10 @@ with the default driver and with `docker-container` builders alike.
 
 npm was picked for all three because Node is already in `base`, `ARG` pins the version, and
 nothing is piped from `curl` into `sh`. The pins were the npm registry's `latest` on the day this
-was written. Each pin has a `# renovate:` comment (npm datasource), as `base/` does for uv and
-pre-commit. The node image tag in `BASE_IMAGE` has none, same as `base/`.
+was written. Each pin has a `# renovate:` comment (npm datasource for the agents, github-releases for
+oh-my-posh), as `base/` does for uv and pre-commit. oh-my-posh is pinned with the installer's
+`-v` (the tag keeps its `v`); its themes still come from `latest`, because the script hard-codes
+that. The node image tag in `BASE_IMAGE` has none, same as `base/`.
 
 ## Defaults and overrides
 
