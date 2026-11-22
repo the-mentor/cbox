@@ -118,17 +118,19 @@ reference containing a `/` — a registry reference like `ghcr.io/the-mentor/cbo
 not applied to a bare local tag like `cbox-base`, because Docker would otherwise try to pull that
 tag from Docker Hub instead of using the one just built locally.
 
-`just build-local` is the pre-published flow: it runs `build-base` (building `base/` locally),
-then `build-image` with `CBOX_BASE_IMAGE` forced to that local tag — it always uses the locally
-built base, ignoring any `CBOX_BASE_IMAGE` already set in the environment. Reach for it when
-changing `base/` itself, since a change there has nothing to test against until it's built.
+`just build-local` builds the claude agent image from `images/` locally (`agent-claude` in
+`images/docker-bake.hcl`, tagged `cbox-agent-claude:dev`), then runs `build-image` with
+`CBOX_BASE_IMAGE` forced to that local tag — it always uses the locally built image, ignoring any
+`CBOX_BASE_IMAGE` already set in the environment. Reach for it when changing `images/` itself,
+since a change there has nothing to test against until it's built. (Before the agent images it
+built `base/` into `cbox-base`; `just build-base` still does that, for `base/` and `base-rust/`.)
 
 `just build`/`just build-image` do honor an environment `CBOX_BASE_IMAGE`, so
 `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-agent-claude:pr-<n> just build` tries a PR's published
 agent image before it merges, and `CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest just build`
 builds on the old Claude-bundled base.
 
-To boot a box on a locally built base rather than the published one: `just build-local && just
+To boot a box on a locally built image rather than the published one: `just build-local && just
 build-cbox && just up` (`just up-dev` always builds against the published base).
 
 ## Errors and recovery
@@ -156,7 +158,7 @@ Rollout, in order:
 3. Right after merge, run `base-image.yml` via `workflow_dispatch` to publish `latest` and a
    dated tag — nothing has pushed `:latest` yet at this point.
 4. Until `:latest` exists, `just build`/`just up-dev` can't pull a base to build against; use
-   `just build-local` instead.
+   `just build-local` instead (for the agent images, see `docs/design/agent-images.md`).
 
 ## Not covered
 

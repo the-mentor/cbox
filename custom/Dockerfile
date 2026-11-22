@@ -1,8 +1,8 @@
 # The published claude agent image (see docs/design/agent-images.md). It already has
 # the claude CLI, ~/.claude.json, ~/.claude/settings.json (hooks, status line, MCP
 # entry), cbox-hook and the status line theme; this layer adds awscli and plugins.
-# CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest builds on the old base instead, which
-# has none of those defaults.
+# `just build-local` builds that image locally and uses it here. The old base (cbox-base)
+# has none of those defaults, so building on it gives a box without them.
 ARG BASE_IMAGE=ghcr.io/the-mentor/cbox-agent-claude:latest
 FROM ${BASE_IMAGE}
 

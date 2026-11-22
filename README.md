@@ -168,10 +168,10 @@ and `build-image` build only `custom/`, on top of `CBOX_BASE_IMAGE` (the publish
 
 ```bash
 just build                             # start the local registry, build custom, push it
-just build-local                       # build base/ locally too, for changing base/ itself
+just build-local                       # build the claude agent image (images/) locally too, for changing images/ itself
 just build --no-cache                  # rebuild custom from scratch, on a freshly pulled base
-just build-base --no-cache             # rebuild base/ only, locally, ignoring the layer cache
-just build-local --no-cache            # rebuild base + custom locally, ignoring the layer cache
+just build-base --no-cache             # rebuild the old base/ (cbox-base) only, locally, ignoring the layer cache
+just build-local --no-cache            # rebuild the claude agent image + custom locally, ignoring the layer cache
 ```
 
 Reach for `--no-cache` when a build step whose command text never changes has gone stale.

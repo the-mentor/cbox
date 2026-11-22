@@ -234,8 +234,8 @@ runners, the merge step that refuses a tag missing an architecture).
   `custom/Dockerfile` and the CI `custom-image` job is now `cbox-agent-claude`; the four files
   `custom/` duplicated (`claude.json`, `settings.json`, `cbox-hook.sh`, `mojada-claude.omp.json`)
   are deleted, so `custom/` is now only awscli and plugins on top of the image, and on the old
-  `cbox-base` (`CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest`, `just build-local`) it
-  has none of the defaults; (4) port
+  `cbox-base` (`CBOX_BASE_IMAGE=ghcr.io/the-mentor/cbox-base:latest`) it has none of the
+  defaults (`just build-local` now builds the claude image locally instead); (4) port
   `base-rust/` onto `base`; (5) remove `base/`, update `docs/design/images.md`,
   `docs/design/general.md` and `AGENTS.md`.
 - **File duplication.** `images/base/bashrc.d/boxlite.sh`, and `images/claude/claude-wrapper.sh`
