@@ -205,6 +205,14 @@ runners, the merge step that refuses a tag missing an architecture).
   `http://host.boxlite.internal:15003/mcp` is baked into each agent's home config. An image
   used outside cbox gets a dead entry, which a customize image can replace.
 
+- **`sandbox-agent` starts the image's agent.** Each agent image installs
+  `/usr/local/bin/sandbox-agent`. With no arguments it starts that image's agent, `--continue`
+  means "the last session" (`claude --continue`, `codex resume --last`, `opencode --continue`),
+  and any other arguments go to the agent. `cbox` does not call it yet: `up` still defaults to
+  `claude` and `exec` to `claude --continue`, so for now pass `-- sandbox-agent`. Planned:
+  those defaults become `sandbox-agent` and `sandbox-agent --continue`, with a fallback to
+  `claude` for images that lack it (`cbox-custom` and boxes already created from it).
+
 ## Not done / open questions
 
 - **How `cbox up` / `just build` switch over.** Not done. The image names, the

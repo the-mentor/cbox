@@ -76,6 +76,9 @@ RUN mv /usr/local/bin/claude /usr/local/bin/claude-real \
 # wired up as hooks in settings.json below.
 COPY --chmod=0755 claude/cbox-hook.sh /usr/local/bin/cbox-hook
 
+# What `cbox up` runs by default in this image (see the design doc).
+COPY --chmod=0755 claude/sandbox-agent /usr/local/bin/sandbox-agent
+
 USER sandbox-user
 # User scope: the lowest-precedence settings, so anything above can override them.
 COPY --chown=sandbox-user:sandbox-user claude/claude.json /home/sandbox-user/.claude.json
@@ -88,6 +91,8 @@ COPY --chown=sandbox-user:sandbox-user claude/mojada-claude.omp.json /home/sandb
 # ---------------------------------------------------------------------------
 FROM base AS codex
 USER root
+# What `cbox up` runs by default in this image (see the design doc).
+COPY --chmod=0755 codex/sandbox-agent /usr/local/bin/sandbox-agent
 # https://github.com/openai/codex#quickstart (npm install -g @openai/codex)
 # renovate: datasource=npm depName=@openai/codex
 ARG CODEX_VERSION=0.171.0
@@ -103,6 +108,8 @@ COPY --chown=sandbox-user:sandbox-user codex/config.toml /home/sandbox-user/.cod
 # ---------------------------------------------------------------------------
 FROM base AS opencode
 USER root
+# What `cbox up` runs by default in this image (see the design doc).
+COPY --chmod=0755 opencode/sandbox-agent /usr/local/bin/sandbox-agent
 # https://opencode.ai/docs/ (npm install -g @opencode/cli)
 # renovate: datasource=npm depName=@opencode/cli
 ARG OPENCODE_VERSION=2.3.2
