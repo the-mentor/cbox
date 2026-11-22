@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use boxlite::{BoxCommand, BoxliteOptions, BoxliteRuntime, LiteBox};
 
-use crate::{attach, boxopts, config, env, envfile, naming, profiles, secrets, secretstore, sidecar};
+use crate::{agentcmd, attach, boxopts, config, env, envfile, naming, profiles, secrets, secretstore, sidecar};
 
 pub struct UpArgs {
     pub name: Option<String>,
