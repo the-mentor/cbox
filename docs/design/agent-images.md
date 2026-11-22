@@ -254,6 +254,8 @@ Checked on amd64 with Docker Desktop (default builder), from the repo root:
   baked `update` setting is read. opencode 2.x lists MCP servers only after its first
   request in a directory loads the config, so the first `mcp list` can be empty.
 - Codex needs `ps` (the `procps` package, added to `base`) to start its background server.
+- `images/smoke-test.sh` passes (17 checks) on locally built `:dev` images, including
+  `sandbox-agent --version` for each agent and the wrapper's atomic config write.
 - CI on PR 160: `agent-images.yml` built base, claude, codex and opencode for amd64 and arm64
   on native runners, the merge step found both architectures for each, the `smoke` job passed,
   and `CI` was green with `base-image` and `custom-image`.
