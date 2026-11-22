@@ -212,16 +212,22 @@ Checked on amd64 with Docker Desktop (default builder), from the repo root:
 - The baked config is in the home directory: the claude JSON files parse, the theme file and
   `cbox-hook` are installed, and the codex and opencode files carry the agentgateway entry.
 - `cbox-hook` run with `TERM_PROGRAM=iTerm.app` prints the `terminalSequence` line.
+- Boxes booted with `cbox up -i cbox-agent-<name>` (images pushed to the local registry):
+  the host gateway answers from inside the box (HTTP 406 to a plain `curl`), `claude mcp list`
+  and `opencode mcp list` show `agentgateway` connected, and `codex mcp list` lists it as
+  enabled. Codex runs. opencode logs `update check skipped reason=policy-disabled`, so its
+  baked `update` setting is read. opencode 2.x lists MCP servers only after its first
+  request in a directory loads the config, so the first `mcp list` can be empty.
+- Codex needs `ps` (the `procps` package, added to `base`) to start its background server.
 - `opencode` is large (about 2.3GB on disk, 708MB of content, against about 380MB for the
   other agents).
 
 ### Unverified
 
 - arm64: the opencode install and its platform binary, and the other stages under emulation.
-- That codex and opencode load their baked config (update check, trust, MCP entry). Only the
-  key names were checked, against their published schemas.
-- That the agentgateway entry works from inside a box, and that the status line and the hook
-  events reach iTerm2 (run in a real box with `cbox up -i`).
+- That codex loads its baked update-check and trust settings (its MCP entry is read).
+- That the status line and the hook events reach iTerm2, and that the claude first run shows
+  no theme or trust prompt (run in a real box with `cbox up -i`).
 - That the image works for `cbox up` and exec, and that codex runs without further setup.
 - The codex and opencode docs list a `curl` script and npm side by side, and neither says
   which one it prefers. npm was a choice, not a documented recommendation.
