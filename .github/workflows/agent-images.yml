@@ -100,7 +100,7 @@ jobs:
   # Dockerfile, so each rebuilds this stage itself (no tag handoff, and none
   # of them waits on this job).
   base:
-    needs: prep
+    needs: [prep, smoke]
     uses: ./.github/workflows/image.yml
     with:
       context: images
@@ -115,7 +115,7 @@ jobs:
   # Not in the matrix below: custom-image builds on this image, so ci.yml needs
   # this job's output, and a matrix job's outputs can't be read per row.
   claude:
-    needs: prep
+    needs: [prep, smoke]
     uses: ./.github/workflows/image.yml
     with:
       context: images
@@ -128,7 +128,7 @@ jobs:
       ref: ${{ needs.prep.outputs.ref }}
 
   agents:
-    needs: prep
+    needs: [prep, smoke]
     strategy:
       fail-fast: false
       matrix:
@@ -144,11 +144,17 @@ jobs:
       no-cache: ${{ needs.prep.outputs.no-cache == 'true' }}
       ref: ${{ needs.prep.outputs.ref }}
 
-  # Builds the four images for amd64 into the runner's own docker (so it works
-  # for fork PRs, which push nothing) and runs images/smoke-test.sh on them.
+  # Builds the four images for the runner's own architecture into its docker (so it
+  # works for fork PRs, which push nothing) and runs images/smoke-test.sh on them,
+  # on amd64 and on arm64 (native runners, as in image.yml). The jobs that publish
+  # wait for it, so a broken image never gets a tag.
   smoke:
     needs: prep
-    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-26.04, ubuntu-26.04-arm]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -162,5 +168,7 @@ jobs:
           [ "$NO_CACHE" = true ] && flags="--no-cache"
           # shellcheck disable=SC2086 # $flags is empty or one flag
           docker buildx bake -f images/docker-bake.hcl $flags
+
+      - run: sh images/test-sandbox-agent.sh
 
       - run: sh images/smoke-test.sh

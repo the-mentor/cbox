@@ -20,7 +20,7 @@ if [ -z "$agent" ]; then
 fi
 if [ "${1:-}" = --continue ]; then
     shift
-    case "$agent" in
+    case "${agent##*/}" in
         codex) exec codex resume --last "$@" ;;
         *) exec "$agent" --continue "$@" ;;
     esac

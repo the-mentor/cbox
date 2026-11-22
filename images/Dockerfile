@@ -33,7 +33,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o 
 
 # Shared themes path: root's cache is unreadable by sandbox-user.
 ENV POSH_THEMES_PATH=/usr/local/share/oh-my-posh/themes
-RUN curl -s https://ohmyposh.dev/install.sh | bash -s -- -d /usr/local/bin -t "$POSH_THEMES_PATH" \
+# Downloaded to a file first: `curl | bash` hides a failed download (no pipefail in RUN).
+RUN curl -fsSL https://ohmyposh.dev/install.sh -o /tmp/omp-install.sh \
+    && bash /tmp/omp-install.sh -d /usr/local/bin -t "$POSH_THEMES_PATH" \
+    && rm -f /tmp/omp-install.sh \
     && rm -rf /root/.cache/oh-my-posh
 
 # renovate: datasource=pypi depName=uv
