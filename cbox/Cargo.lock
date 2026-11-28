@@ -307,9 +307,9 @@ dependencies = [
 
 [[package]]
 name = "boxlite"
-version = "0.11.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ce36a3ba65cc81bd83c31c2f1397d5e42735248754b3347c722f5d5c54a1f8a"
+checksum = "1d938bda36722543470d2e9ad655886dfa09299c0f0afa897bd24b90fb203118"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -331,6 +331,7 @@ dependencies = [
  "fuse-backend-rs",
  "futures",
  "hex",
+ "http",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -383,11 +384,12 @@ dependencies = [
 
 [[package]]
 name = "boxlite-shared"
-version = "0.11.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c5ce9532367f4d917c83b6e609557d6b95ade29b1e80ff2091b243793236564"
+checksum = "827ed22d558cf06624b9b206785834eefac3955115bc8fb045cf7172e3f8d6bd"
 dependencies = [
  "futures",
+ "nix 0.29.0",
  "prost",
  "serde",
  "serde_json",
@@ -401,9 +403,9 @@ dependencies = [
 
 [[package]]
 name = "bubblewrap-sys"
-version = "0.11.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5839581d996951646e745a0a6ccadd74ea98b23db0ed1d48e2941e41c27983a0"
+checksum = "9a3ccfa990f654465bf47f529d9613f383f6fcdb0293ea7179bf7e5876eabb77"
 dependencies = [
  "num_cpus",
 ]
@@ -917,9 +919,9 @@ dependencies = [
 
 [[package]]
 name = "e2fsprogs-sys"
-version = "0.11.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "078b4870bb3a137fbf309b589e6263ad3c190f705111c5e758dc07c368323346"
+checksum = "61b0784d11a3132264979aeba979c957a2355f58e631e1245d428ee68b3821d4"
 dependencies = [
  "num_cpus",
 ]
@@ -1765,9 +1767,9 @@ checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "libkrun-sys"
-version = "0.11.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afc9a79868f4a3ba112f340671230b13e33d39e65db557e978671f6419982e8d"
+checksum = "7d08c6b28d380afe4e81bea84578785650cff701d705bdfd10dfd92b96eb4f87"
 dependencies = [
  "libc",
  "num_cpus",
@@ -1968,6 +1970,18 @@ dependencies = [
  "libc",
  "memoffset 0.7.1",
  "pin-utils",
+]
+
+[[package]]
+name = "nix"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
 ]
 
 [[package]]
@@ -3205,7 +3219,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -3955,7 +3969,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
